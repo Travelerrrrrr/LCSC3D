@@ -1,0 +1,2 @@
+824e921353749707da843a64ca886ef31c9903a8cb2d4acb530147ad16e5cdc6  LCSC3D-Portable-v1.0.1.exe
+76ebfa494f7ba85911aeedd0ff8a52fb5a38daf1be536b6be8bfb953e95944a7  LCSC3D-Source-v1.0.1.zip

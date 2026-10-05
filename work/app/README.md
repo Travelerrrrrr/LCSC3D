@@ -1,0 +1,67 @@
+# 立创 3D 模型下载器
+
+Windows x64 便携软件，基于 easyeda2kicad 1.0.1。运行 EXE 即可使用，无须安装 Python、KiCad、浏览器插件或额外浏览器运行时。
+
+当前版本：1.0.1。左右栏保留 24 个逻辑像素的间距，中间的分隔条可以拖动，悬停时高亮。
+
+## 使用
+
+1. 输入立创 C 编号，可以使用换行、空格、中英文逗号和分号分隔。编号不区分大小写，重复编号会自动合并。
+2. 选择保存目录。默认导出 STEP，也可选择 WRL、OBJ。
+3. 点击“开始批量下载”。每个器件保存到独立的 C 编号目录，结果写入 UTF-8 CSV 下载报告。
+4. 选中列表中的器件，点击“在线预览”，或双击器件。鼠标拖动旋转，滚轮缩放。
+
+预览可以在下载前使用：先“载入列表”，再选中器件。预览采用立创商城正在使用的官方在线查看器，由查看器按 C 编号联网获取模型。软件没有实现自有的 3D 模型解析器或渲染器；WRL 导出使用上游转换功能。
+
+示例输入：
+
+```text
+C2040
+C20197, C163691
+```
+
+保存结构示例：
+
+```text
+所选目录/
+  C2040/
+    C2040_LQFN-56_L7.0-W7.0-P0.4-EP.step
+    model-info.json
+  C20197/
+    ...
+  下载结果_年月日_时分秒.csv
+```
+
+STEP 原样保存，适用于 FreeCAD、SolidWorks 等 CAD 软件；WRL 适用于 KiCad；OBJ 为官方模型文本。默认保留已有的非空模型文件，勾选“覆盖已有文件”可更新文件。零字节文件会重新下载。各格式独立处理：WRL 或 OBJ 不可用时，已经保存的 STEP 会保留。
+
+保存目录与可选格式记录在 EXE 同目录的 `LCSC3D-settings.json`；目录不可写时不会保存设置。浏览器在临时目录运行，关闭后释放，不需要安装 WebView2。
+
+下载和预览需要网络及官方服务器可用，预览还需要能运行 WebGL 的显卡驱动。部分器件没有模型，软件会显示“无模型”或对应错误。停止下载会在当前网络请求结束后生效，连接读取超时为 18 秒；已经保存的完整文件会保留。
+
+## 源码与构建
+
+对应源码包含 GUI、下载适配器、官方查看器接入页面、测试、打包脚本及未修改的上游源码。自有代码采用 AGPL-3.0-or-later，上游 easyeda2kicad 采用 AGPL-3.0。
+
+本版本使用 Python 3.12.10、PySide6 6.11.1、PyInstaller 6.20.0 构建，目标系统为 Windows 10/11 x64。
+打包配置会排除构建环境中可能来自 Poppler/Conda 的同名 ICU DLL，使用 Qt 所需的 Windows 自带 ICU API；Chromium 的 ICU 数据资源仍包含在 EXE 中。
+
+在安装了 Python 3.12 的 Windows x64 系统中，进入源码目录运行：
+
+```powershell
+.\build.ps1
+```
+
+构建结果位于 `dist\LCSC3D-Portable-v1.0.1.exe`。依赖安装需要网络，运行成品不需要 Python。也可以直接安装 `requirements.txt` 后执行 `python main.py`。
+
+本地测试：`python -m unittest discover -s tests -v`。
+联网成品验证：`LCSC3D-Portable-v1.0.1.exe --self-test .\verification`（将请求三个测试编号，保存模型、报告、界面图与 verification.json，验证结束后自动关闭）。
+
+## 来源
+
+- 上游项目：https://github.com/uPesy/easyeda2kicad.py
+- 上游版本：v1.0.1，Git commit 20c754d0fc1fec94e7fab2112b66ea576e8db369
+- 模型来源：JLCEDA/EasyEDA 官方库，https://lceda.cn/ 和 https://easyeda.com/
+- 在线预览脚本来源：立创商城公开加载的官方 `modules.lceda.cn` 查看器。脚本在预览时联网加载，未复制进软件。
+- 软件许可证不替代模型数据本身的版权和使用条件；下载目录的 model-info.json 保留官方库的来源和版权声明。
+
+第三方软件说明与许可证见 `licenses/`。

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="engine-env" content="3rd-china">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>商城在线 3D 预览</title>
+  <style>
+    html,body { width:100%;height:100%;margin:0;overflow:hidden;background:#f3f6fa;font-family:"Microsoft YaHei UI",sans-serif; }
+    #smt-ui-container { width:100%;height:100%; }
+    #notice { position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#64748b;font-size:14px;padding:32px;box-sizing:border-box;background:#f3f6fa;z-index:100; }
+    #notice.hidden { display:none; }
+    .spinner { width:30px;height:30px;border:3px solid #dce5ec;border-top-color:#13897d;border-radius:50%;margin:0 auto 18px;animation:spin 1s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="smt-ui-container"></div>
+  <div id="notice"><div><div class="spinner"></div><span id="notice-text">正在连接商城在线查看器…</span></div></div>
+  <script>
+    // Official store viewer: it fetches and renders the part by C number.
+    // This application does not implement a model parser or a 3D renderer.
+    const PART = __PART_JSON__;
+    let finished = false;
+    function state(status, message) {
+      console.log('LCSC3D_STATE:' + JSON.stringify({status, message}));
+      const box = document.getElementById('notice');
+      if (status === 'ready') box.classList.add('hidden');
+      else {
+        document.getElementById('notice-text').textContent = message;
+        box.classList.remove('hidden');
+        const spinner = box.querySelector('.spinner');
+        spinner.style.display = status === 'error' ? 'none' : 'block';
+      }
+    }
+    function loadScript(url) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = url;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('无法连接商城查看器，请检查网络后点击重新加载'));
+        document.head.appendChild(script);
+      });
+    }
+    window.addEventListener('unhandledrejection', event => {
+      if (!finished) state('error', '在线模型加载失败，请重新加载或打开商城页面');
+    });
+    async function boot() {
+      try {
+        await loadScript('https://modules.lceda.cn/smt-gl-engine/3.12.42.6f0bbae9/smt-gl-engine.js');
+        await loadScript('https://modules.lceda.cn/smt-ui/1.0.263.4b13cbc9/model-3d-view.js');
+        if (!window._MSG_BUS_) throw new Error('商城查看器未初始化，请重新加载');
+        window._MSG_BUS_.subscribe('/engine/model/finishLoading', models => {
+          const entries = Object.values(models || {});
+          if (!entries.length || entries.every(x => x && x.missingModel)) {
+            finished = true;
+            state('error', '官方库没有可预览的 3D 模型');
+          } else {
+            finished = true;
+            state('ready', PART + ' · 已加载商城 3D 模型');
+          }
+        });
+        setTimeout(() => {
+          state('loading', '正在加载 ' + PART + ' 的在线 3D 模型…');
+          window._MSG_BUS_.publish('/smt-ui/lc/load/registLoadCode', PART);
+        }, 500);
+      } catch(error) {
+        state('error', error.message || '在线预览加载失败');
+      }
+    }
+    setTimeout(() => {
+      if (!finished) state('error', '在线预览等待超时，可点击重新加载或打开商城页面');
+    }, 40000);
+    boot();
+  </script>
+</body>
+</html>

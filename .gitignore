@@ -1,0 +1,32 @@
+# Local tooling and Python/build caches
+/.codex/
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Runtime logs and per-machine settings
+*.log
+LCSC3D-settings.json
+LCSC3D-error.log
+
+# Keep application source, upstream, and release support scripts.
+# Other work files are downloaded research data or generated verification output.
+/work/*
+!/work/app/
+!/work/upstream/
+!/work/collect_licenses.py
+!/work/finalize_delivery.py
+!/work/make_assets.py
+!/work/package_source.py
+
+# Keep delivery documentation, screenshots, and checksums; omit release binaries.
+/outputs/*
+!/outputs/*.md
+!/outputs/*.png
+!/outputs/SHA256SUMS*.txt
