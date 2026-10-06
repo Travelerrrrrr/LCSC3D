@@ -1,6 +1,6 @@
 # JLC3DViewer — 立创 3D 模型下载器
 
-Windows x64 便携软件，当前版本 1.1.0。输入立创 C 编号，批量下载 STEP、WRL、OBJ 模型，导出 Altium Designer 符号库 SchLib 和封装库 PcbLib，并通过商城官方查看器在线预览。
+Windows x64 便携软件，当前版本 1.1.1。输入立创 C 编号，批量下载 STEP、WRL、OBJ 模型，导出 Altium Designer 符号库 SchLib 和封装库 PcbLib，并通过商城官方查看器在线预览。
 
 完整使用说明、依赖版本与许可证信息见 [应用说明](work/app/README.md)。
 
@@ -30,6 +30,6 @@ cd work/app
 .\build.ps1 -QtPrefix C:/Qt/6.10.1/mingw_64 -CompilerPrefix C:/Qt/Tools/mingw/bin
 ```
 
-构建脚本会创建虚拟环境、安装依赖、编译 AD 后端、运行测试并生成 `dist/LCSC3D-Portable-v1.1.0.exe`。
+构建脚本会创建虚拟环境、安装依赖、编译 AD 后端、运行测试并生成 `dist/LCSC3D-Portable-v1.1.1.exe`。
 
 安装 `work/app/requirements.txt` 后，可在应用目录运行 `python main.py`；本地测试命令为 `python -m unittest discover -s tests -v`。

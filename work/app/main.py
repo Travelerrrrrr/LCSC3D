@@ -23,7 +23,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from backend import Cancelled, NetworkApi, Options, Result, download_part, parse_part_numbers, write_report
 from altium import converter_path
 
-VERSION = '1.1.0'
+VERSION = '1.1.1'
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / 'LCSC3D-settings.json'
@@ -175,6 +175,7 @@ class MainWindow(QMainWindow):
         self.web_profile = None
         self.close_when_finished = False
         self._setup_ui()
+        self._setup_preview()
         self.setMinimumHeight(max(self.minimumHeight(), self.minimumSizeHint().height()))
         self._restore_settings()
 
@@ -576,19 +577,24 @@ class MainWindow(QMainWindow):
         if part:
             self.show_preview(part)
 
+    def _setup_preview(self):
+        self.web_profile = QWebEngineProfile(self)
+        self.web = QWebEngineView(self.preview_stack)
+        page = PreviewPage(self.web_profile, self.web)
+        page.state.connect(self.on_preview_state)
+        self.web.setPage(page)
+        self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.WebGLEnabled, True)
+        self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        self.web.setContextMenuPolicy(Qt.NoContextMenu)
+        self.preview_stack.addWidget(self.web)
+        # setPage alone leaves Qt's rendering widget uninitialized. Load a local
+        # blank page before show() so the first preview cannot recreate the HWND.
+        # The placeholder remains visible; no model or remote page is loaded.
+        self.web.setHtml('<!doctype html><html><body style="background:#f3f6fa"></body></html>')
+
     def show_preview(self, part):
         if not part:
             return
-        if not self.web:
-            self.web_profile = QWebEngineProfile(self)
-            self.web = QWebEngineView()
-            page = PreviewPage(self.web_profile, self.web)
-            page.state.connect(self.on_preview_state)
-            self.web.setPage(page)
-            self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.WebGLEnabled, True)
-            self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-            self.web.setContextMenuPolicy(Qt.NoContextMenu)
-            self.preview_stack.addWidget(self.web)
         self.current_preview = part
         self.preview_caption.setText(part + ' · 商城官方在线查看器')
         self.reload_button.setEnabled(True)
@@ -660,6 +666,21 @@ def main():
     window = MainWindow(settings_enabled=not bool(args.self_test))
     window.show()
     if args.self_test:
+        from PySide6.QtCore import QEvent, QObject
+
+        class PreviewWindowProbe(QObject):
+            def __init__(self):
+                super().__init__(window)
+                self.initial_id = int(window.winId())
+                self.events = []
+                window.installEventFilter(self)
+
+            def eventFilter(self, watched, event):
+                if event.type() in (QEvent.Hide, QEvent.WinIdChange):
+                    self.events.append(event.type().name)
+                return False
+
+        preview_probe = PreviewWindowProbe()
         destination = Path(args.self_test).resolve()
         destination.mkdir(parents=True, exist_ok=True)
         window.path_input.setText(str(destination / '批量下载测试'))
@@ -680,6 +701,10 @@ def main():
             report = {
                 'version': VERSION, 'frozen': bool(getattr(sys, 'frozen', False)),
                 'ids': window.ids, 'preview': window.preview_state,
+                'preview_window': {
+                    'hwnd_preserved': preview_probe.initial_id == int(window.winId()),
+                    'events': preview_probe.events,
+                },
                 'results': [vars(result) for result in window.results.values()],
                 'report': window.report_path,
             }
@@ -688,6 +713,8 @@ def main():
                 window.worker.cancelled.set()
                 window.worker.wait(45000)
             passed = (window.preview_state == 'ready'
+                      and report['preview_window']['hwnd_preserved']
+                      and not preview_probe.events
                       and sum(result.status in ('成功', '已存在') for result in window.results.values()) == 2
                       and all(any(Path(file).suffix == '.SchLib' for file in result.files)
                               and any(Path(file).suffix == '.PcbLib' for file in result.files)
