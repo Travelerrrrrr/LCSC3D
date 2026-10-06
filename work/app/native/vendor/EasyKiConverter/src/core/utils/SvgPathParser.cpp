@@ -1,0 +1,567 @@
+/**
+ * @file SvgPathParser.cpp
+ * @brief SvgPathParser 的实现。
+ */
+#include "SvgPathParser.h"
+
+#include <QDebug>
+#include <QRegularExpression>
+
+#include <cmath>
+
+namespace EasyKiConverter {
+
+const double PI = 3.14159265358979323846;
+
+QList<QPointF> SvgPathParser::parsePath(const QString& path) {
+    QList<QPointF> points;
+    if (path.isEmpty()) {
+        return points;
+    }
+
+    QStringList tokens = splitPath(path);
+    double currentX = 0.0;
+    double currentY = 0.0;
+    QPointF lastCubicControl;
+    QPointF lastQuadraticControl;
+    QChar previousCommand;
+
+    int i = 0;
+    while (i < tokens.size()) {
+        QString cmd = tokens[i];
+        if (cmd.isEmpty()) {
+            i++;
+            continue;
+        }
+
+        QChar command = cmd[0].toUpper();
+
+        // 处理M/m（MoveTo）命
+        if (command == 'M') {
+            bool relative = (cmd[0] == 'm');
+            i++;
+            while (i < tokens.size()) {
+                bool okX, okY;
+                double x = tokens[i].toDouble(&okX);
+                if (!okX)
+                    break;
+                i++;
+                if (i >= tokens.size())
+                    break;
+                double y = tokens[i].toDouble(&okY);
+                if (!okY)
+                    break;
+                i++;
+
+                QPointF pt = createPoint(x, y, relative, currentX, currentY);
+                points.append(pt);
+            }
+            previousCommand = 'M';
+        }
+        // 处理L/l（LineTo）命
+        else if (command == 'L') {
+            bool relative = (cmd[0] == 'l');
+            i++;
+            while (i < tokens.size()) {
+                bool okX, okY;
+                double x = tokens[i].toDouble(&okX);
+                if (!okX)
+                    break;
+                i++;
+                if (i >= tokens.size())
+                    break;
+                double y = tokens[i].toDouble(&okY);
+                if (!okY)
+                    break;
+                i++;
+
+                QPointF pt = createPoint(x, y, relative, currentX, currentY);
+                points.append(pt);
+            }
+            previousCommand = 'L';
+        }
+        // 处理H/h（Horizontal LineTo）命
+        else if (command == 'H') {
+            bool relative = (cmd[0] == 'h');
+            i++;
+            while (i < tokens.size()) {
+                bool ok;
+                double dx = tokens[i].toDouble(&ok);
+                if (!ok)
+                    break;
+                i++;
+
+                if (relative) {
+                    currentX += dx;
+                } else {
+                    currentX = dx;
+                }
+                points.append(QPointF(currentX, currentY));
+            }
+            previousCommand = 'H';
+        }
+        // 处理V/v（Vertical LineTo）命
+        else if (command == 'V') {
+            bool relative = (cmd[0] == 'v');
+            i++;
+            while (i < tokens.size()) {
+                bool ok;
+                double dy = tokens[i].toDouble(&ok);
+                if (!ok)
+                    break;
+                i++;
+
+                if (relative) {
+                    currentY += dy;
+                } else {
+                    currentY = dy;
+                }
+                points.append(QPointF(currentX, currentY));
+            }
+            previousCommand = 'V';
+        }
+        // 处理A/a（Arc）命
+        else if (command == 'A') {
+            bool relative = (cmd[0] == 'a');
+            if (points.isEmpty()) {
+                qWarning() << "Arc without origin point";
+                i++;
+                continue;
+            }
+
+            QPointF startPoint = points.last();
+            i++;
+
+            if (i + 6 >= tokens.size()) {
+                qWarning() << "Arc param length error";
+                continue;
+            }
+
+            bool okRx, okRy, okXRot, okLarge, okSweep, okX, okY;
+            double rx = tokens[i].toDouble(&okRx);
+            i++;
+            double ry = tokens[i].toDouble(&okRy);
+            i++;
+            double xRotation = tokens[i].toDouble(&okXRot);
+            i++;
+            int largeArcFlag = tokens[i].toInt(&okLarge);
+            i++;
+            int sweepFlag = tokens[i].toInt(&okSweep);
+            i++;
+            double endX = tokens[i].toDouble(&okX);
+            i++;
+            double endY = tokens[i].toDouble(&okY);
+            i++;
+
+            if (!okRx || !okRy || !okXRot || !okLarge || !okSweep || !okX || !okY) {
+                qWarning() << "Arc param parse error";
+                continue;
+            }
+
+            QPointF endPoint(endX, endY);
+            if (relative) {
+                endPoint = startPoint + QPointF(endX, endY);
+            }
+
+            QList<QPointF> arcPoints =
+                parseArc(startPoint, rx, ry, xRotation, largeArcFlag != 0, sweepFlag != 0, endPoint);
+            for (const QPointF& point : arcPoints) {
+                if (points.isEmpty() || point != points.last())
+                    points.append(point);
+            }
+            currentX = endPoint.x();
+            currentY = endPoint.y();
+            previousCommand = 'A';
+        }
+        // 处理C/c（Bezier Curve）命
+        else if (command == 'C') {
+            bool relative = (cmd[0] == 'c');
+            if (points.isEmpty()) {
+                qWarning() << "Bezier without origin point";
+                i += 7;
+                continue;
+            }
+
+            QPointF startPoint = points.last();
+            i++;
+
+            if (i + 5 >= tokens.size()) {
+                qWarning() << "Bezier param length error";
+                continue;
+            }
+
+            bool okCp1x, okCp1y, okCp2x, okCp2y, okX, okY;
+            double cp1x = tokens[i].toDouble(&okCp1x);
+            i++;
+            double cp1y = tokens[i].toDouble(&okCp1y);
+            i++;
+            double cp2x = tokens[i].toDouble(&okCp2x);
+            i++;
+            double cp2y = tokens[i].toDouble(&okCp2y);
+            i++;
+            double endX = tokens[i].toDouble(&okX);
+            i++;
+            double endY = tokens[i].toDouble(&okY);
+            i++;
+
+            if (!okCp1x || !okCp1y || !okCp2x || !okCp2y || !okX || !okY) {
+                qWarning() << "Bezier param parse error";
+                continue;
+            }
+
+            if (relative) {
+                cp1x += startPoint.x();
+                cp1y += startPoint.y();
+                cp2x += startPoint.x();
+                cp2y += startPoint.y();
+                endX += startPoint.x();
+                endY += startPoint.y();
+            }
+
+            QList<QPointF> bezierPoints =
+                bezierToPolyline(startPoint.x(), startPoint.y(), cp1x, cp1y, cp2x, cp2y, endX, endY);
+            for (const QPointF& point : bezierPoints) {
+                if (points.isEmpty() || point != points.last())
+                    points.append(point);
+            }
+            currentX = endX;
+            currentY = endY;
+            lastCubicControl = QPointF(cp2x, cp2y);
+            previousCommand = 'C';
+        }
+        // 处理S/s（平滑三次贝塞尔曲线）命令
+        else if (command == 'S') {
+            const bool relative = (cmd[0] == 's');
+            if (points.isEmpty() || i + 4 >= tokens.size()) {
+                qWarning() << "Smooth cubic bezier param length error";
+                i++;
+                continue;
+            }
+            const QPointF startPoint = points.last();
+            const QPointF cp1 =
+                (previousCommand == 'C' || previousCommand == 'S')
+                    ? QPointF(2.0 * startPoint.x() - lastCubicControl.x(), 2.0 * startPoint.y() - lastCubicControl.y())
+                    : startPoint;
+            bool okCp2x = false, okCp2y = false, okX = false, okY = false;
+            i++;
+            double cp2x = tokens[i++].toDouble(&okCp2x);
+            double cp2y = tokens[i++].toDouble(&okCp2y);
+            double endX = tokens[i++].toDouble(&okX);
+            double endY = tokens[i].toDouble(&okY);
+            if (!okCp2x || !okCp2y || !okX || !okY)
+                continue;
+            if (relative) {
+                cp2x += startPoint.x();
+                cp2y += startPoint.y();
+                endX += startPoint.x();
+                endY += startPoint.y();
+            }
+            const QList<QPointF> bezierPoints =
+                bezierToPolyline(startPoint.x(), startPoint.y(), cp1.x(), cp1.y(), cp2x, cp2y, endX, endY);
+            for (const QPointF& point : bezierPoints) {
+                if (point != points.last())
+                    points.append(point);
+            }
+            currentX = endX;
+            currentY = endY;
+            lastCubicControl = QPointF(cp2x, cp2y);
+            previousCommand = 'S';
+        }
+        // 处理Q/q（二次贝塞尔曲线）命令
+        else if (command == 'Q') {
+            const bool relative = (cmd[0] == 'q');
+            if (points.isEmpty() || i + 4 >= tokens.size()) {
+                qWarning() << "Quadratic bezier param length error";
+                i++;
+                continue;
+            }
+
+            const QPointF startPoint = points.last();
+            bool okCpX = false, okCpY = false, okEndX = false, okEndY = false;
+            i++;
+            double cpX = tokens[i].toDouble(&okCpX);
+            i++;
+            double cpY = tokens[i].toDouble(&okCpY);
+            i++;
+            double endX = tokens[i].toDouble(&okEndX);
+            i++;
+            double endY = tokens[i].toDouble(&okEndY);
+            if (!okCpX || !okCpY || !okEndX || !okEndY) {
+                qWarning() << "Quadratic bezier param parse error";
+                continue;
+            }
+            if (relative) {
+                cpX += startPoint.x();
+                cpY += startPoint.y();
+                endX += startPoint.x();
+                endY += startPoint.y();
+            }
+            const QPointF cp2(endX + 2.0 * (cpX - endX) / 3.0, endY + 2.0 * (cpY - endY) / 3.0);
+            const QPointF cp1(startPoint.x() + 2.0 * (cpX - startPoint.x()) / 3.0,
+                              startPoint.y() + 2.0 * (cpY - startPoint.y()) / 3.0);
+            const QList<QPointF> bezierPoints =
+                bezierToPolyline(startPoint.x(), startPoint.y(), cp1.x(), cp1.y(), cp2.x(), cp2.y(), endX, endY);
+            for (const QPointF& point : bezierPoints) {
+                if (points.isEmpty() || point != points.last())
+                    points.append(point);
+            }
+            currentX = endX;
+            currentY = endY;
+            lastQuadraticControl = QPointF(cpX, cpY);
+            previousCommand = 'Q';
+        }
+        // 处理T/t（平滑二次贝塞尔曲线）命令
+        else if (command == 'T') {
+            const bool relative = (cmd[0] == 't');
+            if (points.isEmpty() || i + 2 >= tokens.size()) {
+                qWarning() << "Smooth quadratic bezier param length error";
+                i++;
+                continue;
+            }
+            const QPointF startPoint = points.last();
+            const QPointF control = (previousCommand == 'Q' || previousCommand == 'T')
+                                        ? QPointF(2.0 * startPoint.x() - lastQuadraticControl.x(),
+                                                  2.0 * startPoint.y() - lastQuadraticControl.y())
+                                        : startPoint;
+            bool okX = false, okY = false;
+            i++;
+            double endX = tokens[i++].toDouble(&okX);
+            double endY = tokens[i].toDouble(&okY);
+            if (!okX || !okY)
+                continue;
+            if (relative) {
+                endX += startPoint.x();
+                endY += startPoint.y();
+            }
+            const QPointF cp1(startPoint.x() + 2.0 * (control.x() - startPoint.x()) / 3.0,
+                              startPoint.y() + 2.0 * (control.y() - startPoint.y()) / 3.0);
+            const QPointF cp2(endX + 2.0 * (control.x() - endX) / 3.0, endY + 2.0 * (control.y() - endY) / 3.0);
+            const QList<QPointF> bezierPoints =
+                bezierToPolyline(startPoint.x(), startPoint.y(), cp1.x(), cp1.y(), cp2.x(), cp2.y(), endX, endY);
+            for (const QPointF& point : bezierPoints) {
+                if (point != points.last())
+                    points.append(point);
+            }
+            currentX = endX;
+            currentY = endY;
+            lastQuadraticControl = control;
+            previousCommand = 'T';
+        }
+        // 处理Z/z（ClosePath）命
+        else if (command == 'Z') {
+            if (!points.isEmpty()) {
+                points.append(points.first());
+            }
+            i++;
+            previousCommand = 'Z';
+        }
+        // 未知命令
+        else {
+            qWarning() << "SVG: Unknown cmd:" << command;
+            i++;
+        }
+    }
+
+    return points;
+}
+
+QStringList SvgPathParser::splitPath(const QString& path) {
+    // 将命令字母前后添加空格，然后按空格分
+    QString processed = path;
+    processed.replace(QRegularExpression("([a-zA-Z])"), " \\1 ");
+    processed.replace(QRegularExpression("(?<=[0-9.])(?=[+-])"), " ");
+    const QStringList rawTokens = processed.split(QRegularExpression("[\\s,]+"), Qt::SkipEmptyParts);
+
+    // SVG 允许一个命令后连续跟随多组参数。当前主解析循环按一次命令消费一组
+    // 曲线/圆弧参数，因此在分词阶段把后续参数组展开成同类型的重复命令。
+    QStringList tokens;
+    int index = 0;
+    while (index < rawTokens.size()) {
+        const QString command = rawTokens.at(index++);
+        tokens.append(command);
+        if (command.size() != 1 || !command.at(0).isLetter())
+            continue;
+
+        const QChar upper = command.at(0).toUpper();
+        int groupSize = 0;
+        if (upper == 'A')
+            groupSize = 7;
+        else if (upper == 'C')
+            groupSize = 6;
+        else if (upper == 'S' || upper == 'Q')
+            groupSize = 4;
+        else if (upper == 'T')
+            groupSize = 2;
+        if (groupSize == 0)
+            continue;
+
+        int parameterCount = 0;
+        while (index < rawTokens.size() && !rawTokens.at(index).at(0).isLetter()) {
+            if (parameterCount == groupSize) {
+                tokens.append(command);
+                parameterCount = 0;
+            }
+            tokens.append(rawTokens.at(index++));
+            ++parameterCount;
+        }
+    }
+    return tokens;
+}
+
+QPointF SvgPathParser::createPoint(double x, double y, bool relative, double& currentX, double& currentY) {
+    if (relative) {
+        currentX += x;
+        currentY += y;
+    } else {
+        currentX = x;
+        currentY = y;
+    }
+    return QPointF(currentX, currentY);
+}
+
+QList<QPointF> SvgPathParser::parseArc(const QPointF& startPoint,
+                                       double rx,
+                                       double ry,
+                                       double xRotation,
+                                       bool largeArcFlag,
+                                       bool sweepFlag,
+                                       const QPointF& endPoint) {
+    QList<QPointF> points;
+
+    // 如果半径，直接返回起点和终点
+    if (rx <= 0 || ry <= 0) {
+        points.append(startPoint);
+        points.append(endPoint);
+        return points;
+    }
+
+    // 将角度转换为弧度
+    double phi = xRotation * PI / 180.0;
+
+    // 计算中点
+    double dx = (startPoint.x() - endPoint.x()) / 2.0;
+    double dy = (startPoint.y() - endPoint.y()) / 2.0;
+
+    // 旋转坐标
+    double x1 = cos(phi) * dx + sin(phi) * dy;
+    double y1 = -sin(phi) * dx + cos(phi) * dy;
+
+    // 计算临时变量
+    double rxSq = rx * rx;
+    double rySq = ry * ry;
+    double x1Sq = x1 * x1;
+    double y1Sq = y1 * y1;
+
+    // 计算校正因子
+    double temp = (rxSq * rySq - rxSq * y1Sq - rySq * x1Sq) / (rxSq * y1Sq + rySq * x1Sq);
+    if (temp < 0)
+        temp = 0;
+    temp = sqrt(temp);
+
+    // 根据largeArcFlag和sweepFlag确定符号
+    double factor = (largeArcFlag == sweepFlag) ? -1.0 : 1.0;
+    double cx1 = factor * temp * rx * y1 / ry;
+    double cy1 = -factor * temp * ry * x1 / rx;
+
+    // 计算圆心
+    double cx = cos(phi) * cx1 - sin(phi) * cy1 + (startPoint.x() + endPoint.x()) / 2.0;
+    double cy = sin(phi) * cx1 + cos(phi) * cy1 + (startPoint.y() + endPoint.y()) / 2.0;
+
+    // 计算起始角度和角度增
+    double startAngle = getAngle(1.0, 0.0, (x1 - cx1) / rx, (y1 - cy1) / ry);
+    double deltaAngle = getAngle((x1 - cx1) / rx, (y1 - cy1) / ry, (-x1 - cx1) / rx, (-y1 - cy1) / ry);
+
+    // 规范化角
+    while (startAngle < 0)
+        startAngle += 2 * PI;
+    while (startAngle >= 2 * PI)
+        startAngle -= 2 * PI;
+
+    // 根据sweepFlag调整角度增量
+    if (sweepFlag) {
+        if (deltaAngle < 0)
+            deltaAngle += 2 * PI;
+    } else {
+        if (deltaAngle > 0)
+            deltaAngle -= 2 * PI;
+    }
+
+    // 将弧度转换为角度
+    double startAngleDeg = startAngle * 180.0 / PI;
+    double deltaAngleDeg = deltaAngle * 180.0 / PI;
+
+    // 计算圆弧上的
+    points = calcArcPoints(cx, cy, rx, ry, startAngleDeg, deltaAngleDeg, xRotation);
+
+    return points;
+}
+
+QList<QPointF> SvgPathParser::calcArcPoints(double cx,
+                                            double cy,
+                                            double rx,
+                                            double ry,
+                                            double startAngle,
+                                            double deltaAngle,
+                                            double xRotation) {
+    QList<QPointF> points;
+    const int splitCount = 32;  // 分割32段
+    double step = deltaAngle / splitCount;
+
+    double phi = xRotation * PI / 180.0;
+
+    for (int i = 0; i <= splitCount; i++) {
+        double theta = (startAngle + i * step) * PI / 180.0;
+        double cosTheta = cos(theta);
+        double sinTheta = sin(theta);
+
+        double x = cos(phi) * rx * cosTheta - sin(phi) * ry * sinTheta + cx;
+        double y = sin(phi) * rx * cosTheta + cos(phi) * ry * sinTheta + cy;
+
+        points.append(QPointF(x, y));
+    }
+
+    return points;
+}
+
+double SvgPathParser::getAngle(double x1, double y1, double x2, double y2) {
+    // 计算向量点积和叉
+    double dot = x1 * x2 + y1 * y2;
+    double cross = x1 * y2 - y1 * x2;
+
+    // 计算角度
+    double angle = atan2(cross, dot);
+    return angle;
+}
+
+QList<QPointF> SvgPathParser::bezierToPolyline(double startX,
+                                               double startY,
+                                               double cp1X,
+                                               double cp1Y,
+                                               double cp2X,
+                                               double cp2Y,
+                                               double endX,
+                                               double endY,
+                                               int segments) {
+    QList<QPointF> res;
+
+    // 三次贝塞尔曲线公式
+    // B(t) = (1-t)^3 * P0 + 3*(1-t)^2*t * P1 + 3*(1-t)*t^2 * P2 + t^3 * P3
+
+    for (int i = 0; i <= segments; ++i) {
+        double t = static_cast<double>(i) / segments;
+        double t2 = t * t;
+        double t3 = t2 * t;
+        double mt = 1.0 - t;
+        double mt2 = mt * mt;
+        double mt3 = mt2 * mt;
+
+        double x = mt3 * startX + 3.0 * mt2 * t * cp1X + 3.0 * mt * t2 * cp2X + t3 * endX;
+        double y = mt3 * startY + 3.0 * mt2 * t * cp1Y + 3.0 * mt * t2 * cp2Y + t3 * endY;
+
+        res.append(QPointF(x, y));
+    }
+
+    return res;
+}
+
+}  // namespace EasyKiConverter

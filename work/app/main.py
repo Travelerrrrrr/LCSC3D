@@ -21,8 +21,9 @@ from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngin
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from backend import Cancelled, NetworkApi, Options, Result, download_part, parse_part_numbers, write_report
+from altium import converter_path
 
-VERSION = '1.0.1'
+VERSION = '1.1.0'
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / 'LCSC3D-settings.json'
@@ -174,6 +175,7 @@ class MainWindow(QMainWindow):
         self.web_profile = None
         self.close_when_finished = False
         self._setup_ui()
+        self.setMinimumHeight(max(self.minimumHeight(), self.minimumSizeHint().height()))
         self._restore_settings()
 
     def _setup_ui(self):
@@ -191,7 +193,7 @@ class MainWindow(QMainWindow):
         title_col = QVBoxLayout()
         title_col.setSpacing(3)
         title_col.addWidget(label('立创 3D 模型下载器', 'title'))
-        title_col.addWidget(label('粘贴器件编号，批量下载模型并在线预览', 'muted'))
+        title_col.addWidget(label('批量下载 3D 模型、导出 AD 元件库并在线预览', 'muted'))
         heading.addLayout(title_col)
         heading.addStretch()
         heading.addWidget(label('便携版  ' + VERSION, 'badge'))
@@ -207,6 +209,7 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(14)
 
         input_card, input_layout = card()
+        input_layout.setSpacing(8)
         input_head = QHBoxLayout()
         input_head.addWidget(label('1  输入器件编号', 'section'))
         input_head.addStretch()
@@ -221,7 +224,7 @@ class MainWindow(QMainWindow):
         input_layout.addLayout(input_head)
         self.input = QPlainTextEdit()
         self.input.setPlaceholderText('例如：C2040, C20197\n支持换行、空格、中英文逗号分隔；重复编号自动合并')
-        self.input.setFixedHeight(92)
+        self.input.setFixedHeight(76)
         self.input.textChanged.connect(self.input_changed)
         input_layout.addWidget(self.input)
         count_row = QHBoxLayout()
@@ -235,10 +238,11 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(input_card)
 
         output_card, output_layout = card()
+        output_layout.setSpacing(8)
         path_row = QHBoxLayout()
         path_row.addWidget(label('2  保存到', 'section'))
         self.path_input = QLineEdit()
-        self.path_input.setPlaceholderText('选择模型保存目录')
+        self.path_input.setPlaceholderText('选择模型与元件库保存目录')
         path_row.addWidget(self.path_input, 1)
         self.browse_button = QPushButton('选择文件夹…')
         self.browse_button.clicked.connect(self.choose_folder)
@@ -248,7 +252,7 @@ class MainWindow(QMainWindow):
         path_row.addWidget(open_button)
         output_layout.addLayout(path_row)
         option_row = QHBoxLayout()
-        option_row.addWidget(label('导出格式', 'muted'))
+        option_row.addWidget(label('3D 模型', 'muted'))
         self.step_box = QCheckBox('STEP')
         self.step_box.setChecked(True)
         self.step_box.setToolTip('原始 STEP 文件，适用于 SolidWorks、FreeCAD 等 CAD 软件')
@@ -258,21 +262,31 @@ class MainWindow(QMainWindow):
         self.obj_box.setToolTip('下载官方 OBJ 模型文本')
         for widget in (self.step_box, self.wrl_box, self.obj_box):
             option_row.addWidget(widget)
-        option_row.addSpacing(15)
+        option_row.addStretch()
+        output_layout.addLayout(option_row)
+        library_row = QHBoxLayout()
+        library_row.addWidget(label('Altium 库', 'muted'))
+        self.symbol_box = QCheckBox('AD 符号')
+        self.symbol_box.setToolTip('导出原生 .SchLib 符号库，可在 Altium Designer 中使用')
+        self.footprint_box = QCheckBox('AD 封装')
+        self.footprint_box.setToolTip('导出原生 .PcbLib 封装库；有可用 STEP 时自动嵌入，无需额外选择 STEP')
+        library_row.addWidget(self.symbol_box)
+        library_row.addWidget(self.footprint_box)
+        library_row.addStretch()
         self.overwrite_box = QCheckBox('覆盖已有文件')
         self.overwrite_box.setToolTip('默认跳过已存在的完整文件')
-        option_row.addWidget(self.overwrite_box)
-        option_row.addStretch()
+        library_row.addWidget(self.overwrite_box)
         self.stop_button = QPushButton('停止')
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_batch)
-        self.start_button = QPushButton('开始批量下载')
+        self.start_button = QPushButton('开始下载 / 导出')
         self.start_button.setObjectName('primary')
         self.start_button.clicked.connect(self.start_batch)
-        output_layout.addLayout(option_row)
+        output_layout.addLayout(library_row)
         left_layout.addWidget(output_card)
 
         list_card, list_layout = card()
+        list_layout.setSpacing(8)
         list_head = QHBoxLayout()
         list_head.addWidget(label('下载列表', 'section'))
         list_head.addStretch()
@@ -290,6 +304,7 @@ class MainWindow(QMainWindow):
         self.table.setWordWrap(False)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(40)
+        self.table.setMinimumHeight(112)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
         self.table.setColumnWidth(0, 104)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -309,7 +324,7 @@ class MainWindow(QMainWindow):
         list_layout.addWidget(self.run_status)
         self.detail = label('选择器件查看结果详情；双击器件可在线预览', 'muted')
         self.detail.setWordWrap(True)
-        self.detail.setMinimumHeight(34)
+        self.detail.setMinimumHeight(26)
         list_layout.addWidget(self.detail)
         list_actions = QHBoxLayout()
         self.part_folder_button = QPushButton('打开器件目录')
@@ -389,9 +404,14 @@ class MainWindow(QMainWindow):
             return
         try:
             settings = json.loads(SETTINGS_PATH.read_text(encoding='utf-8'))
+            if not isinstance(settings, dict):
+                return
             self.path_input.setText(settings.get('destination') or default)
+            self.step_box.setChecked(bool(settings.get('step', True)))
             self.wrl_box.setChecked(bool(settings.get('wrl')))
             self.obj_box.setChecked(bool(settings.get('obj')))
+            self.symbol_box.setChecked(bool(settings.get('symbol')))
+            self.footprint_box.setChecked(bool(settings.get('footprint')))
         except (OSError, ValueError):
             pass
 
@@ -399,7 +419,7 @@ class MainWindow(QMainWindow):
         if not self.settings_enabled:
             return
         try:
-            SETTINGS_PATH.write_text(json.dumps({'destination': self.path_input.text(), 'wrl': self.wrl_box.isChecked(), 'obj': self.obj_box.isChecked()}, ensure_ascii=False, indent=2), encoding='utf-8')
+            SETTINGS_PATH.write_text(json.dumps({'destination': self.path_input.text(), 'step': self.step_box.isChecked(), 'wrl': self.wrl_box.isChecked(), 'obj': self.obj_box.isChecked(), 'symbol': self.symbol_box.isChecked(), 'footprint': self.footprint_box.isChecked()}, ensure_ascii=False, indent=2), encoding='utf-8')
         except OSError:
             pass
 
@@ -447,17 +467,23 @@ class MainWindow(QMainWindow):
             self.run_status.setText('目录尚未创建，开始下载时会自动创建')
 
     def set_running(self, running):
-        for widget in (self.input, self.sample_button, self.clear_button, self.path_input, self.browse_button, self.queue_button, self.start_button, self.step_box, self.wrl_box, self.obj_box, self.overwrite_box):
+        for widget in (self.input, self.sample_button, self.clear_button, self.path_input, self.browse_button, self.queue_button, self.start_button, self.step_box, self.wrl_box, self.obj_box, self.symbol_box, self.footprint_box, self.overwrite_box):
             widget.setEnabled(not running)
         self.stop_button.setEnabled(running)
 
     def start_batch(self):
         if self.worker and self.worker.isRunning():
             return
-        formats = tuple(name for name, box in [('STEP', self.step_box), ('WRL', self.wrl_box), ('OBJ', self.obj_box)] if box.isChecked())
+        formats = tuple(name for name, box in [('STEP', self.step_box), ('WRL', self.wrl_box), ('OBJ', self.obj_box), ('SCHLIB', self.symbol_box), ('PCBLIB', self.footprint_box)] if box.isChecked())
         if not formats:
             self.run_status.setText('请至少选择一种导出格式')
             return
+        if self.symbol_box.isChecked() or self.footprint_box.isChecked():
+            try:
+                converter_path()
+            except Exception as exc:
+                self.run_status.setText(str(exc))
+                return
         if not self.path_input.text().strip():
             self.run_status.setText('请选择保存目录')
             return
@@ -478,7 +504,7 @@ class MainWindow(QMainWindow):
         self.report_path = ''
         self.report_button.setEnabled(False)
         self.set_running(True)
-        self.run_status.setText(f'开始下载，共 {len(self.ids)} 个器件…')
+        self.run_status.setText(f'开始下载 / 导出，共 {len(self.ids)} 个器件…')
         worker = BatchWorker(self.ids[:], Options(destination, formats, self.overwrite_box.isChecked()), self)
         self.worker = worker
         worker.phase.connect(self.update_phase)
@@ -596,13 +622,16 @@ class MainWindow(QMainWindow):
         message.setTextFormat(Qt.RichText)
         message.setText('<b>立创 3D 模型下载器 ' + VERSION + '</b><br><br>'
             '1. 输入 C 开头的立创编号，支持换行、空格和逗号。<br>'
-            '2. 选择保存目录和格式，点击「开始批量下载」。<br>'
+            '2. 选择保存目录和导出内容，点击「开始下载 / 导出」。<br>'
             '3. 选中列表中的器件，点击「在线预览」或双击。<br><br>'
             'STEP 是原始 CAD 模型；WRL 适用于 KiCad；OBJ 是官方模型文本。<br>'
+            'AD 符号导出 .SchLib，AD 封装导出 .PcbLib，并自动嵌入可用的 STEP。<br>'
+            '只导出 AD 库时可取消全部 3D 格式；没有 3D 模型也可导出符号和封装。<br>'
             '每个器件单独保存到 C 编号目录，默认保留已有文件。<br>'
             '预览使用商城现有的官方查看器，联网加载模型；鼠标拖动旋转，滚轮缩放。<br><br>'
             '模型来源：<a href="https://lceda.cn/">JLCEDA</a> / <a href="https://easyeda.com/">EasyEDA 官方库</a>。<br>'
             '基于 <a href="https://github.com/uPesy/easyeda2kicad.py">easyeda2kicad 1.0.1</a>，软件采用 AGPL-3.0-or-later。<br>'
+            'AD 转换使用 <a href="https://github.com/EasyKiconverter/EasyKiConverter">EasyKiConverter</a>（GPL-3.0）。<br>'
             '对应源码、构建脚本与第三方说明随交付提供。')
         message.exec()
 
@@ -637,6 +666,8 @@ def main():
         window.input.setPlainText('C2040\nc20197, C2040\nC999999999999')
         window.wrl_box.setChecked(True)
         window.obj_box.setChecked(True)
+        window.symbol_box.setChecked(True)
+        window.footprint_box.setChecked(True)
         window.load_queue()
         window.preview_selected()
         state = {'batch': False, 'preview': False, 'done': False}
@@ -656,7 +687,11 @@ def main():
             if window.worker and window.worker.isRunning():
                 window.worker.cancelled.set()
                 window.worker.wait(45000)
-            passed = (window.preview_state == 'ready' and sum(result.status in ('成功', '已存在') for result in window.results.values()) == 2)
+            passed = (window.preview_state == 'ready'
+                      and sum(result.status in ('成功', '已存在') for result in window.results.values()) == 2
+                      and all(any(Path(file).suffix == '.SchLib' for file in result.files)
+                              and any(Path(file).suffix == '.PcbLib' for file in result.files)
+                              for result in window.results.values() if result.part in ('C2040', 'C20197')))
             app.exit(0 if passed else 1)
 
         def batch_done():

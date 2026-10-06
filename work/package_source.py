@@ -17,7 +17,7 @@ with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compressleve
             if not source.is_file():
                 continue
             relative = source.relative_to(base)
-            if any(part in {'.git', '__pycache__', '.venv', 'build', 'dist'} for part in relative.parts):
+            if any(part in {'.git', '__pycache__', '.venv', 'build', 'dist', 'runtime'} for part in relative.parts):
                 continue
             archive.write(source, str(prefix / relative))
 shutil.copyfile(app / 'README.md', outputs / f'使用说明-v{version}.md')

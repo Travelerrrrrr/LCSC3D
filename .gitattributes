@@ -1,0 +1,3 @@
+# Preserve the vendored upstream bytes and their recorded SHA-256 hashes.
+work/app/native/** text eol=lf
+work/app/native/vendor/EasyKiConverter/** -text

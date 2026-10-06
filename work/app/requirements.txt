@@ -2,3 +2,4 @@ easyeda2kicad==1.0.1
 PySide6==6.11.1
 pyinstaller==6.20.0
 certifi==2026.7.22
+olefile==0.47

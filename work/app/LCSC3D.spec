@@ -1,16 +1,24 @@
 # PyInstaller specification. The browser runtime is bundled inside the EXE.
 from pathlib import Path
+import re
+import runpy
 
 root = Path(SPECPATH)
 upstream = root / 'upstream'
 if not upstream.is_dir():
     upstream = root.parent / 'upstream'
+version = re.search(r"VERSION = '([^']+)'", (root / 'main.py').read_text(encoding='utf-8')).group(1)
+runtime = root / 'native' / 'runtime'
+if not (runtime / 'lcsc-altium.exe').is_file():
+    raise RuntimeError('Build the Altium backend with native/build_native.py before packaging')
+runpy.run_path(str(root / 'native' / 'build_native.py'))['verify_runtime'](root / 'native')
 
 a = Analysis(
     [str(root / 'launcher.py')],
     pathex=[str(root), str(upstream)],
     binaries=[],
-    datas=[(str(root / 'viewer.html'), '.'), (str(root / 'assets'), 'assets'), (str(root / 'licenses'), 'licenses')],
+    datas=[(str(root / 'viewer.html'), '.'), (str(root / 'assets'), 'assets'), (str(root / 'licenses'), 'licenses'),
+           (str(runtime), 'native/runtime')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -29,7 +37,7 @@ a.binaries = [entry for entry in a.binaries
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, a.binaries, a.datas, [],
-    name='LCSC3D-Portable-v1.0.1',
+    name=f'LCSC3D-Portable-v{version}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

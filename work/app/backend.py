@@ -1,4 +1,4 @@
-"""Batch model downloads based on easyeda2kicad 1.0.1 (AGPL-3.0)."""
+"""Batch 3D downloads and Altium library exports from EasyEDA component data."""
 from __future__ import annotations
 
 import csv
@@ -11,7 +11,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -21,16 +21,11 @@ from easyeda2kicad.easyeda.easyeda_api import (
 from easyeda2kicad.easyeda.easyeda_importer import Easyeda3dModelImporter
 from easyeda2kicad.kicad.export_kicad_3d_model import Exporter3dModelKicad
 
+from altium import ALTIUM_FORMATS, CONVERTER_COMMIT, CONVERTER_URL, export_libraries
+from errors import Cancelled, DownloadError
+
 UPSTREAM_URL = 'https://github.com/uPesy/easyeda2kicad.py'
 SOURCE_LABEL = 'JLCEDA/EasyEDA 官方库'
-
-
-class Cancelled(Exception):
-    pass
-
-
-class DownloadError(Exception):
-    pass
 
 
 def parse_part_numbers(text: str) -> tuple[list[str], list[str], int]:
@@ -167,6 +162,8 @@ class Result:
 
 def download_part(part: str, options: Options, api: NetworkApi,
                   progress: Callable[[str, str], None] | None = None) -> Result:
+    if not options.formats or any(fmt not in ('STEP', 'WRL', 'OBJ', *ALTIUM_FORMATS) for fmt in options.formats):
+        raise DownloadError('请至少选择一种受支持的导出格式')
     notify = progress or (lambda phase, title: None)
     notify('查询器件', '')
     data = api.get_cad_data_of_component(part)
@@ -175,21 +172,33 @@ def download_part(part: str, options: Options, api: NetworkApi,
     store_url = f'https://item.szlcsc.com/{product_id}.html' if product_id else f'https://so.szlcsc.com/global.html?k={part}'
     result = Result(part, '失败', title=title, store_url=store_url)
     api.check_cancelled()
-    try:
-        model = Easyeda3dModelImporter(data, download_raw_3d_model=False, api=api).output
-    except (KeyError, TypeError, ValueError, IndexError) as exc:
-        raise DownloadError('器件模型信息缺失或格式不受支持') from exc
-    if model is None:
-        result.status = '无模型'
-        result.message = '官方库中没有关联的 3D 模型'
-        return result
-    result.model = model.name
     folder = options.destination / part
     result.folder = str(folder)
-    basename = f'{part}_{safe_filename(model.name)}'
-    completed, skipped, errors = [], [], []
+    model_formats = tuple(fmt for fmt in options.formats if fmt not in ALTIUM_FORMATS)
+    library_formats = tuple(fmt for fmt in options.formats if fmt in ALTIUM_FORMATS)
+    completed, skipped, errors, notes = [], [], [], []
+    model, model_error = None, ''
+    if model_formats or 'PCBLIB' in library_formats:
+        try:
+            model = Easyeda3dModelImporter(data, download_raw_3d_model=False, api=api).output
+        except (KeyError, TypeError, ValueError, IndexError):
+            model_error = '器件模型信息缺失或格式不受支持'
+        if model:
+            result.model = model.name
+        elif model_formats:
+            errors.append(model_error or '官方库中没有关联的 3D 模型')
+
+    def save_payload(fmt: str, path: Path, payload: bytes):
+        if atomic_write(path, payload, overwrite=options.overwrite):
+            completed.append(ALTIUM_FORMATS.get(fmt, fmt))
+        else:
+            skipped.append(ALTIUM_FORMATS.get(fmt, fmt))
+        result.files.append(str(path))
+
+    basename = f'{part}_{safe_filename(model.name)}' if model else part
+    step_payload, step_attempted, step_error = None, False, ''
     raw_obj = None
-    for fmt in options.formats:
+    for fmt in model_formats if model else ():
         api.check_cancelled()
         path = folder / f'{basename}.{fmt.lower()}'
         if path.is_file() and not options.overwrite and path.stat().st_size:
@@ -199,7 +208,9 @@ def download_part(part: str, options: Options, api: NetworkApi,
         notify(f'下载 {fmt}', title)
         try:
             if fmt == 'STEP':
+                step_attempted = True
                 payload = api.get_step_3d_model(model.uuid)
+                step_payload = payload
             else:
                 if raw_obj is None:
                     raw_obj = api.get_raw_3d_model_obj(model.uuid)
@@ -217,16 +228,59 @@ def download_part(part: str, options: Options, api: NetworkApi,
             api.check_cancelled()
             if not payload:
                 errors.append(f'{fmt} 不可用')
-            elif atomic_write(path, payload, overwrite=options.overwrite):
-                completed.append(fmt)
-                result.files.append(str(path))
             else:
-                skipped.append(fmt)
-                result.files.append(str(path))
+                save_payload(fmt, path, payload)
         except Cancelled:
             raise
         except Exception as exc:
             errors.append(f'{fmt}：{exc}')
+            if fmt == 'STEP':
+                step_error = str(exc)
+
+    pending, library_details = [], {}
+    for fmt in library_formats:
+        path = folder / f'{part}.{ALTIUM_FORMATS[fmt]}'
+        if path.is_file() and path.stat().st_size and not options.overwrite:
+            skipped.append(ALTIUM_FORMATS[fmt])
+            result.files.append(str(path))
+        else:
+            pending.append(fmt)
+    if pending:
+        if 'PCBLIB' in pending and model and not step_attempted:
+            notify('获取封装 STEP', title)
+            try:
+                existing = folder / f'{basename}.step'
+                if existing.is_file() and existing.stat().st_size and not options.overwrite:
+                    step_payload = existing.read_bytes()
+                    if b'ISO-10303-21' not in step_payload[:2048]:
+                        step_payload = None
+                if step_payload is None:
+                    step_payload = api.get_step_3d_model(model.uuid)
+            except Cancelled:
+                raise
+            except Exception as exc:
+                step_error = str(exc)
+        api.check_cancelled()
+        notify('导出 AD 库', title)
+        try:
+            exported = export_libraries(data, part, tuple(pending), api.check_cancelled, step_payload)
+            library_details = exported.details
+            for fmt in pending:
+                api.check_cancelled()
+                if fmt in exported.payloads:
+                    try:
+                        save_payload(fmt, folder / f'{part}.{ALTIUM_FORMATS[fmt]}', exported.payloads[fmt])
+                    except OSError as exc:
+                        errors.append(f'{ALTIUM_FORMATS[fmt]}：{exc}')
+                else:
+                    errors.append(f'{ALTIUM_FORMATS[fmt]}：{exported.errors.get(fmt, "库文件导出失败")}')
+            if 'PCBLIB' in exported.payloads:
+                embedded = exported.details.get('footprint', {}).get('step_embedded')
+                notes.append('封装已嵌入 STEP' if embedded else '封装已保存，未嵌入 STEP' + (f'：{step_error}' if step_error else '（官方库没有可用模型）'))
+        except Cancelled:
+            raise
+        except Exception as exc:
+            errors.append('AD 库：' + str(exc))
     if completed or skipped:
         result.status = '部分完成' if errors else ('已存在' if not completed else '成功')
         descriptions = []
@@ -234,22 +288,27 @@ def download_part(part: str, options: Options, api: NetworkApi,
             descriptions.append('已保存 ' + ' / '.join(completed))
         if skipped:
             descriptions.append('已存在 ' + ' / '.join(skipped))
-        result.message = '；'.join(descriptions + errors)
+        result.message = '；'.join(descriptions + errors + notes)
         metadata = {
-            'part': part, 'title': title, 'model': model.name, 'model_uuid': model.uuid,
+            'part': part, 'title': title, 'model': model.name if model else '', 'model_uuid': model.uuid if model else '',
             'source': SOURCE_LABEL, 'source_urls': ['https://lceda.cn/', 'https://easyeda.com/'],
             'store_url': store_url, 'downloaded_at': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
             'upstream': UPSTREAM_URL, 'upstream_version': '1.0.1',
             'files': [Path(x).name for x in result.files],
             'library_notice': data.get('packageDetail', {}).get('dataStr', {}).get('head', {}).get('licence', ''),
+            'symbol_library_notice': data.get('dataStr', {}).get('head', {}).get('licence', ''),
         }
+        if library_formats:
+            metadata['altium'] = {'converter': CONVERTER_URL, 'commit': CONVERTER_COMMIT, 'exports': library_details}
         try:
             atomic_write(folder / 'model-info.json', json.dumps(metadata, ensure_ascii=False, indent=2).encode('utf-8'), overwrite=True)
         except OSError as exc:
             result.status = '部分完成'
             result.message += f'；来源信息保存失败：{exc}'
     else:
-        result.message = '；'.join(errors) or '没有可保存的模型文件'
+        if not library_formats and model is None and not model_error:
+            result.status = '无模型'
+        result.message = '；'.join(errors) or '没有可保存的文件'
     return result
 
 
