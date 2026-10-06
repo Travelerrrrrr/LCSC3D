@@ -1,3 +1,3 @@
-[submodule "work/upstream"]
-	path = work/upstream
+[submodule "upstream"]
+	path = upstream
 	url = https://github.com/uPesy/easyeda2kicad.py.git

@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-06",
+  "mode": "startup",
+  "samples": [
+    {
+      "window_seconds": 2.541,
+      "rss_bytes": 360120320,
+      "process_count": 2
+    },
+    {
+      "window_seconds": 2.566,
+      "rss_bytes": 364527616,
+      "process_count": 2
+    },
+    {
+      "window_seconds": 2.589,
+      "rss_bytes": 364871680,
+      "process_count": 2
+    }
+  ],
+  "median_window_seconds": 2.566,
+  "median_rss_bytes": 364527616
+}

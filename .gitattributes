@@ -1,3 +1,9 @@
-# Preserve the vendored upstream bytes and their recorded SHA-256 hashes.
-work/app/native/** text eol=lf
-work/app/native/vendor/EasyKiConverter/** -text
+* text=auto
+*.py text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.ps1 text eol=crlf
+*.png -text
+*.ico -text

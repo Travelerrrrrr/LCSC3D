@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-06",
+  "mode": "downloads",
+  "samples": [
+    {
+      "seconds": 4.584,
+      "files": 6,
+      "statuses": [
+        "成功",
+        "成功"
+      ]
+    },
+    {
+      "seconds": 3.033,
+      "files": 6,
+      "statuses": [
+        "成功",
+        "成功"
+      ]
+    },
+    {
+      "seconds": 3.202,
+      "files": 6,
+      "statuses": [
+        "成功",
+        "成功"
+      ]
+    }
+  ],
+  "median_seconds": 3.202,
+  "failed_runs": 0
+}
