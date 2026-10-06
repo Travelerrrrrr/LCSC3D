@@ -130,6 +130,41 @@ class Tests(unittest.TestCase):
                 api.fetch('https://easyeda.com/')
             connect.assert_not_called()
 
+    def test_official_svg_endpoint_records_domestic_source(self):
+        payload = b'{"success":true,"result":[]}'
+        api = NetworkApi()
+        with patch.object(api, 'fetch', return_value=payload) as fetch:
+            data = api.get_svg_data_of_component('C2040')
+        fetch.assert_called_once_with('https://lceda.cn/api/products/C2040/svgs')
+        self.assertEqual(data['source_url'], 'https://lceda.cn/api/products/C2040/svgs')
+        self.assertEqual(data['result'], [])
+
+    def test_official_svg_mirror_recovers_host_failure(self):
+        api = NetworkApi()
+        with patch.object(api, 'fetch', side_effect=[DownloadError('HTTP 418'), b'{"success":true,"result":[]}']) as fetch:
+            data = api.get_svg_data_of_component('C20197')
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(data['source_url'], 'https://easyeda.com/api/products/C20197/svgs')
+
+    def test_svg_error_and_cancellation_never_return_placeholder_data(self):
+        api = NetworkApi()
+        for response in (b'<html>blocked</html>', b'{"success":false,"result":[]}', b'{"success":true,"result":{}}'):
+            with self.subTest(response=response), patch.object(api, 'fetch', return_value=response) as fetch:
+                with self.assertRaises(DownloadError):
+                    api.get_svg_data_of_component('C2040')
+                self.assertEqual(fetch.call_count, 2)
+        with patch.object(api, 'fetch', side_effect=Cancelled()) as fetch:
+            with self.assertRaises(Cancelled):
+                api.get_svg_data_of_component('C2040')
+            fetch.assert_called_once()
+
+    def test_svg_invalid_number_never_connects(self):
+        api = NetworkApi()
+        with patch.object(api, 'fetch') as fetch:
+            with self.assertRaises(DownloadError):
+                api.get_svg_data_of_component('../C2040')
+            fetch.assert_not_called()
+
     def test_filename_sanitizing_keeps_output_inside_target(self):
         self.assertNotIn('/', safe_filename('../../CON:<bad>'))
         self.assertEqual(safe_filename('CON'), '_CON')

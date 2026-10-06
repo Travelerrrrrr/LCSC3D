@@ -1,8 +1,8 @@
 # JLC3DViewer — 立创 3D 模型下载器
 
-Windows x64 便携软件，当前版本 1.3.0。输入立创 C 编号，批量下载 STEP、WRL、OBJ 三种 3D 模型。右侧保留 3D 模型、符号、封装预览，无需先下载。器件目录按“器件名_编号”命名，不生成 CSV 文件。
+Windows x64 便携软件，当前版本 1.4.0。输入立创 C 编号，批量下载 STEP、WRL、OBJ 三种 3D 模型。右侧支持 3D 模型、符号、封装预览，无需先下载。器件目录按“器件名_编号”命名，不生成 CSV 文件。
 
-1.3.0 已移除符号和封装导出及其转换后端。完整使用说明、依赖版本与许可证见 [应用说明](work/app/README.md)。
+1.4.0 的符号和封装预览直接加载国内商城使用的官方 SVG，保留官方图形、文字和图层配色，支持拖动、缩放、适应窗口及多单元符号选择。导出仍仅包含 3D 模型。完整使用说明、依赖版本与许可证见 [应用说明](work/app/README.md)。
 
 ## 目录
 
@@ -23,6 +23,6 @@ cd work/app
 .\build.ps1
 ```
 
-构建脚本会安装 Python 依赖、运行测试并生成 `dist/LCSC3D-Portable-v1.3.0.exe`。无需 C++、Qt 开发包或 EDA 软件。
+构建脚本会安装 Python 依赖、运行测试并生成 `dist/LCSC3D-Portable-v1.4.0.exe`。无需 C++、Qt 开发包或 EDA 软件。
 
 安装 `work/app/requirements.txt` 后可运行 `python main.py`；本地测试为 `python -m unittest discover -s tests -v`。

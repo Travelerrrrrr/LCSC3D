@@ -1,21 +1,23 @@
-"""Vector previews from the same official component data used by the exporters."""
+"""Display the official SVGs used by the domestic LCSC storefront."""
 from __future__ import annotations
 
+import base64
+import json
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from easyeda2kicad.easyeda.easyeda_svg_renderer import render_footprint_svg, render_symbol_svg
-from PySide6.QtCore import QByteArray, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter
-from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtSvgWidgets import QGraphicsSvgItem
-from PySide6.QtWidgets import QFrame, QGraphicsItem, QGraphicsScene, QGraphicsView
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+from PySide6.QtWebEngineWidgets import QWebEngineView
 
 
 SYMBOL_BACKGROUND = '#ffffff'
-FOOTPRINT_BACKGROUND = '#172a3c'
-SYMBOL_SHAPES = {'P', 'PL', 'PG', 'E', 'C', 'R', 'A', 'PT', 'T'}
-FOOTPRINT_SHAPES = {'PAD', 'TRACK', 'CIRCLE', 'ARC', 'RECT', 'SOLIDREGION', 'HOLE', 'VIA', 'TEXT', 'SILK_LABEL'}
+FOOTPRINT_BACKGROUND = '#000000'
+SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
+RESOURCE_ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 
 
 @dataclass(frozen=True)
@@ -24,7 +26,6 @@ class VectorPreview:
     name: str = ''
     count: int = 0
     error: str = ''
-    unsupported: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -32,138 +33,128 @@ class LibraryPreview:
     title: str
     symbols: tuple[VectorPreview, ...]
     footprint: VectorPreview
+    source_url: str = ''
 
 
-def _render(data: dict, kind: str) -> VectorPreview:
+def _read_svg(entry: dict, kind: str) -> VectorPreview:
     label = '符号' if kind == 'symbol' else '封装'
-    package = data.get('packageDetail')
-    block = data.get('dataStr') if kind == 'symbol' else package.get('dataStr') if isinstance(package, dict) else None
-    if not isinstance(block, dict) or not isinstance(block.get('shape'), list) or not block['shape']:
-        return VectorPreview(error=f'官方库中没有{label}数据')
+    text = entry.get('svg')
+    if not isinstance(text, str) or not text.strip():
+        return VectorPreview(error=f'官方库中没有{label} SVG 数据')
     try:
-        shapes = [shape for shape in block['shape'] if isinstance(shape, str)]
-        types = {shape.split('~', 1)[0] for shape in shapes}
-        supported = SYMBOL_SHAPES if kind == 'symbol' else FOOTPRINT_SHAPES
-        unknown = tuple(sorted(types - supported - {'SVGNODE'}))
-        count = sum(shape.startswith('P~' if kind == 'symbol' else 'PAD~') for shape in shapes)
-        params = (block.get('head') or {}).get('c_para') or {}
-        name = str(data.get('title') or params.get('name') or '') if kind == 'symbol' else str(params.get('package') or '')
-        renderer = render_symbol_svg if kind == 'symbol' else render_footprint_svg
-        svg = renderer(data, bg_color=SYMBOL_BACKGROUND if kind == 'symbol' else FOOTPRINT_BACKGROUND)
-        root = ET.fromstring(svg)
-        # A background rectangle and title alone are not a usable preview.
-        if len(root) <= 2:
-            return VectorPreview(name=name, error=f'{label}没有可显示的图形', unsupported=unknown)
-        if kind == 'footprint':
-            _fit_pad_labels(root, shapes)
-            ET.register_namespace('', 'http://www.w3.org/2000/svg')
-            svg = ET.tostring(root, encoding='unicode')
-        return VectorPreview(svg.encode('utf-8'), name, count, unsupported=unknown)
-    except (ValueError, TypeError, KeyError, IndexError, AttributeError, ET.ParseError) as exc:
-        return VectorPreview(error=f'{label}数据无法预览：{exc}')
+        root = ET.fromstring(text)
+        if root.tag != f'{{{SVG_NAMESPACE}}}svg':
+            raise ValueError('文档不是 SVG')
+        geometry = {'path', 'rect', 'circle', 'ellipse', 'polygon', 'polyline', 'line', 'text', 'use', 'image'}
+        if not any(node.tag.rsplit('}', 1)[-1] in geometry for node in root.iter()):
+            raise ValueError('没有可显示的图形')
+        part_type = 'part_pin' if kind == 'symbol' else 'part_pad'
+        count = sum(node.get('c_partid') == part_type for node in root.iter())
+        name_key = 'name' if kind == 'symbol' else 'package'
+        name = ''
+        for node in root.iter():
+            params = node.get('c_para', '').split('`')
+            attributes = dict(zip(params[::2], params[1::2]))
+            if attributes.get(name_key):
+                name = attributes[name_key]
+                break
+        # Keep the server's paths, text, units and CSS exactly as supplied.
+        return VectorPreview(text.encode('utf-8'), name, count)
+    except (ValueError, ET.ParseError) as exc:
+        return VectorPreview(error=f'官方{label} SVG 无法预览：{exc}')
 
 
-def _fit_pad_labels(root, shapes):
-    # Upstream uses a fixed font size of 2 canvas units, which overlaps fine-
-    # pitch pads. Qt SVG also needs an explicit baseline for vertical centering.
-    pads = {}
-    for shape in shapes:
-        fields = shape.split('~')
-        if fields[0] == 'PAD' and len(fields) > 8:
-            pads[(fields[8], float(fields[2]), float(fields[3]))] = (abs(float(fields[4])), abs(float(fields[5])))
-    for text in root.iter('{http://www.w3.org/2000/svg}text'):
-        key = (text.text, float(text.get('x', 0)), float(text.get('y', 0)))
-        if key in pads:
-            width, height = pads[key]
-            size = min(2.0, min(width, height) * 0.7 / max(1.0, len(text.text) * 0.65))
-            text.set('font-size', str(size))
-            text.set('font-family', 'Arial')
-            text.set('y', str(key[2] + size * 0.35))
+def build_library_preview(data: dict, part: str = '') -> LibraryPreview:
+    entries = data.get('result') or []
+    if not isinstance(entries, list):
+        entries = []
+    entries = [entry for entry in entries if isinstance(entry, dict)]
+    # Match the storefront's preference for multi-unit symbols (docType 6).
+    symbol_type = 6 if any(entry.get('docType') == 6 for entry in entries) else 2
+    symbols = tuple(_read_svg(entry, 'symbol') for entry in entries if entry.get('docType') == symbol_type)
+    if not symbols:
+        symbols = (VectorPreview(error='官方库中没有符号 SVG 数据'),)
+    footprints = [entry for entry in entries if entry.get('docType') == 4]
+    footprint = _read_svg(footprints[0], 'footprint') if footprints else VectorPreview(error='官方库中没有封装 SVG 数据')
+    title = next((document.name for document in symbols if document.name), part)
+    return LibraryPreview(title, symbols, footprint, str(data.get('source_url') or ''))
 
 
-def build_library_preview(data: dict) -> LibraryPreview:
-    title = str(data.get('title') or '').strip()
-    subparts = data.get('subparts') or []
-    units = subparts if isinstance(subparts, list) and subparts else [data]
-    symbols = tuple(_render({**unit, 'title': str(unit.get('title') or title)}, 'symbol')
-                    if isinstance(unit, dict) else VectorPreview(error='符号单元数据无法预览')
-                    for unit in units)
-    return LibraryPreview(title, symbols, _render(data, 'footprint'))
+class SvgPreviewPage(QWebEnginePage):
+    rendered = Signal(int, str, str)
+
+    def javaScriptConsoleMessage(self, level, message, line, source):
+        if message.startswith('LCSC3D_SVG_STATE:'):
+            try:
+                state = json.loads(message[len('LCSC3D_SVG_STATE:'):])
+                self.rendered.emit(int(state['token']), state['status'], state['message'])
+            except (ValueError, TypeError, KeyError):
+                pass
 
 
-class VectorPreviewView(QGraphicsView):
-    """Qt vector canvas with bounded zoom, drag to pan, and automatic fitting."""
+class VectorPreviewView(QWebEngineView):
+    """A local browser canvas that preserves the official SVG's CSS."""
+    state = Signal(str, str)
+
     def __init__(self, background, parent=None):
         super().__init__(parent)
-        self.setScene(QGraphicsScene(self))
-        self.setFrameShape(QFrame.NoFrame)
-        self.setBackgroundBrush(QColor(background))
-        self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
-        self.setDragMode(QGraphicsView.ScrollHandDrag)
-        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.background = background
         self.document = None
-        self.renderer = None
-        self.item = None
-        self.auto_fit = True
-        self.fit_scale = 1.0
-        self.fit_timer = QTimer(self)
-        self.fit_timer.setSingleShot(True)
-        self.fit_timer.timeout.connect(self.fit_if_automatic)
+        self.revision = 0
+        self.shell_ready = False
+        self.load_state = ('empty', '')
+        self.profile = QWebEngineProfile(self)
+        page = SvgPreviewPage(self.profile, self)
+        self.setPage(page)
+        page.setBackgroundColor(QColor(background))
+        page.rendered.connect(self.on_rendered)
+        page.renderProcessTerminated.connect(self.on_render_process_terminated)
+        self.loadFinished.connect(self.on_shell_loaded)
+        self.setContextMenuPolicy(Qt.NoContextMenu)
+        # Prepare the browser before the main window is shown, including when
+        # the user's first preview is a symbol or a footprint.
+        self.setHtml((RESOURCE_ROOT / 'vector_viewer.html').read_text(encoding='utf-8'))
+
+    def set_state(self, status, message):
+        self.load_state = (status, message)
+        self.state.emit(status, message)
+
+    def on_shell_loaded(self, ok):
+        self.shell_ready = ok
+        if not ok:
+            self.set_state('error', '预览画布加载失败，请重新加载')
+        elif self.document is not None:
+            self.load_document()
+
+    def on_rendered(self, token, status, message):
+        if token == self.revision:
+            self.set_state(status, message)
+
+    def on_render_process_terminated(self, *args):
+        self.shell_ready = False
+        self.set_state('error', '预览画布已停止，请重新加载')
 
     def show_document(self, document: VectorPreview) -> bool:
-        if document is self.document:
-            return self.item is not None
-        self.scene().clear()
-        self.item = None
-        if self.renderer:
-            self.renderer.deleteLater()
-        self.renderer = QSvgRenderer(QByteArray(document.svg), self)
-        self.document = document
-        if not self.renderer.isValid():
+        if document.error or not document.svg:
             return False
-        self.item = QGraphicsSvgItem()
-        self.item.setSharedRenderer(self.renderer)
-        self.item.setCacheMode(QGraphicsItem.NoCache)
-        self.scene().addItem(self.item)
-        bounds = self.item.boundingRect()
-        padding = max(bounds.width(), bounds.height()) * 0.06
-        self.scene().setSceneRect(bounds.adjusted(-padding, -padding, padding, padding))
-        self.auto_fit = True
-        self.fit_content()
+        if document is self.document and self.load_state[0] != 'error':
+            return True
+        restart_shell = self.load_state[0] == 'error' and not self.shell_ready
+        self.document = document
+        self.revision += 1
+        self.set_state('loading', '正在显示商城官方 SVG…')
+        if self.shell_ready:
+            self.load_document()
+        elif restart_shell:
+            self.reload()
         return True
 
+    def load_document(self):
+        encoded = base64.b64encode(self.document.svg).decode('ascii')
+        # Pass data after the small shell loads, avoiding setHtml's 2 MB limit.
+        args = ','.join(json.dumps(value) for value in (encoded, self.background, self.revision))
+        self.page().runJavaScript(f'window.showSvgDocument({args})')
+
     def fit_content(self):
-        if not self.item:
-            return
-        self.resetTransform()
-        self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
-        self.fit_scale = self.transform().m11()
-        self.auto_fit = True
-
-    def wheelEvent(self, event):
-        delta = event.angleDelta().y()
-        if not self.item or not delta:
-            event.ignore()
-            return
-        self.auto_fit = False
-        ratio = self.transform().m11() / self.fit_scale
-        target = min(20.0, max(0.2, ratio * 1.2 ** (delta / 120)))
-        self.scale(target / ratio, target / ratio)
-        event.accept()
-
-    def mousePressEvent(self, event):
-        if self.item and event.button() == Qt.LeftButton:
-            self.auto_fit = False
-        super().mousePressEvent(event)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.auto_fit:
-            self.fit_timer.start(0)
-
-    def fit_if_automatic(self):
-        if self.auto_fit:
-            self.fit_content()
+        if self.shell_ready and self.document is not None:
+            self.page().runJavaScript('window.fitSvg()')

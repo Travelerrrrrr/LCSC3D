@@ -32,13 +32,17 @@ for result in report['results'][:2]:
     assert not list(folder.glob('*.SchLib')) and not list(folder.glob('*.PcbLib'))
     assert 'altium' not in json.loads((folder / 'model-info.json').read_text(encoding='utf-8'))
     count = 57 if result['part'] == 'C2040' else 8
-    assert report['library_previews'][result['part']] == {
+    preview = report['library_previews'][result['part']]
+    assert preview['source_url'] in [f'https://{host}/api/products/{result["part"]}/svgs'
+                                    for host in ('lceda.cn', 'easyeda.com')]
+    assert {key: value for key, value in preview.items() if key != 'source_url'} == {
         'symbol_pins': [count], 'footprint_pads': count, 'errors': []}
 for source, name in [('软件界面.png', '软件界面'), ('符号_C2040.png', '符号预览'), ('封装_C2040.png', '封装预览')]:
     shutil.copyfile(tested / source, outputs / f'{name}-v{version}.png')
 archive = outputs / f'LCSC3D-Source-v{version}.zip'
 with zipfile.ZipFile(archive) as source_zip:
     assert not [name for name in source_zip.namelist() if '/native/' in name or name.endswith(('/altium.py', '.csv'))]
+    assert 'LCSC3D-Source/vector_viewer.html' in source_zip.namelist()
 hashes = []
 for name in [f'LCSC3D-Portable-v{version}.exe', archive.name]:
     with (outputs / name).open('rb') as stream:
@@ -48,9 +52,10 @@ for name in [f'LCSC3D-Portable-v{version}.exe', archive.name]:
 
 验证日期：2026-10-06。Windows x64、Python 3.12.10、PySide6 6.11.1。
 
-- 仅导出 STEP、WRL、OBJ。已移除符号/封装导出控件、后端、原生转换器、构建依赖和相关运行时。
-- 保留右侧 3D 模型、符号、封装预览及首次在线预览防闪动修复。
-- {args.test_count} 项本地测试通过，覆盖下载、路径命名、已存在文件、失败处理、旧设置迁移、预览切换、缓存、缩放平移和窗口稳定性。
+- 符号、封装直接加载国内商城使用的官方 SVG，使用内置浏览器呈现官方 CSS、文字和图层配色；实际来源接口记录在 verification.json 中。
+- 国内接口请求失败时自动使用 EasyEDA 官方 SVG 镜像，不依赖商城登录。
+- 仅导出 STEP、WRL、OBJ，保留首次在线预览防闪动修复。
+- {args.test_count} 项本地测试通过，覆盖下载、路径命名、失败处理、旧设置迁移、官方 SVG 原始数据保留、镜像回退、取消请求、多单元、缓存、浏览器配色、缩放平移、超 2 MB SVG 和窗口稳定性。
 - 实际 EXE 从独立中文目录联网运行，清除 Python/Qt 环境变量，PATH 仅保留系统目录；退出码为 0。
 - C2040 与 C20197 均成功保存三种 3D 格式；无效编号正确失败。输出仍按“器件名_编号”分目录，未生成 CSV、SchLib 或 PcbLib。
 - 官方 3D 预览 ready；主窗口句柄保持不变，没有 Hide/WinIdChange 事件。

@@ -24,7 +24,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from backend import Cancelled, NetworkApi, Options, Result, download_part, parse_part_numbers
 from library_preview import build_library_preview, VectorPreviewView, SYMBOL_BACKGROUND, FOOTPRINT_BACKGROUND
 
-VERSION = '1.3.0'
+VERSION = '1.4.0'
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / 'LCSC3D-settings.json'
@@ -131,9 +131,9 @@ class LibraryPreviewWorker(QThread):
     def run(self):
         try:
             api = NetworkApi(self.cancelled)
-            data = api.get_cad_data_of_component(self.part)
+            data = api.get_svg_data_of_component(self.part)
             api.check_cancelled()
-            preview = build_library_preview(data)
+            preview = build_library_preview(data, self.part)
             api.check_cancelled()
             self.loaded.emit(self.part, preview)
         except Cancelled:
@@ -405,14 +405,16 @@ class MainWindow(QMainWindow):
         self.preview_hint = hint
         self.symbol_view = VectorPreviewView(SYMBOL_BACKGROUND)
         self.footprint_view = VectorPreviewView(FOOTPRINT_BACKGROUND)
+        for view in (self.symbol_view, self.footprint_view):
+            view.state.connect(lambda status, message, canvas=view: self.on_vector_preview_state(canvas, status, message))
         self.preview_stack.addWidget(self.symbol_view)
         self.preview_stack.addWidget(self.footprint_view)
         self.preview_stack.setMinimumHeight(180)
         preview_layout.addWidget(self.preview_stack, 1)
-        self.preview_legend = label('<span style="color:#ff4444">■ 顶层焊盘</span>　'
-                                    '<span style="color:#4677ff">■ 底层焊盘</span>　'
-                                    '<span style="color:#a88900">■ 丝印</span>　'
-                                    '<span style="color:#788898">■ 多层</span>', 'muted')
+        self.preview_legend = label('<span style="color:#ff0000">■ 顶层焊盘</span>　'
+                                    '<span style="color:#0000ff">■ 底层焊盘</span>　'
+                                    '<span style="color:#cc9900">■ 丝印</span>　'
+                                    '<span style="color:#c0c0c0">■ 多层</span>', 'muted')
         self.preview_legend.setWordWrap(True)
         self.preview_legend.hide()
         preview_layout.addWidget(self.preview_legend)
@@ -688,7 +690,7 @@ class MainWindow(QMainWindow):
         self.preview_hint.setText('正在加载器件预览…')
         self.preview_stack.setCurrentWidget(self.preview_empty)
         self.fit_button.setEnabled(False)
-        self.on_preview_state('loading', '正在获取官方符号和封装数据…')
+        self.on_preview_state('loading', '正在获取商城官方符号和封装 SVG…')
         if self.library_worker is not None:
             if self.library_worker.part != part or self.library_worker.cancelled.is_set() or reload:
                 self.library_pending = part
@@ -744,11 +746,11 @@ class MainWindow(QMainWindow):
                 self.symbol_unit_part = part
             self.symbol_unit_box.setVisible(len(preview.symbols) > 1)
             document = preview.symbols[max(0, self.symbol_unit_box.currentIndex())]
-            view, label, unit = self.symbol_view, '符号', '引脚'
+            view, label = self.symbol_view, '符号'
         else:
             self.symbol_unit_box.hide()
             document = preview.footprint
-            view, label, unit = self.footprint_view, '封装', '焊盘'
+            view, label = self.footprint_view, '封装'
         self.preview_caption.setText(part + ' · ' + label + (' · ' + document.name if document.name else ''))
         if document.error or not view.show_document(document):
             self.fit_button.setEnabled(False)
@@ -757,11 +759,16 @@ class MainWindow(QMainWindow):
             self.on_preview_state('error', document.error or '预览图形无法显示')
             return
         self.preview_stack.setCurrentWidget(view)
-        self.fit_button.setEnabled(True)
-        message = f'已加载{label} · {document.count} 个{unit} · 滚轮缩放，拖动平移'
-        if document.unsupported:
-            message += '；未显示图形：' + ', '.join(document.unsupported)
-        self.on_preview_state('ready', message)
+        self.on_vector_preview_state(view, *view.load_state)
+
+    def on_vector_preview_state(self, view, status, message):
+        if self.preview_mode == '3d' or self.preview_stack.currentWidget() is not view:
+            return
+        self.fit_button.setEnabled(status == 'ready')
+        if status == 'ready':
+            label, unit = ('符号', '引脚') if self.preview_mode == 'symbol' else ('封装', '焊盘')
+            message = f'商城官方 SVG · {label} · {view.document.count} 个{unit} · 滚轮缩放，拖动平移'
+        self.on_preview_state(status, message)
 
     def show_symbol_unit(self, index):
         if self.preview_mode == 'symbol' and self.current_preview in self.library_cache:
@@ -803,7 +810,7 @@ class MainWindow(QMainWindow):
             '每个器件单独保存到“器件名_编号”目录，默认保留已有文件。<br>'
             '预览使用商城现有的官方查看器，联网加载模型；鼠标拖动旋转，滚轮缩放。<br><br>'
             '右侧上方可切换「3D 模型 / 符号 / 封装」，无需先下载。<br>'
-            '符号和封装支持滚轮缩放、拖动平移及「适应窗口」；多单元符号可选择单元。<br><br>'
+            '符号和封装直接加载商城使用的官方 SVG，支持滚轮缩放、拖动平移及「适应窗口」；多单元符号可选择单元。<br><br>'
             '模型来源：<a href="https://lceda.cn/">JLCEDA</a> / <a href="https://easyeda.com/">EasyEDA 官方库</a>。<br>'
             '基于 <a href="https://github.com/uPesy/easyeda2kicad.py">easyeda2kicad 1.0.1</a>，软件采用 AGPL-3.0-or-later。<br>'
             '对应源码、构建脚本与第三方说明随交付提供。')
@@ -868,7 +875,7 @@ def main():
         window.obj_box.setChecked(True)
         window.load_queue()
         window.preview_selected()
-        state = {'batch': False, 'preview': False, 'library': False, 'library_started': False,
+        state = {'batch': False, 'preview': False, 'initial_3d_done': False, 'library': False, 'library_started': False,
                  'capture_pending': False, 'step': 0, 'done': False}
         library_steps = [('symbol', 0), ('footprint', 0), ('symbol', 1), ('footprint', 1)]
 
@@ -880,6 +887,7 @@ def main():
             report = {
                 'version': VERSION, 'frozen': bool(getattr(sys, 'frozen', False)),
                 'ids': window.ids, 'preview': window.preview_state,
+                'preview_message': window.preview_status.text(),
                 'preview_window': {
                     'hwnd_preserved': preview_probe.initial_id == int(window.winId()),
                     'events': preview_probe.events,
@@ -889,6 +897,7 @@ def main():
                 'library_previews': {
                     part: {'symbol_pins': [unit.count for unit in preview.symbols],
                            'footprint_pads': preview.footprint.count,
+                           'source_url': preview.source_url,
                            'errors': [unit.error for unit in preview.symbols if unit.error]
                                      + ([preview.footprint.error] if preview.footprint.error else [])}
                     for part, preview in window.library_cache.items()
@@ -917,7 +926,7 @@ def main():
             start_library_checks()
 
         def start_library_checks():
-            if state['batch'] and state['preview'] and not state['library_started']:
+            if state['batch'] and state['initial_3d_done'] and not state['library_started']:
                 state['library_started'] = True
                 advance_library_check()
 
@@ -926,7 +935,7 @@ def main():
                 state['library'] = True
                 window.table.selectRow(0)
                 window.set_preview_mode('3d')
-                QTimer.singleShot(2500, finish_if_ready)
+                QTimer.singleShot(2500, lambda: finish_if_ready(True))
                 return
             mode, row = library_steps[state['step']]
             window.table.selectRow(row)
@@ -941,12 +950,15 @@ def main():
             QTimer.singleShot(100, advance_library_check)
 
         def preview_done(status):
-            if status != 'ready' or state['done']:
+            if state['done']:
                 return
             if window.preview_mode == '3d':
-                state['preview'] = True
-                start_library_checks()
-            elif state['library_started'] and state['step'] < len(library_steps) and not state['capture_pending']:
+                if status in ('ready', 'error'):
+                    state['initial_3d_done'] = True
+                    state['preview'] = status == 'ready'
+                    start_library_checks()
+                return
+            if status == 'ready' and state['library_started'] and state['step'] < len(library_steps) and not state['capture_pending']:
                 mode, row = library_steps[state['step']]
                 if window.preview_mode == mode and window.current_preview == window.ids[row]:
                     state['capture_pending'] = True

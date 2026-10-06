@@ -11,4 +11,4 @@ if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
 & $buildPython -m PyInstaller --noconfirm --clean LCSC3D.spec
 if ($LASTEXITCODE -ne 0) { throw 'EXE build failed' }
-Write-Host 'Done: dist\LCSC3D-Portable-v1.3.0.exe'
+Write-Host 'Done: see dist\LCSC3D-Portable-v*.exe'

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-lcsc3d-svg'; style-src 'unsafe-inline'; img-src data:;">
+<style>
+html, body { margin:0; width:100%; height:100%; overflow:hidden; }
+#canvas { width:100%; height:100%; overflow:hidden; cursor:grab; touch-action:none; user-select:none; }
+#canvas.dragging { cursor:grabbing; }
+#canvas > svg { display:block; width:100%; height:100%; }
+</style>
+</head>
+<body>
+<div id="canvas" aria-label="商城官方器件预览"></div>
+<script nonce="lcsc3d-svg">
+(() => {
+  const canvas = document.getElementById('canvas');
+  let svg = null, content = null, fitted = null, box = null, zoom = 1, autoFit = true, drag = null, token = 0;
+  function signal(status, message, revision = token) {
+    console.log('LCSC3D_SVG_STATE:' + JSON.stringify({token: revision, status, message}));
+  }
+  function fittedBox() {
+    const rect = canvas.getBoundingClientRect();
+    const aspect = Math.max(rect.width, 1) / Math.max(rect.height, 1);
+    let width = content.width * 1.12, height = content.height * 1.12;
+    if (width / height < aspect) width = height * aspect; else height = width / aspect;
+    return {x: content.x + (content.width - width) / 2, y: content.y + (content.height - height) / 2, width, height};
+  }
+  function draw() {
+    svg.setAttribute('viewBox', `${box.x} ${box.y} ${box.width} ${box.height}`);
+  }
+  window.fitSvg = () => {
+    if (!svg || !content) return;
+    fitted = fittedBox(); box = {...fitted}; zoom = 1; autoFit = true; draw();
+  };
+  function addPadNumbers() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const labels = document.createElementNS(ns, 'g');
+    labels.setAttribute('data-pad-numbers', 'true');
+    labels.setAttribute('pointer-events', 'none');
+    for (const pad of svg.querySelectorAll('g[c_partid="part_pad"][number]')) {
+      const origin = (pad.getAttribute('c_origin') || '').split(',').map(Number);
+      const number = pad.getAttribute('number');
+      if (origin.length !== 2 || !origin.every(Number.isFinite) || !number || pad.querySelector('text')) continue;
+      const point = new DOMPoint(...origin).matrixTransform(pad.getCTM()).matrixTransform(svg.getCTM().inverse());
+      const size = Math.min(Math.abs(Number(pad.getAttribute('c_width'))), Math.abs(Number(pad.getAttribute('c_height'))));
+      const fontSize = size > 0 ? Math.min(1, size * 0.9 / Math.max(1, number.length * 0.65)) : 1;
+      const text = document.createElementNS(ns, 'text');
+      text.textContent = number;
+      for (const [key, value] of Object.entries({x:point.x, y:point.y, 'text-anchor':'middle',
+        'dominant-baseline':'central', 'font-family':'Consolas,monospace', 'font-size':fontSize,
+        fill:'#ffffff', stroke:'#000000', 'stroke-width':0.02, 'paint-order':'stroke fill'})) {
+        text.setAttribute(key, value);
+      }
+      labels.appendChild(text);
+    }
+    if (labels.childElementCount) svg.appendChild(labels);
+  }
+  window.showSvgDocument = (encoded, background, revision) => {
+    token = revision; drag = null; svg = null; content = null; box = null;
+    canvas.classList.remove('dragging'); canvas.replaceChildren();
+    document.body.style.background = background;
+    try {
+      const raw = new TextDecoder().decode(Uint8Array.from(atob(encoded), c => c.charCodeAt(0)));
+      const parsed = new DOMParser().parseFromString(raw, 'image/svg+xml');
+      const root = parsed.documentElement;
+      if (parsed.querySelector('parsererror') || root.localName !== 'svg' || root.namespaceURI !== 'http://www.w3.org/2000/svg') {
+        throw new Error('文档不是有效的 SVG');
+      }
+      // Official SVG data is passive artwork; keep remote content passive here.
+      root.querySelectorAll('script, foreignObject, iframe, object, embed').forEach(node => node.remove());
+      [root, ...root.querySelectorAll('*')].forEach(node => {
+        for (const attr of [...node.attributes]) {
+          if (/^on/i.test(attr.name) || (/^(href|xlink:href)$/i.test(attr.name) && !attr.value.startsWith('#') && !attr.value.startsWith('data:image/'))) {
+            node.removeAttributeNode(attr);
+          }
+        }
+      });
+      svg = document.importNode(root, true);
+      svg.setAttribute('width', '100%'); svg.setAttribute('height', '100%');
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      canvas.appendChild(svg);
+      const bounds = svg.viewBox.baseVal;
+      const b = bounds.width > 0 && bounds.height > 0 ? bounds : svg.getBBox();
+      if (![b.x, b.y, b.width, b.height].every(Number.isFinite) || b.width <= 0 || b.height <= 0) {
+        throw new Error('图形范围无效');
+      }
+      content = {x:b.x, y:b.y, width:b.width, height:b.height};
+      // The storefront also overlays numbers from the SVG's pad attributes.
+      addPadNumbers();
+      window.fitSvg();
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (revision === token) signal('ready', '商城官方 SVG 已显示', revision);
+      }));
+    } catch (error) {
+      canvas.replaceChildren(); svg = null; content = null; box = null;
+      signal('error', '官方 SVG 无法显示：' + error.message, revision);
+    }
+  };
+  canvas.addEventListener('wheel', event => {
+    if (!svg || !box || event.deltaY === 0) return;
+    event.preventDefault(); autoFit = false;
+    const rect = canvas.getBoundingClientRect();
+    const px = (event.clientX - rect.left) / rect.width, py = (event.clientY - rect.top) / rect.height;
+    const next = Math.max(0.2, Math.min(20, zoom * Math.exp(-event.deltaY * 0.002)));
+    const factor = zoom / next;
+    box = {x:box.x + box.width * px * (1-factor), y:box.y + box.height * py * (1-factor), width:box.width * factor, height:box.height * factor};
+    zoom = next; draw();
+  }, {passive:false});
+  canvas.addEventListener('pointerdown', event => {
+    if (!box || event.button !== 0) return;
+    autoFit = false; drag = {pointer:event.pointerId, x:event.clientX, y:event.clientY, box:{...box}};
+    canvas.setPointerCapture(event.pointerId); canvas.classList.add('dragging'); event.preventDefault();
+  });
+  canvas.addEventListener('pointermove', event => {
+    if (!drag || drag.pointer !== event.pointerId || !box) return;
+    const rect = canvas.getBoundingClientRect();
+    box = {...drag.box, x:drag.box.x - (event.clientX-drag.x) * drag.box.width/rect.width, y:drag.box.y - (event.clientY-drag.y) * drag.box.height/rect.height};
+    draw();
+  });
+  function endDrag(event) {
+    if (drag && drag.pointer === event.pointerId) { drag = null; canvas.classList.remove('dragging'); }
+  }
+  canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('lostpointercapture', endDrag);
+  canvas.addEventListener('dblclick', window.fitSvg);
+  new ResizeObserver(() => {
+    if (!box || !content) return;
+    if (autoFit) { window.fitSvg(); return; }
+    const center = {x:box.x + box.width/2, y:box.y + box.height/2};
+    fitted = fittedBox();
+    box = {x:center.x - fitted.width/zoom/2, y:center.y - fitted.height/zoom/2, width:fitted.width/zoom, height:fitted.height/zoom};
+    draw();
+  }).observe(canvas);
+  window.getSvgPreviewState = () => ({token, loaded:!!svg, zoom, autoFit, box:box && {...box}});
+})();
+</script>
+</body>
+</html>

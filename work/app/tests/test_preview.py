@@ -110,13 +110,14 @@ console.log('LCSC3D_STATE:' + JSON.stringify({
         self.window.show()
         hwnd, geometry = int(self.window.winId()), self.window.geometry()
         events = WindowEvents(self.window)
-        api = SimpleNamespace(get_cad_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
         with patch('main.NetworkApi', return_value=api) as network:
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             self.assertIs(self.window.preview_stack.currentWidget(), self.window.symbol_view)
             self.assertEqual(self.window.symbol_view.document.count, 57)
             self.window.preview_mode_buttons['footprint'].click()
+            self.wait_for_library()
             self.assertIs(self.window.preview_stack.currentWidget(), self.window.footprint_view)
             self.assertEqual(self.window.footprint_view.document.count, 57)
             self.assertEqual(network.call_count, 1)
@@ -125,6 +126,7 @@ console.log('LCSC3D_STATE:' + JSON.stringify({
             self.assertEqual(self.window.current_preview, 'C20197')
             self.assertEqual(self.window.footprint_view.document.count, 8)
             self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
             self.assertEqual(self.window.symbol_view.document.count, 8)
             self.assertEqual(network.call_count, 2)
         self.window.preview_mode_buttons['3d'].click()
@@ -133,27 +135,74 @@ console.log('LCSC3D_STATE:' + JSON.stringify({
 
     def test_vector_zoom_pan_and_fit(self):
         self.window.show()
-        api = SimpleNamespace(get_cad_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
         with patch('main.NetworkApi', return_value=api):
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
         view = self.window.symbol_view
-        fitted = view.transform().m11()
-        center = view.viewport().rect().center()
-        wheel = QWheelEvent(QPointF(center), QPointF(view.viewport().mapToGlobal(center)), QPoint(), QPoint(0, 360),
+        fitted = self.svg_state(view)
+        target = view.focusProxy()
+        center = target.rect().center()
+        wheel = QWheelEvent(QPointF(center), QPointF(target.mapToGlobal(center)), QPoint(), QPoint(0, 360),
                             Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
-        self.app.sendEvent(view.viewport(), wheel)
-        self.assertGreater(view.transform().m11(), fitted)
-        origin = view.mapToScene(center)
-        QTest.mousePress(view.viewport(), Qt.LeftButton, pos=center)
-        QTest.mouseMove(view.viewport(), center + QPoint(30, 30))
-        QTest.mouseRelease(view.viewport(), Qt.LeftButton, pos=center + QPoint(30, 30))
-        self.assertNotEqual(view.mapToScene(center), origin)
+        self.app.sendEvent(target, wheel)
+        QTest.qWait(100)
+        scaled = self.svg_state(view)
+        self.assertGreater(scaled['zoom'], fitted['zoom'])
+        QTest.mousePress(target, Qt.LeftButton, pos=center)
+        QTest.mouseMove(target, center + QPoint(30, 30), delay=20)
+        QTest.mouseRelease(target, Qt.LeftButton, pos=center + QPoint(30, 30))
+        QTest.qWait(100)
+        self.assertNotEqual(self.svg_state(view)['box']['x'], scaled['box']['x'])
         self.window.fit_button.click()
-        self.assertAlmostEqual(view.transform().m11(), fitted, places=5)
+        QTest.qWait(100)
+        self.assertEqual(self.svg_state(view), fitted)
+
+    def evaluate(self, view, javascript):
+        values = []
+        view.page().runJavaScript('JSON.stringify(' + javascript + ')', values.append)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not values:
+            QTest.qWait(10)
+        self.assertTrue(values, 'Browser did not return its rendered state')
+        return json.loads(values[0])
+
+    def svg_state(self, view):
+        return self.evaluate(view, 'window.getSvgPreviewState()')
+
+    def test_official_pad_css_and_pin_text_survive_browser_rendering(self):
+        self.window.show()
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
+        with patch('main.NetworkApi', return_value=api):
+            self.window.preview_mode_buttons['footprint'].click()
+            self.wait_for_library()
+            fill = self.evaluate(self.window.footprint_view,
+                "getComputedStyle(document.querySelector('g[c_partid=part_pad][layerid=\"1\"] polygon:not([c_padid])')).fill")
+            self.assertEqual(fill, 'rgb(255, 0, 0)')
+            numbers = self.evaluate(self.window.footprint_view,
+                "Array.from(document.querySelectorAll('g[data-pad-numbers] text'), e => e.textContent)")
+            self.assertEqual(set(numbers), {str(number) for number in range(1, 58)})
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+            texts = self.evaluate(self.window.symbol_view,
+                "Array.from(document.querySelectorAll('#canvas svg text'), e => e.textContent)")
+            self.assertIn('GPIO29_ADC3', texts)
+            self.assertIn('RP2040', texts)
+
+    def test_large_official_svg_exceeds_sethtml_limit_and_still_renders(self):
+        self.window.show()
+        data = fixture('C20197')
+        data['result'][0]['svg'] = data['result'][0]['svg'].replace('</svg>', '<!--' + 'x' * 2100000 + '--></svg>')
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
+        with patch('main.NetworkApi', return_value=api):
+            self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
+        self.assertTrue(self.svg_state(self.window.symbol_view)['loaded'])
+        self.assertEqual(self.window.symbol_view.document.count, 8)
 
     def test_failed_request_can_be_reloaded(self):
-        api = SimpleNamespace(get_cad_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
+        self.window.show()
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
         with patch('main.NetworkApi', side_effect=[DownloadError('offline'), api]) as network:
             self.window.preview_mode_buttons['symbol'].click()
             deadline = time.monotonic() + 5
@@ -166,6 +215,7 @@ console.log('LCSC3D_STATE:' + JSON.stringify({
             self.assertEqual(network.call_count, 2)
 
     def test_superseded_preview_never_replaces_current_part(self):
+        self.window.show()
         started, release = threading.Event(), threading.Event()
 
         class Api:
@@ -176,7 +226,7 @@ console.log('LCSC3D_STATE:' + JSON.stringify({
                 if self.cancelled.is_set():
                     raise main.Cancelled()
 
-            def get_cad_data_of_component(self, part):
+            def get_svg_data_of_component(self, part):
                 if part == 'C2040':
                     started.set()
                     if not release.wait(3):
@@ -203,7 +253,7 @@ console.log('LCSC3D_STATE:' + JSON.stringify({
             def __init__(self, cancelled):
                 self.cancelled = cancelled
 
-            def get_cad_data_of_component(self, part):
+            def get_svg_data_of_component(self, part):
                 started.set()
                 self.cancelled.wait(3)
                 raise main.Cancelled()
@@ -222,19 +272,21 @@ console.log('LCSC3D_STATE:' + JSON.stringify({
 
     def test_multi_unit_selector_and_missing_footprint(self):
         data = fixture('C20197')
-        data['subparts'] = [{'dataStr': data['dataStr']}, {'dataStr': {'shape': ['C~0~0~5~#000000~1~0~none~id~0']}}]
-        data.pop('packageDetail')
-        api = SimpleNamespace(get_cad_data_of_component=lambda part: data, check_cancelled=lambda: None)
+        data['result'] = [data['result'][0], {'docType': 2, 'svg':
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><circle cx="10" cy="10" r="5"/></svg>'}]
+        api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
         self.window.show()
         with patch('main.NetworkApi', return_value=api):
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             self.assertTrue(self.window.symbol_unit_box.isVisible())
             self.window.symbol_unit_box.setCurrentIndex(1)
+            self.wait_for_library()
             self.assertEqual(self.window.symbol_view.document.count, 0)
             self.window.preview_mode_buttons['footprint'].click()
             self.assertEqual(self.window.preview_state, 'error')
             self.window.preview_mode_buttons['symbol'].click()
+            self.wait_for_library()
             self.assertEqual(self.window.preview_state, 'ready')
             self.assertEqual(self.window.symbol_unit_box.currentIndex(), 1)
 

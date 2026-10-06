@@ -24,6 +24,10 @@ from errors import Cancelled, DownloadError
 
 UPSTREAM_URL = 'https://github.com/uPesy/easyeda2kicad.py'
 SOURCE_LABEL = 'JLCEDA/EasyEDA 官方库'
+SVG_ENDPOINTS = (
+    'https://lceda.cn/api/products/{part}/svgs',
+    'https://easyeda.com/api/products/{part}/svgs',
+)
 
 
 def parse_part_numbers(text: str) -> tuple[list[str], list[str], int]:
@@ -122,6 +126,27 @@ class NetworkApi(EasyedaApi):
         if not isinstance(data, dict) or not data.get('success') or not data.get('result'):
             raise DownloadError('未找到器件，请核对立创 C 编号')
         return data
+
+    def get_svg_data_of_component(self, part: str) -> dict:
+        """Fetch storefront SVGs; use the official mirror if the first host fails."""
+        if not re.fullmatch(r'C[0-9]+', part):
+            raise DownloadError('请使用有效的立创 C 编号')
+        for template in SVG_ENDPOINTS:
+            self.check_cancelled()
+            url = template.format(part=part)
+            try:
+                raw = self.fetch(url)
+                try:
+                    data = json.loads(raw or b'{}')
+                except (ValueError, UnicodeDecodeError) as exc:
+                    raise DownloadError('官方 SVG 接口返回了无法识别的数据') from exc
+                if not isinstance(data, dict) or not data.get('success') or not isinstance(data.get('result'), list):
+                    raise DownloadError('未找到官方 SVG 预览，请核对立创 C 编号')
+                self.check_cancelled()
+                return {**data, 'source_url': url}
+            except DownloadError as exc:
+                last_error = exc
+        raise DownloadError(f'官方 SVG 预览获取失败：{last_error}') from last_error
 
     def get_raw_3d_model_obj(self, uuid: str) -> str | None:
         raw = self.fetch(ENDPOINT_3D_MODEL.format(uuid=uuid), optional=True)
