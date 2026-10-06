@@ -1,0 +1,77 @@
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag matching app/main.py VERSION
+        required: true
+        default: v1.6.1
+      build_run_id:
+        description: Successful Windows build run to use
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  prepare:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: '1'
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Verify version and successful build
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$' -or $env:BUILD_RUN_ID -notmatch '^\d+$') {
+            throw 'Invalid release inputs'
+          }
+          $versionMatch = Select-String -LiteralPath app/main.py -Pattern "^VERSION = '([^']+)'"
+          if ($env:RELEASE_TAG -ne ('v' + $versionMatch.Matches[0].Groups[1].Value)) {
+            throw 'Release tag does not match the application version'
+          }
+          if (-not (Test-Path -LiteralPath ("docs/releases/" + $env:RELEASE_TAG + '.md'))) {
+            throw 'Release notes are missing'
+          }
+          $build = (gh run view $env:BUILD_RUN_ID --repo $env:GITHUB_REPOSITORY --json conclusion,status,headSha,workflowName) | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $build.conclusion -ne 'success' -or $build.status -ne 'completed' -or $build.workflowName -ne 'Windows build') {
+            throw 'A successful completed Windows build is required'
+          }
+          git diff --quiet $build.headSha -- app upstream
+          if ($LASTEXITCODE -ne 0) { throw 'Application source differs from the tested build' }
+      - name: Download verified build and package complete source
+        shell: pwsh
+        run: |
+          gh run download $env:BUILD_RUN_ID --repo $env:GITHUB_REPOSITORY --name LCSC3D-Windows-x64 --dir outputs
+          if ($LASTEXITCODE -ne 0) { throw 'Build artifact download failed' }
+          python scripts/package_source.py
+          if ($LASTEXITCODE -ne 0) { throw 'Source packaging failed' }
+          $checksums = foreach ($name in @('LCSC3D.exe', 'LCSC3D.zip')) {
+            $hash = Get-FileHash -LiteralPath (Join-Path outputs $name) -Algorithm SHA256
+            $hash.Hash.ToLowerInvariant() + '  ' + $name
+          }
+          Set-Content -LiteralPath outputs/SHA256SUMS.txt -Value $checksums -Encoding ascii
+      - name: Prepare draft release and upload verified assets
+        shell: pwsh
+        run: |
+          $draft = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json isDraft --jq .isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if ($draft -ne 'true') { throw 'An existing public release will not be replaced' }
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --notes-file ("docs/releases/" + $env:RELEASE_TAG + '.md')
+          } else {
+            gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft --target $env:GITHUB_SHA --title ("LCSC3D " + $env:RELEASE_TAG.TrimStart('v')) --notes-file ("docs/releases/" + $env:RELEASE_TAG + '.md')
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release preparation failed' }
+          gh release upload $env:RELEASE_TAG outputs/LCSC3D.exe outputs/LCSC3D.zip outputs/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed' }
