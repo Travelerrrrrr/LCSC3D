@@ -1,5 +1,6 @@
 """Exercise the real Windows preview compositor without remote services."""
 import sys
+import json
 import tempfile
 import threading
 import time
@@ -77,6 +78,21 @@ console.log('LCSC3D_STATE:' + JSON.stringify({
         self.assertEqual(self.window.preview_state, 'ready', self.window.preview_status.text())
         self.assertEqual(self.window.current_preview, part)
         self.assertEqual(self.window.preview_status.text(), part + ' WebGL ready')
+
+    def test_legacy_library_only_settings_migrate_to_step(self):
+        settings_path = Path(self.directory.name) / 'settings.json'
+        settings_path.write_text(json.dumps({'step': False, 'wrl': False, 'obj': False,
+                                              'symbol': True, 'footprint': True}), encoding='utf-8')
+        self.window.settings_enabled = True
+        with patch.object(main, 'SETTINGS_PATH', settings_path):
+            self.window._restore_settings()
+            self.assertTrue(self.window.step_box.isChecked())
+            self.assertFalse(self.window.wrl_box.isChecked())
+            self.assertFalse(self.window.obj_box.isChecked())
+            self.window.save_settings()
+        self.window.settings_enabled = False
+        self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
+                         {'destination', 'step', 'wrl', 'obj'})
 
     def assert_stable(self, hwnd, events, geometry, maximized=False):
         self.assertEqual(int(self.window.winId()), hwnd, 'Preview recreated the native window')

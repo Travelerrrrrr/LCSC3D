@@ -1,4 +1,4 @@
-"""Exceptions shared by downloads and the offline Altium converter."""
+"""Exceptions shared by downloads and previews."""
 
 
 class Cancelled(Exception):

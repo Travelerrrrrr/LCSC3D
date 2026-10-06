@@ -16,6 +16,8 @@ with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compressleve
         for source in base.rglob('*'):
             if not source.is_file():
                 continue
+            if source.suffix.lower() in {'.csv', '.log'} or source.name == 'LCSC3D-settings.json':
+                continue
             relative = source.relative_to(base)
             if any(part in {'.git', '__pycache__', '.venv', 'build', 'dist', 'runtime'} for part in relative.parts):
                 continue

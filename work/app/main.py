@@ -22,10 +22,9 @@ from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngin
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from backend import Cancelled, NetworkApi, Options, Result, download_part, parse_part_numbers
-from altium import converter_path
 from library_preview import build_library_preview, VectorPreviewView, SYMBOL_BACKGROUND, FOOTPRINT_BACKGROUND
 
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / 'LCSC3D-settings.json'
@@ -222,7 +221,7 @@ class MainWindow(QMainWindow):
         title_col = QVBoxLayout()
         title_col.setSpacing(3)
         title_col.addWidget(label('立创 3D 模型下载器', 'title'))
-        title_col.addWidget(label('批量下载 3D 模型、导出 AD 元件库并在线预览', 'muted'))
+        title_col.addWidget(label('批量下载 3D 模型并在线预览', 'muted'))
         heading.addLayout(title_col)
         heading.addStretch()
         heading.addWidget(label('便携版  ' + VERSION, 'badge'))
@@ -292,26 +291,16 @@ class MainWindow(QMainWindow):
         for widget in (self.step_box, self.wrl_box, self.obj_box):
             option_row.addWidget(widget)
         option_row.addStretch()
-        output_layout.addLayout(option_row)
-        library_row = QHBoxLayout()
-        library_row.addWidget(label('Altium 库', 'muted'))
-        self.symbol_box = QCheckBox('AD 符号')
-        self.symbol_box.setToolTip('导出原生 .SchLib 符号库，可在 Altium Designer 中使用')
-        self.footprint_box = QCheckBox('AD 封装')
-        self.footprint_box.setToolTip('导出原生 .PcbLib 封装库；有可用 STEP 时自动嵌入，无需额外选择 STEP')
-        library_row.addWidget(self.symbol_box)
-        library_row.addWidget(self.footprint_box)
-        library_row.addStretch()
         self.overwrite_box = QCheckBox('覆盖已有文件')
         self.overwrite_box.setToolTip('默认跳过已存在的完整文件')
-        library_row.addWidget(self.overwrite_box)
+        option_row.addWidget(self.overwrite_box)
         self.stop_button = QPushButton('停止')
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_batch)
-        self.start_button = QPushButton('开始下载 / 导出')
+        self.start_button = QPushButton('开始下载')
         self.start_button.setObjectName('primary')
         self.start_button.clicked.connect(self.start_batch)
-        output_layout.addLayout(library_row)
+        output_layout.addLayout(option_row)
         left_layout.addWidget(output_card)
 
         list_card, list_layout = card()
@@ -471,8 +460,10 @@ class MainWindow(QMainWindow):
             self.step_box.setChecked(bool(settings.get('step', True)))
             self.wrl_box.setChecked(bool(settings.get('wrl')))
             self.obj_box.setChecked(bool(settings.get('obj')))
-            self.symbol_box.setChecked(bool(settings.get('symbol')))
-            self.footprint_box.setChecked(bool(settings.get('footprint')))
+            # Migrate a previous library-only selection to the default 3D format.
+            if (settings.get('symbol') or settings.get('footprint')) and not any(
+                    box.isChecked() for box in (self.step_box, self.wrl_box, self.obj_box)):
+                self.step_box.setChecked(True)
         except (OSError, ValueError):
             pass
 
@@ -480,7 +471,7 @@ class MainWindow(QMainWindow):
         if not self.settings_enabled:
             return
         try:
-            SETTINGS_PATH.write_text(json.dumps({'destination': self.path_input.text(), 'step': self.step_box.isChecked(), 'wrl': self.wrl_box.isChecked(), 'obj': self.obj_box.isChecked(), 'symbol': self.symbol_box.isChecked(), 'footprint': self.footprint_box.isChecked()}, ensure_ascii=False, indent=2), encoding='utf-8')
+            SETTINGS_PATH.write_text(json.dumps({'destination': self.path_input.text(), 'step': self.step_box.isChecked(), 'wrl': self.wrl_box.isChecked(), 'obj': self.obj_box.isChecked()}, ensure_ascii=False, indent=2), encoding='utf-8')
         except OSError:
             pass
 
@@ -528,23 +519,17 @@ class MainWindow(QMainWindow):
             self.run_status.setText('目录尚未创建，开始下载时会自动创建')
 
     def set_running(self, running):
-        for widget in (self.input, self.sample_button, self.clear_button, self.path_input, self.browse_button, self.queue_button, self.start_button, self.step_box, self.wrl_box, self.obj_box, self.symbol_box, self.footprint_box, self.overwrite_box):
+        for widget in (self.input, self.sample_button, self.clear_button, self.path_input, self.browse_button, self.queue_button, self.start_button, self.step_box, self.wrl_box, self.obj_box, self.overwrite_box):
             widget.setEnabled(not running)
         self.stop_button.setEnabled(running)
 
     def start_batch(self):
         if self.worker and self.worker.isRunning():
             return
-        formats = tuple(name for name, box in [('STEP', self.step_box), ('WRL', self.wrl_box), ('OBJ', self.obj_box), ('SCHLIB', self.symbol_box), ('PCBLIB', self.footprint_box)] if box.isChecked())
+        formats = tuple(name for name, box in [('STEP', self.step_box), ('WRL', self.wrl_box), ('OBJ', self.obj_box)] if box.isChecked())
         if not formats:
-            self.run_status.setText('请至少选择一种导出格式')
+            self.run_status.setText('请至少选择一种 3D 格式')
             return
-        if self.symbol_box.isChecked() or self.footprint_box.isChecked():
-            try:
-                converter_path()
-            except Exception as exc:
-                self.run_status.setText(str(exc))
-                return
         if not self.path_input.text().strip():
             self.run_status.setText('请选择保存目录')
             return
@@ -563,7 +548,7 @@ class MainWindow(QMainWindow):
         self.path_input.setText(str(destination))
         self.save_settings()
         self.set_running(True)
-        self.run_status.setText(f'开始下载 / 导出，共 {len(self.ids)} 个器件…')
+        self.run_status.setText(f'开始下载，共 {len(self.ids)} 个器件…')
         worker = BatchWorker(self.ids[:], Options(destination, formats, self.overwrite_box.isChecked()), self)
         self.worker = worker
         worker.phase.connect(self.update_phase)
@@ -812,18 +797,15 @@ class MainWindow(QMainWindow):
         message.setTextFormat(Qt.RichText)
         message.setText('<b>立创 3D 模型下载器 ' + VERSION + '</b><br><br>'
             '1. 输入 C 开头的立创编号，支持换行、空格和逗号。<br>'
-            '2. 选择保存目录和导出内容，点击「开始下载 / 导出」。<br>'
+            '2. 选择保存目录和 3D 格式，点击「开始下载」。<br>'
             '3. 选中列表中的器件，点击「在线预览」或双击。<br><br>'
             'STEP 是原始 CAD 模型；WRL 适用于 KiCad；OBJ 是官方模型文本。<br>'
-            'AD 符号导出 .SchLib，AD 封装导出 .PcbLib，并自动嵌入可用的 STEP。<br>'
-            '只导出 AD 库时可取消全部 3D 格式；没有 3D 模型也可导出符号和封装。<br>'
             '每个器件单独保存到“器件名_编号”目录，默认保留已有文件。<br>'
             '预览使用商城现有的官方查看器，联网加载模型；鼠标拖动旋转，滚轮缩放。<br><br>'
             '右侧上方可切换「3D 模型 / 符号 / 封装」，无需先下载。<br>'
             '符号和封装支持滚轮缩放、拖动平移及「适应窗口」；多单元符号可选择单元。<br><br>'
             '模型来源：<a href="https://lceda.cn/">JLCEDA</a> / <a href="https://easyeda.com/">EasyEDA 官方库</a>。<br>'
             '基于 <a href="https://github.com/uPesy/easyeda2kicad.py">easyeda2kicad 1.0.1</a>，软件采用 AGPL-3.0-or-later。<br>'
-            'AD 转换使用 <a href="https://github.com/EasyKiconverter/EasyKiConverter">EasyKiConverter</a>（GPL-3.0）。<br>'
             '对应源码、构建脚本与第三方说明随交付提供。')
         message.exec()
 
@@ -884,8 +866,6 @@ def main():
         window.input.setPlainText('C2040\nc20197, C2040\nC999999999999')
         window.wrl_box.setChecked(True)
         window.obj_box.setChecked(True)
-        window.symbol_box.setChecked(True)
-        window.footprint_box.setChecked(True)
         window.load_queue()
         window.preview_selected()
         state = {'batch': False, 'preview': False, 'library': False, 'library_started': False,
@@ -928,8 +908,7 @@ def main():
                       and not preview_probe.events
                       and not report['csv_files']
                       and sum(result.status in ('成功', '已存在') for result in window.results.values()) == 2
-                      and all(any(Path(file).suffix == '.SchLib' for file in result.files)
-                              and any(Path(file).suffix == '.PcbLib' for file in result.files)
+                      and all({Path(file).suffix for file in result.files} == {'.step', '.wrl', '.obj'}
                               for result in window.results.values() if result.part in ('C2040', 'C20197')))
             app.exit(0 if passed else 1)
 
