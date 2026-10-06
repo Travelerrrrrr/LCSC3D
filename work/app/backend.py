@@ -1,7 +1,6 @@
 """Batch 3D downloads and Altium library exports from EasyEDA component data."""
 from __future__ import annotations
 
-import csv
 import gzip
 import json
 import os
@@ -167,12 +166,12 @@ def download_part(part: str, options: Options, api: NetworkApi,
     notify = progress or (lambda phase, title: None)
     notify('查询器件', '')
     data = api.get_cad_data_of_component(part)
-    title = str(data.get('title', ''))
+    title = str(data.get('title') or '').strip()
     product_id = (data.get('szlcsc') or data.get('lcsc') or {}).get('id')
     store_url = f'https://item.szlcsc.com/{product_id}.html' if product_id else f'https://so.szlcsc.com/global.html?k={part}'
     result = Result(part, '失败', title=title, store_url=store_url)
     api.check_cancelled()
-    folder = options.destination / part
+    folder = options.destination / f'{safe_filename(title or "未命名器件")}_{part}'
     result.folder = str(folder)
     model_formats = tuple(fmt for fmt in options.formats if fmt not in ALTIUM_FORMATS)
     library_formats = tuple(fmt for fmt in options.formats if fmt in ALTIUM_FORMATS)
@@ -310,13 +309,3 @@ def download_part(part: str, options: Options, api: NetworkApi,
             result.status = '无模型'
         result.message = '；'.join(errors) or '没有可保存的文件'
     return result
-
-
-def write_report(destination: Path, results: list[Result]) -> Path:
-    path = destination / ('下载结果_' + time.strftime('%Y%m%d_%H%M%S') + '.csv')
-    with path.open('w', encoding='utf-8-sig', newline='') as stream:
-        writer = csv.writer(stream)
-        writer.writerow(['器件编号', '型号', '状态', '说明', '保存目录', '文件', '商城链接'])
-        for result in results:
-            writer.writerow([result.part, result.title, result.status, result.message, result.folder, ' | '.join(result.files), result.store_url])
-    return path

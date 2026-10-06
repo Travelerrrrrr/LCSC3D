@@ -20,10 +20,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from backend import Cancelled, NetworkApi, Options, Result, download_part, parse_part_numbers, write_report
+from backend import Cancelled, NetworkApi, Options, Result, download_part, parse_part_numbers
 from altium import converter_path
 
-VERSION = '1.1.1'
+VERSION = '1.1.2'
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / 'LCSC3D-settings.json'
@@ -77,7 +77,7 @@ def card():
 class BatchWorker(QThread):
     phase = Signal(int, str, str)
     result = Signal(int, object)
-    completed = Signal(object, str, str)
+    completed = Signal(object)
 
     def __init__(self, ids: list[str], options: Options, parent=None):
         super().__init__(parent)
@@ -99,12 +99,7 @@ class BatchWorker(QThread):
                     result = Result(part, '失败', message=str(exc))
             results.append(result)
             self.result.emit(row, result)
-        report, error = '', ''
-        try:
-            report = str(write_report(self.options.destination, results))
-        except OSError as exc:
-            error = f'下载报告保存失败：{exc}'
-        self.completed.emit(results, report, error)
+        self.completed.emit(results)
 
 
 class PreviewPage(QWebEnginePage):
@@ -168,7 +163,6 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.ids = []
         self.results = {}
-        self.report_path = ''
         self.current_preview = ''
         self.preview_state = 'empty'
         self.web = None
@@ -333,10 +327,6 @@ class MainWindow(QMainWindow):
         self.part_folder_button.setEnabled(False)
         list_actions.addWidget(self.part_folder_button)
         list_actions.addStretch()
-        self.report_button = QPushButton('查看下载报告')
-        self.report_button.setEnabled(False)
-        self.report_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.report_path)))
-        list_actions.addWidget(self.report_button)
         list_layout.addLayout(list_actions)
         left_layout.addWidget(list_card, 1)
         splitter.addWidget(left_column)
@@ -502,8 +492,6 @@ class MainWindow(QMainWindow):
             return
         self.path_input.setText(str(destination))
         self.save_settings()
-        self.report_path = ''
-        self.report_button.setEnabled(False)
         self.set_running(True)
         self.run_status.setText(f'开始下载 / 导出，共 {len(self.ids)} 个器件…')
         worker = BatchWorker(self.ids[:], Options(destination, formats, self.overwrite_box.isChecked()), self)
@@ -532,14 +520,12 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(row + 1)
         self.selection_changed()
 
-    def complete_batch(self, results, report, error):
-        self.report_path = report
-        self.report_button.setEnabled(bool(report))
+    def complete_batch(self, results):
         ok = sum(r.status in ('成功', '已存在') for r in results)
         partial = sum(r.status == '部分完成' for r in results)
         failed = sum(r.status in ('失败', '无模型') for r in results)
         cancelled = sum(r.status == '已取消' for r in results)
-        self.run_status.setText(f'完成 · 成功 {ok} · 部分完成 {partial} · 失败或无模型 {failed} · 取消 {cancelled}' + ('；' + error if error else ''))
+        self.run_status.setText(f'完成 · 成功 {ok} · 部分完成 {partial} · 失败或无模型 {failed} · 取消 {cancelled}')
         self.summary.setText(f'{ok} / {len(results)} 成功')
         self.batch_done.emit()
 
@@ -633,7 +619,7 @@ class MainWindow(QMainWindow):
             'STEP 是原始 CAD 模型；WRL 适用于 KiCad；OBJ 是官方模型文本。<br>'
             'AD 符号导出 .SchLib，AD 封装导出 .PcbLib，并自动嵌入可用的 STEP。<br>'
             '只导出 AD 库时可取消全部 3D 格式；没有 3D 模型也可导出符号和封装。<br>'
-            '每个器件单独保存到 C 编号目录，默认保留已有文件。<br>'
+            '每个器件单独保存到“器件名_编号”目录，默认保留已有文件。<br>'
             '预览使用商城现有的官方查看器，联网加载模型；鼠标拖动旋转，滚轮缩放。<br><br>'
             '模型来源：<a href="https://lceda.cn/">JLCEDA</a> / <a href="https://easyeda.com/">EasyEDA 官方库</a>。<br>'
             '基于 <a href="https://github.com/uPesy/easyeda2kicad.py">easyeda2kicad 1.0.1</a>，软件采用 AGPL-3.0-or-later。<br>'
@@ -706,7 +692,7 @@ def main():
                     'events': preview_probe.events,
                 },
                 'results': [vars(result) for result in window.results.values()],
-                'report': window.report_path,
+                'csv_files': [str(path) for path in Path(window.path_input.text()).rglob('*.csv')],
             }
             (destination / 'verification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
             if window.worker and window.worker.isRunning():
@@ -715,6 +701,7 @@ def main():
             passed = (window.preview_state == 'ready'
                       and report['preview_window']['hwnd_preserved']
                       and not preview_probe.events
+                      and not report['csv_files']
                       and sum(result.status in ('成功', '已存在') for result in window.results.values()) == 2
                       and all(any(Path(file).suffix == '.SchLib' for file in result.files)
                               and any(Path(file).suffix == '.PcbLib' for file in result.files)

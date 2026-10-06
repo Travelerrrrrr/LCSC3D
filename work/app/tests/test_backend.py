@@ -15,15 +15,16 @@ STEP = b'ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;'
 
 
 class FakeApi:
-    def __init__(self, step=STEP, obj=None):
+    def __init__(self, step=STEP, obj=None, title='Test component'):
         self.step, self.obj = step, obj
+        self.title = title
         self.step_calls = 0
 
     def check_cancelled(self):
         pass
 
     def get_cad_data_of_component(self, part):
-        return {'title': 'Test component', 'lcsc': {'id': 2392}}
+        return {'title': self.title, 'lcsc': {'id': 2392}}
 
     def get_step_3d_model(self, uuid):
         self.step_calls += 1
@@ -54,8 +55,8 @@ class Tests(unittest.TestCase):
         with self.importer():
             result = download_part('C2040', Options(self.folder, ('STEP', 'WRL')), FakeApi())
         self.assertEqual(result.status, '部分完成')
-        self.assertEqual((self.folder / 'C2040/C2040_QFN_56.step').read_bytes(), STEP)
-        self.assertFalse((self.folder / 'C2040/C2040_QFN_56.wrl').exists())
+        self.assertEqual((self.folder / 'Test component_C2040/C2040_QFN_56.step').read_bytes(), STEP)
+        self.assertFalse((self.folder / 'Test component_C2040/C2040_QFN_56.wrl').exists())
 
     def test_rerun_preserves_existing_file_without_download(self):
         with self.importer():
@@ -69,10 +70,10 @@ class Tests(unittest.TestCase):
         with self.importer():
             result = download_part('C2040', Options(self.folder), FakeApi(step=DownloadError('timeout')))
         self.assertEqual(result.status, '失败')
-        self.assertFalse((self.folder / 'C2040/C2040_QFN_56.step').exists())
+        self.assertFalse((self.folder / 'Test component_C2040/C2040_QFN_56.step').exists())
 
     def test_zero_byte_output_is_replaced(self):
-        path = self.folder / 'C2040/C2040_QFN_56.step'
+        path = self.folder / 'Test component_C2040/C2040_QFN_56.step'
         path.parent.mkdir()
         path.touch()
         with self.importer():
@@ -82,9 +83,44 @@ class Tests(unittest.TestCase):
 
     def test_different_part_numbers_do_not_share_a_file(self):
         with self.importer():
-            download_part('C2040', Options(self.folder), FakeApi())
-            download_part('C20197', Options(self.folder), FakeApi())
+            first = download_part('C2040', Options(self.folder), FakeApi())
+            second = download_part('C20197', Options(self.folder), FakeApi())
+        self.assertEqual(Path(first.folder).name, 'Test component_C2040')
+        self.assertEqual(Path(second.folder).name, 'Test component_C20197')
         self.assertEqual(len(list(self.folder.rglob('*.step'))), 2)
+
+    def test_folder_uses_component_title_instead_of_model_name(self):
+        with self.importer():
+            result = download_part('C2040', Options(self.folder), FakeApi(title='RP2040'))
+        self.assertEqual(Path(result.folder), self.folder / 'RP2040_C2040')
+        self.assertEqual(result.status, '成功')
+        self.assertTrue(all(Path(file).parent == Path(result.folder) for file in result.files))
+
+    def test_folder_handles_unicode_and_windows_characters(self):
+        with self.importer():
+            result = download_part('C2040', Options(self.folder), FakeApi(title=' 温度/传感器:V1 '))
+        self.assertEqual(Path(result.folder), self.folder / '温度_传感器_V1_C2040')
+        self.assertEqual(result.status, '成功')
+        metadata = json.loads((Path(result.folder) / 'model-info.json').read_text(encoding='utf-8'))
+        self.assertEqual(metadata['title'], '温度/传感器:V1')
+
+    def test_missing_title_still_exports_to_number_suffixed_folder(self):
+        for data in ({}, {'title': None}, {'title': ''}, {'title': ' \t '}):
+            with self.subTest(data=data):
+                api = FakeApi()
+                with self.importer(), patch.object(api, 'get_cad_data_of_component', return_value=data):
+                    result = download_part('C2040', Options(self.folder, overwrite=True), api)
+                self.assertEqual(Path(result.folder), self.folder / '未命名器件_C2040')
+                self.assertEqual(result.status, '成功')
+
+    def test_long_title_keeps_number_suffix_and_stays_inside_destination(self):
+        with self.importer():
+            result = download_part('C2040', Options(self.folder), FakeApi(title='../' + 'x' * 200))
+        folder = Path(result.folder)
+        self.assertEqual(folder.resolve().parent, self.folder.resolve())
+        self.assertTrue(folder.name.endswith('_C2040'))
+        self.assertLessEqual(len(folder.name), 122)
+        self.assertEqual(result.status, '成功')
 
     def test_cancelled_request_does_not_connect(self):
         event = threading.Event()
@@ -106,7 +142,7 @@ class Tests(unittest.TestCase):
             result = download_part('C2040', Options(self.folder, ('SCHLIB', 'PCBLIB')), FakeApi())
         self.assertEqual(result.status, '成功')
         self.assertEqual({Path(file).suffix for file in result.files}, {'.SchLib', '.PcbLib'})
-        metadata = json.loads((self.folder / 'C2040/model-info.json').read_text(encoding='utf-8'))
+        metadata = json.loads((self.folder / 'Test component_C2040/model-info.json').read_text(encoding='utf-8'))
         self.assertEqual(metadata['model_uuid'], '')
         self.assertIn('altium', metadata)
 
@@ -116,14 +152,14 @@ class Tests(unittest.TestCase):
                 patch('backend.export_libraries', return_value=exported):
             result = download_part('C2040', Options(self.folder, ('STEP', 'SCHLIB')), FakeApi())
         self.assertEqual(result.status, '部分完成')
-        self.assertTrue((self.folder / 'C2040/C2040.SchLib').exists())
+        self.assertTrue((self.folder / 'Test component_C2040/C2040.SchLib').exists())
 
     def test_converter_failure_preserves_saved_step(self):
         with self.importer(), patch('backend.export_libraries', side_effect=DownloadError('converter failed')):
             result = download_part('C2040', Options(self.folder, ('STEP', 'SCHLIB')), FakeApi())
         self.assertEqual(result.status, '部分完成')
-        self.assertEqual((self.folder / 'C2040/C2040_QFN_56.step').read_bytes(), STEP)
-        self.assertFalse((self.folder / 'C2040/C2040.SchLib').exists())
+        self.assertEqual((self.folder / 'Test component_C2040/C2040_QFN_56.step').read_bytes(), STEP)
+        self.assertFalse((self.folder / 'Test component_C2040/C2040.SchLib').exists())
 
     def test_symbol_success_survives_footprint_conversion_failure(self):
         exported = LibraryExport({'SCHLIB': OLE_MAGIC + b'x' * 512}, {'PCBLIB': 'bad footprint'})
@@ -134,7 +170,7 @@ class Tests(unittest.TestCase):
         self.assertIn('bad footprint', result.message)
 
     def test_existing_libraries_are_not_converted_or_overwritten(self):
-        folder = self.folder / 'C2040'
+        folder = self.folder / 'Test component_C2040'
         folder.mkdir()
         for extension in ('SchLib', 'PcbLib'):
             (folder / f'C2040.{extension}').write_bytes(b'original')
@@ -165,7 +201,7 @@ class Tests(unittest.TestCase):
         with self.importer(), patch('backend.export_libraries', side_effect=Cancelled):
             with self.assertRaises(Cancelled):
                 download_part('C2040', Options(self.folder, ('SCHLIB',)), FakeApi())
-        self.assertFalse((self.folder / 'C2040/C2040.SchLib').exists())
+        self.assertFalse((self.folder / 'Test component_C2040/C2040.SchLib').exists())
 
 
 if __name__ == '__main__':

@@ -24,4 +24,4 @@ $env:LCSC3D_REQUIRE_NATIVE_TESTS = '1'
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
 & $buildPython -m PyInstaller --noconfirm --clean LCSC3D.spec
 if ($LASTEXITCODE -ne 0) { throw 'EXE build failed' }
-Write-Host 'Done: dist\LCSC3D-Portable-v1.1.1.exe'
+Write-Host 'Done: dist\LCSC3D-Portable-v1.1.2.exe'

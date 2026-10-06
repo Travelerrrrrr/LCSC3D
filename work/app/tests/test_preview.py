@@ -4,10 +4,12 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main
+from backend import DownloadError
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -104,6 +106,39 @@ console.log('LCSC3D_STATE:' + JSON.stringify({
         self.wait_for_preview('C20197')
         self.assert_stable(hwnd, events, geometry, maximized=True)
 
+    def test_batch_completion_preserves_results_without_csv_output(self):
+        step = b'ISO-10303-21;\nEND-ISO-10303-21;'
+        model = SimpleNamespace(name='QFN/56', uuid='test-uuid')
+
+        class Api:
+            check_cancelled = staticmethod(lambda: None)
+
+            def get_cad_data_of_component(self, part):
+                if part == 'C20197':
+                    raise DownloadError('Not found')
+                return {'title': 'RP2040'}
+
+            def get_step_3d_model(self, uuid):
+                return step
+
+        destination = Path(self.directory.name) / 'download'
+        self.window.path_input.setText(str(destination))
+        finished = []
+        self.window.batch_done.connect(lambda: finished.append(True))
+        with patch('main.NetworkApi', return_value=Api()), \
+                patch('backend.Easyeda3dModelImporter', return_value=SimpleNamespace(output=model)):
+            self.window.start_batch()
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and (not finished or self.window.worker.isRunning()):
+                QTest.qWait(20)
+            self.assertTrue(finished, 'Batch did not complete')
+            self.assertTrue(self.window.worker.wait(5000))
+        self.assertEqual(self.window.results['C2040'].status, '成功')
+        self.assertEqual(self.window.results['C20197'].status, '失败')
+        self.assertEqual(self.window.summary.text(), '1 / 2 成功')
+        self.assertEqual({path.name for path in destination.iterdir()}, {'RP2040_C2040'})
+        self.assertEqual((destination / 'RP2040_C2040/C2040_QFN_56.step').read_bytes(), step)
+        self.assertFalse(list(destination.rglob('*.csv')))
 
 if __name__ == '__main__':
     unittest.main()
