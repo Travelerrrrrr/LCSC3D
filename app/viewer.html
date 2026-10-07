@@ -2,109 +2,157 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="engine-env" content="3rd-china">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>商城在线 3D 预览</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+  <title>LCSC3D 模型预览</title>
   <style>
     html,body { width:100%;height:100%;margin:0;overflow:hidden;background:#f3f6fa;font-family:"Microsoft YaHei UI",sans-serif; }
-    #smt-ui-container { width:100%;height:100%; }
-    #notice { position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#64748b;font-size:14px;padding:32px;box-sizing:border-box;background:#f3f6fa;z-index:100; }
+    canvas { display:block;width:100%;height:100%;touch-action:none;cursor:grab; }
+    canvas:active { cursor:grabbing; }
+    #notice { position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#64748b;font-size:14px;padding:32px;pointer-events:none; }
     #notice.hidden { display:none; }
-    .spinner { width:30px;height:30px;border:3px solid #dce5ec;border-top-color:#13897d;border-radius:50%;margin:0 auto 18px;animation:spin 1s linear infinite; }
-    @keyframes spin { to { transform:rotate(360deg); } }
+    #hint { position:absolute;bottom:12px;left:14px;color:#788898;font-size:12px;pointer-events:none; }
   </style>
 </head>
 <body>
-  <div id="smt-ui-container"></div>
-  <div id="notice"><div><div class="spinner"></div><span id="notice-text">正在连接商城在线查看器…</span></div></div>
+  <canvas id="canvas" aria-label="3D 模型，可拖动旋转、滚轮缩放、右键平移"></canvas>
+  <div id="notice">正在获取 3D 模型…</div>
+  <div id="hint">拖动旋转 · 滚轮缩放 · 右键平移 · 双击适应窗口</div>
   <script>
-    // Official store viewer: it fetches and renders the part by C number.
-    // This application does not implement a model parser or a 3D renderer.
-    let desired = {part: __PART_JSON__, token: __REVISION_JSON__};
-    let active = null;
-    let loaded = '';
-    let engineReady = false;
-    let timeout;
+    // Project-owned WebGL renderer. Geometry is supplied by the Python OBJ
+    // reader; this page never loads storefront scripts or remote resources.
+    const canvas = document.getElementById('canvas');
+    const gl = canvas.getContext('webgl', {antialias:true, alpha:false});
+    let desired = {part:__PART_JSON__, token:__REVISION_JSON__};
+    let program, buffer, count = 0, vertexCount = 0, faceCount = 0;
+    const initialView = {yaw:-0.45, pitch:-0.85};
+    let yaw = initialView.yaw, pitch = initialView.pitch, zoom = 1, pan = [0,0], dragging = null;
     function state(status, message, token = desired.token) {
       console.log('LCSC3D_STATE:' + JSON.stringify({token, status, message}));
-      const box = document.getElementById('notice');
-      if (status === 'ready') box.classList.add('hidden');
-      else {
-        document.getElementById('notice-text').textContent = message;
-        box.classList.remove('hidden');
-        const spinner = box.querySelector('.spinner');
-        spinner.style.display = status === 'error' ? 'none' : 'block';
-      }
+      const notice = document.getElementById('notice');
+      notice.textContent = message;
+      notice.classList.toggle('hidden', status === 'ready');
     }
-    function loadScript(url) {
-      return new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = url;
-        script.onload = resolve;
-        script.onerror = () => reject(new Error('无法连接商城查看器，请检查网络后点击重新加载'));
-        document.head.appendChild(script);
+    function shader(type, source) {
+      const value = gl.createShader(type);
+      gl.shaderSource(value, source); gl.compileShader(value);
+      if (!gl.getShaderParameter(value, gl.COMPILE_STATUS)) throw Error('3D 着色器初始化失败');
+      return value;
+    }
+    function initialise() {
+      if (!gl) throw Error('显卡未能初始化 WebGL，请检查显卡驱动');
+      program = gl.createProgram();
+      gl.attachShader(program, shader(gl.VERTEX_SHADER, `
+        attribute vec3 position, normal, color;
+        uniform mat3 rotation;
+        uniform vec2 scale, pan;
+        varying vec3 surfaceNormal, surfaceColor;
+        void main() {
+          vec3 p = rotation * position;
+          gl_Position = vec4(p.xy * scale + pan, -p.z * 0.45, 1.0);
+          surfaceNormal = rotation * normal;
+          surfaceColor = color;
+        }`));
+      gl.attachShader(program, shader(gl.FRAGMENT_SHADER, `
+        precision mediump float;
+        varying vec3 surfaceNormal, surfaceColor;
+        void main() {
+          vec3 n = normalize(surfaceNormal);
+          if (!gl_FrontFacing) n = -n;
+          vec3 light = normalize(vec3(-0.4, 0.6, 1.0));
+          float diffuse = max(dot(n, light), 0.0);
+          float highlight = pow(max(dot(reflect(-light,n), vec3(0,0,1)),0.0),32.0);
+          gl_FragColor = vec4(surfaceColor * (0.38 + 0.62 * diffuse) + 0.12 * highlight, 1.0);
+        }`));
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw Error('3D 渲染器初始化失败');
+      gl.useProgram(program);
+      buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      ['position','normal','color'].forEach((name,index) => {
+        const location = gl.getAttribLocation(program,name);
+        gl.enableVertexAttribArray(location);
+        gl.vertexAttribPointer(location,3,gl.FLOAT,false,36,index*12);
       });
+      gl.enable(gl.DEPTH_TEST);
     }
-    window.addEventListener('unhandledrejection', event => {
-      if (active) {
-        const failed = active;
-        active = null;
-        clearTimeout(timeout);
-        if (failed.part === desired.part) state('error', '在线模型加载失败，请重新加载或打开商城页面');
-        else pump();
-      }
-    });
-    function pump() {
-      if (!engineReady || active || loaded === desired.part) return;
-      active = {...desired};
-      state('loading', '正在加载 ' + desired.part + ' 的在线 3D 模型…');
-      window._MSG_BUS_.publish('/smt-ui/lc/load/registLoadCode', active.part);
-      clearTimeout(timeout);
-      timeout = setTimeout(() => {
-        const failed = active;
-        active = null;
-        if (failed && failed.part === desired.part) state('error', '在线预览等待超时，可点击重新加载或打开商城页面');
-        else pump();
-      }, 40000);
+    function rotation() {
+      // Rotate Z-up models around Z; a negative tilt projects +Z upwards.
+      const c = Math.cos(yaw), s = Math.sin(yaw), a = Math.cos(pitch), b = Math.sin(pitch);
+      return new Float32Array([c,s*a,s*b, -s,c*a,c*b, 0,-b,a]);
     }
+    function draw() {
+      if (!program || gl.isContextLost()) return;
+      const width = Math.max(1, Math.round(canvas.clientWidth * devicePixelRatio));
+      const height = Math.max(1, Math.round(canvas.clientHeight * devicePixelRatio));
+      if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+      gl.viewport(0,0,width,height);
+      gl.clearColor(0.953,0.965,0.980,1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.uniformMatrix3fv(gl.getUniformLocation(program,'rotation'),false,rotation());
+      gl.uniform2f(gl.getUniformLocation(program,'scale'),0.78*zoom*Math.min(1,height/width),0.78*zoom*Math.min(1,width/height));
+      gl.uniform2f(gl.getUniformLocation(program,'pan'),pan[0],pan[1]);
+      gl.drawArrays(gl.TRIANGLES,0,count);
+    }
+    window.fitModel = () => { yaw=initialView.yaw; pitch=initialView.pitch; zoom=1; pan=[0,0]; draw(); };
     window.loadLcscPart = (part, token) => {
-      desired = {part, token};
-      if (loaded === part && !active) state('ready', part + ' · 已加载商城 3D 模型');
-      else {
-        state('loading', '正在加载 ' + part + ' 的在线 3D 模型…');
-        pump();
-      }
+      desired = {part,token}; count=0; draw();
+      state('loading', '正在获取 ' + part + ' 的 3D 模型…');
       return true;
     };
-    async function boot() {
+    window.showMesh = (mesh,part,token) => {
+      if (token !== desired.token || part !== desired.part) return false;
       try {
-        await loadScript('https://modules.lceda.cn/smt-gl-engine/3.12.42.6f0bbae9/smt-gl-engine.js');
-        await loadScript('https://modules.lceda.cn/smt-ui/1.0.263.4b13cbc9/model-3d-view.js');
-        if (!window._MSG_BUS_) throw new Error('商城查看器未初始化，请重新加载');
-        window._MSG_BUS_.subscribe('/engine/model/finishLoading', models => {
-          // The official viewer sets each model's UniqueID to its C number.
-          // Ignore notifications for older selections or unrelated engine jobs.
-          if (!active || !Object.prototype.hasOwnProperty.call(models || {}, active.part)) return;
-          const completed = active;
-          const model = models[completed.part];
-          active = null;
-          clearTimeout(timeout);
-          loaded = model && !model.missingModel ? completed.part : '';
-          if (completed.part === desired.part) {
-            state(loaded ? 'ready' : 'error', loaded ? loaded + ' · 已加载商城 3D 模型' : '官方库没有可预览的 3D 模型');
-          } else {
-            pump();
+        if (!program || gl.isContextLost()) throw Error('3D 渲染器不可用，请重新加载');
+        const vertices = mesh.vertices;
+        const lo = [Infinity,Infinity,Infinity], hi = [-Infinity,-Infinity,-Infinity];
+        vertices.forEach(v => v.forEach((x,i) => { lo[i]=Math.min(lo[i],x); hi[i]=Math.max(hi[i],x); }));
+        const center = lo.map((x,i) => (x+hi[i])/2);
+        const radius = Math.hypot(...lo.map((x,i) => hi[i]-x))/2 || 1;
+        const geometry = [];
+        mesh.faces.forEach(face => {
+          const color = mesh.materials[face[0]];
+          for (let i=2; i<face.length-1; i++) {
+            const triangle = [vertices[face[1]],vertices[face[i]],vertices[face[i+1]]];
+            const u = triangle[1].map((x,j) => x-triangle[0][j]);
+            const v = triangle[2].map((x,j) => x-triangle[0][j]);
+            const n = [u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
+            const length = Math.hypot(...n);
+            if (length < 1e-15) continue;
+            triangle.forEach(point => geometry.push(...point.map((x,j) => (x-center[j])/radius),...n.map(x=>x/length),...color));
           }
         });
-        setTimeout(() => {
-          engineReady = true;
-          pump();
-        }, 500);
-      } catch(error) {
-        state('error', error.message || '在线预览加载失败');
-      }
-    }
-    boot();
+        if (!geometry.length) throw Error('模型没有可显示的面');
+        gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(geometry),gl.STATIC_DRAW);
+        count = geometry.length/9; vertexCount = vertices.length; faceCount = mesh.faces.length;
+        window.fitModel();
+        state('ready',part + ' · ' + faceCount + ' 个面 · 拖动旋转，滚轮缩放');
+        return true;
+      } catch (error) { state('error',error.message); return false; }
+    };
+    window.modelError = (part,token,message) => {
+      if (token === desired.token && part === desired.part) state('error',message);
+    };
+    window.getModelPreviewState = () => ({part:desired.part,token:desired.token,loaded:count>0,
+      vertices:vertexCount,faces:faceCount,triangles:count/3,yaw,pitch,zoom,pan:[...pan]});
+    canvas.addEventListener('pointerdown',event => {
+      dragging = {x:event.clientX,y:event.clientY,pan:event.button===2 || event.shiftKey};
+      canvas.setPointerCapture(event.pointerId);
+    });
+    canvas.addEventListener('pointermove',event => {
+      if (!dragging) return;
+      const dx=event.clientX-dragging.x, dy=event.clientY-dragging.y;
+      if (dragging.pan) { pan[0]+=2*dx/canvas.clientWidth; pan[1]-=2*dy/canvas.clientHeight; }
+      else { yaw+=dx*0.01; pitch=Math.max(-Math.PI,Math.min(Math.PI,pitch+dy*0.01)); }
+      dragging.x=event.clientX; dragging.y=event.clientY; draw();
+    });
+    ['pointerup','pointercancel','lostpointercapture'].forEach(name => canvas.addEventListener(name,()=>dragging=null));
+    canvas.addEventListener('contextmenu',event=>event.preventDefault());
+    canvas.addEventListener('wheel',event=>{event.preventDefault();zoom=Math.max(0.1,Math.min(20,zoom*Math.exp(-event.deltaY*0.001)));draw();},{passive:false});
+    canvas.addEventListener('dblclick',window.fitModel);
+    canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();state('error','3D 渲染器已停止，请重新加载');});
+    window.addEventListener('resize',draw);
+    try { initialise(); window.loadLcscPart(desired.part,desired.token); }
+    catch (error) { state('error',error.message); }
   </script>
 </body>
 </html>

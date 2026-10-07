@@ -21,6 +21,6 @@ image.save(assets/'app.png')
 image.save(assets/'app.ico',sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
 licenses=root/'licenses'
 licenses.mkdir(exist_ok=True)
-shutil.copyfile(workspace/'upstream'/'LICENSE',licenses/'AGPL-3.0.txt')
+shutil.copyfile(workspace/'LICENSE',licenses/'AGPL-3.0.txt')
 shutil.copyfile(licenses/'AGPL-3.0.txt',root/'LICENSE')
 print('Assets generated')

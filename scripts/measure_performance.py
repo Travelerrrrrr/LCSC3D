@@ -85,7 +85,7 @@ def downloads(runs):
     for index in range(runs):
         with tempfile.TemporaryDirectory(prefix='LCSC3D-benchmark-') as folder:
             started = time.perf_counter()
-            options = backend.Options(Path(folder), ('STEP', 'WRL', 'OBJ'))
+            options = backend.Options(Path(folder), ('STEP', 'OBJ'))
             if hasattr(backend, 'download_batch'):
                 results = backend.download_batch(['C2040', 'C20197'], options, api=backend.NetworkApi(use_cache=False))
             else:
@@ -93,7 +93,7 @@ def downloads(runs):
                 results = [backend.download_part(part, options, api) for part in ('C2040', 'C20197')]
             elapsed = time.perf_counter() - started
             samples.append({'seconds': round(elapsed, 3), 'files': len(list(Path(folder).rglob('*.step'))) +
-                            len(list(Path(folder).rglob('*.wrl'))) + len(list(Path(folder).rglob('*.obj'))),
+                            len(list(Path(folder).rglob('*.obj'))),
                             'statuses': [result.status for result in results]})
             print('DOWNLOAD_SAMPLE', index, round(elapsed, 3), file=sys.stderr, flush=True)
     successful = [sample['seconds'] for sample in samples if sample['statuses'] == ['成功', '成功']]

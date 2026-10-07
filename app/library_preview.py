@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree as ET
+from resources import svg_entries
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
@@ -65,16 +66,10 @@ def _read_svg(entry: dict, kind: str) -> VectorPreview:
 
 
 def build_library_preview(data: dict, part: str = '') -> LibraryPreview:
-    entries = data.get('result') or []
-    if not isinstance(entries, list):
-        entries = []
-    entries = [entry for entry in entries if isinstance(entry, dict)]
-    # Match the storefront's preference for multi-unit symbols (docType 6).
-    symbol_type = 6 if any(entry.get('docType') == 6 for entry in entries) else 2
-    symbols = tuple(_read_svg(entry, 'symbol') for entry in entries if entry.get('docType') == symbol_type)
+    symbols = tuple(_read_svg(entry, 'symbol') for entry in svg_entries(data, 'SYMBOL'))
     if not symbols:
         symbols = (VectorPreview(error='官方库中没有符号 SVG 数据'),)
-    footprints = [entry for entry in entries if entry.get('docType') == 4]
+    footprints = svg_entries(data, 'FOOTPRINT')
     footprint = _read_svg(footprints[0], 'footprint') if footprints else VectorPreview(error='官方库中没有封装 SVG 数据')
     title = next((document.name for document in symbols if document.name), part)
     return LibraryPreview(title, symbols, footprint, str(data.get('source_url') or ''))

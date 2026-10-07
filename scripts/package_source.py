@@ -6,13 +6,12 @@ from pathlib import Path
 
 workspace = Path(__file__).resolve().parent.parent
 app = workspace / 'app'
-upstream = workspace / 'upstream'
 outputs = workspace / 'outputs'
 outputs.mkdir(exist_ok=True)
 target = outputs / 'LCSC3D.zip'
 with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
     for base, prefix in [(workspace / folder, Path('LCSC3D') / folder)
-                         for folder in ('app', 'upstream', 'scripts', 'docs', '.github')]:
+                         for folder in ('app', 'scripts', 'docs', '.github')]:
         for source in base.rglob('*'):
             if not source.is_file():
                 continue
@@ -22,7 +21,7 @@ with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compressleve
             if any(part in {'.git', '__pycache__', '.venv', 'build', 'dist', 'runtime'} for part in relative.parts):
                 continue
             archive.write(source, str(prefix / relative))
-    for filename in ('README.md', 'LICENSE', 'CONTRIBUTING.md', '.gitignore', '.gitattributes', '.gitmodules'):
+    for filename in ('README.md', 'LICENSE', 'CONTRIBUTING.md', '.gitignore', '.gitattributes'):
         archive.write(workspace / filename, str(Path('LCSC3D') / filename))
 shutil.copyfile(app / 'README.md', outputs / '使用说明.md')
 for name in ['LCSC3D.exe', target.name]:

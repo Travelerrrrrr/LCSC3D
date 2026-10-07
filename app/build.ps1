@@ -5,7 +5,7 @@ if (-not (Test-Path -LiteralPath '.venv\Scripts\python.exe')) {
     if ($LASTEXITCODE -ne 0) { throw 'Python virtual environment creation failed' }
 }
 $buildPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
-& $buildPython -X utf8 -m pip install -r requirements.txt
+& $buildPython -X utf8 -m pip install -r requirements-test.txt
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
 & $buildPython -m unittest discover -s tests -v
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }

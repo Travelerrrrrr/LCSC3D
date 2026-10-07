@@ -41,6 +41,11 @@ try:
     assert titles['C163691'] not in ('', '—', '查询中…', '查询失败', '未提供型号')
     assert report['preview_window'] == {'hwnd_preserved': True, 'events': []}
     assert [result['status'] for result in report['results']] == ['成功', '成功', '失败']
+    for result in report['results'][:2]:
+        assert len(result['files']) == 2
+        assert {Path(file).suffix for file in result['files']} == {'.step', '.obj'}
+        assert set(Path(result['folder']).iterdir()) == {Path(file) for file in result['files']}
+    assert not report['non_model_exports']
     assert report['download_selection'] == {
         'checked_ids': ['C2040', 'C20197', 'C999999999999'],
         'unchecked_ids': ['C163691'], 'selected_only': True}

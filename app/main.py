@@ -24,9 +24,12 @@ from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngin
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from backend import Cancelled, NetworkApi, Options, Result, download_batch, get_component_metadata, parse_part_numbers
+from model3d import model_reference, read_obj
 from library_preview import build_library_preview, VectorPreviewView, SYMBOL_BACKGROUND, FOOTPRINT_BACKGROUND
+from update_ui import UpdateDialog
+from updater import acknowledge_update, cleanup_updates, launch_update
 
-VERSION = '1.6.1'
+VERSION = '2.0.0'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
@@ -95,7 +98,7 @@ class BatchWorker(QThread):
         results = download_batch(self.ids, self.options, self.cancelled,
                                  lambda index, status, title: self.phase.emit(self.rows[index], status, title),
                                  lambda index, result: self.result.emit(self.rows[index], result),
-                                 api=NetworkApi(self.cancelled, use_cache=not self.options.overwrite))
+                                 api=NetworkApi(self.cancelled, use_cache=False))
         self.completed.emit(results)
 
 
@@ -173,6 +176,34 @@ class LibraryPreviewWorker(QThread):
             self.failed.emit(self.part, str(exc))
 
 
+class ModelPreviewWorker(QThread):
+    loaded = Signal(str, int, object)
+    failed = Signal(str, int, str)
+
+    def __init__(self, part, revision, refresh=False, parent=None):
+        super().__init__(parent)
+        self.part, self.revision, self.refresh = part, revision, refresh
+        self.cancelled = threading.Event()
+
+    def run(self):
+        try:
+            api = NetworkApi(self.cancelled, use_cache=not self.refresh)
+            model = model_reference(api.get_cad_data_of_component(self.part))
+            if model is None:
+                raise ValueError('官方库没有关联的 3D 模型')
+            raw = api.get_raw_3d_model_obj(model.uuid)
+            if not raw:
+                raise ValueError('官方库没有可预览的 OBJ 模型')
+            mesh = read_obj(raw, api.check_cancelled)
+            api.check_cancelled()
+            self.loaded.emit(self.part, self.revision, mesh.preview_payload())
+        except Cancelled:
+            pass
+        except Exception as exc:
+            if not self.cancelled.is_set():
+                self.failed.emit(self.part, self.revision, str(exc))
+
+
 class ColumnHandle(QSplitterHandle):
     def __init__(self, orientation, parent):
         super().__init__(orientation, parent)
@@ -234,7 +265,12 @@ class MainWindow(QMainWindow):
         self.web_revision = 0
         self.viewer_started = False
         self.viewer_page_loads = 0
-        self.web_state = ('empty', '预览需要联网，模型由商城官方查看器加载')
+        self.viewer_ready = False
+        self.web_model = None
+        self.web_error = ''
+        self.model_worker = None
+        self.model_pending = None
+        self.web_state = ('empty', '选择器件后获取官方模型并在本地显示')
         self.library_cache = OrderedDict()
         self.library_worker = None
         self.library_pending = None
@@ -243,6 +279,7 @@ class MainWindow(QMainWindow):
         self.web_profile = QWebEngineProfile(self)
         self.web_profile.setHttpCacheMaximumSize(8 * 1024 * 1024)
         self.close_when_finished = False
+        self.update_dialog = None
         self._setup_ui()
         self._setup_preview()
         self.setMinimumHeight(max(self.minimumHeight(), self.minimumSizeHint().height()))
@@ -263,10 +300,13 @@ class MainWindow(QMainWindow):
         title_col = QVBoxLayout()
         title_col.setSpacing(3)
         title_col.addWidget(label('LCSC3D', 'title'))
-        title_col.addWidget(label('批量下载 3D 模型并在线预览', 'muted'))
+        title_col.addWidget(label('批量下载 3D 模型，导出 AD 符号与封装库', 'muted'))
         heading.addLayout(title_col)
         heading.addStretch()
         heading.addWidget(label('版本 ' + VERSION, 'badge'))
+        self.update_button = QPushButton('检查更新')
+        self.update_button.clicked.connect(self.check_updates)
+        heading.addWidget(self.update_button)
         about = QPushButton('使用说明')
         about.clicked.connect(self.show_help)
         heading.addWidget(about)
@@ -312,7 +352,7 @@ class MainWindow(QMainWindow):
         path_row = QHBoxLayout()
         path_row.addWidget(label('2  保存到', 'section'))
         self.path_input = QLineEdit()
-        self.path_input.setPlaceholderText('选择模型与元件库保存目录')
+        self.path_input.setPlaceholderText('选择资源保存目录')
         path_row.addWidget(self.path_input, 1)
         self.browse_button = QPushButton('选择文件夹…')
         self.browse_button.clicked.connect(self.choose_folder)
@@ -326,16 +366,19 @@ class MainWindow(QMainWindow):
         self.step_box = QCheckBox('STEP')
         self.step_box.setChecked(True)
         self.step_box.setToolTip('原始 STEP 文件，适用于 SolidWorks、FreeCAD 等 CAD 软件')
-        self.wrl_box = QCheckBox('WRL')
-        self.wrl_box.setToolTip('使用 easyeda2kicad 转换，适用于 KiCad 3D 查看')
         self.obj_box = QCheckBox('OBJ')
         self.obj_box.setToolTip('下载官方 OBJ 模型文本')
-        for widget in (self.step_box, self.wrl_box, self.obj_box):
+        for widget in (self.step_box, self.obj_box):
+            option_row.addWidget(widget)
+        option_row.addSpacing(12)
+        option_row.addWidget(label('AD 元件库', 'muted'))
+        self.schlib_box = QCheckBox('SchLib')
+        self.schlib_box.setToolTip('导出原生 AD 符号库，保留引脚编号及封装引用')
+        self.pcblib_box = QCheckBox('PcbLib')
+        self.pcblib_box.setToolTip('导出原生 AD 封装库，保留焊盘、钻孔与槽孔；不内嵌 3D 模型')
+        for widget in (self.schlib_box, self.pcblib_box):
             option_row.addWidget(widget)
         option_row.addStretch()
-        self.overwrite_box = QCheckBox('覆盖已有文件')
-        self.overwrite_box.setToolTip('默认跳过已存在的完整文件')
-        option_row.addWidget(self.overwrite_box)
         self.stop_button = QPushButton('停止')
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_batch)
@@ -467,7 +510,7 @@ class MainWindow(QMainWindow):
         self.preview_legend.setWordWrap(True)
         self.preview_legend.hide()
         preview_layout.addWidget(self.preview_legend)
-        self.preview_status = label('预览需要联网，模型由商城官方查看器加载', 'muted')
+        self.preview_status = label('选择器件后获取官方模型并在本地显示', 'muted')
         self.preview_status.setWordWrap(True)
         preview_layout.addWidget(self.preview_status)
         preview_actions = QHBoxLayout()
@@ -491,9 +534,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(splitter, 1)
 
         footer = QHBoxLayout()
-        footer.addWidget(label('基于 easyeda2kicad 1.0.1 · AGPL-3.0', 'muted'))
+        footer.addWidget(label('官方资源下载 · AGPL-3.0', 'muted'))
         footer.addStretch()
-        source = label('模型来源：<a style="color:#638397" href="https://lceda.cn/">JLCEDA</a> / <a style="color:#638397" href="https://easyeda.com/">EasyEDA 官方库</a>', 'muted')
+        source = label('数据来源：<a style="color:#638397" href="https://lceda.cn/">JLCEDA</a> / <a style="color:#638397" href="https://easyeda.com/">EasyEDA 官方库</a>', 'muted')
         source.setOpenExternalLinks(True)
         footer.addWidget(source)
         layout.addLayout(footer)
@@ -509,11 +552,11 @@ class MainWindow(QMainWindow):
                 return
             self.path_input.setText(settings.get('destination') or default)
             self.step_box.setChecked(bool(settings.get('step', True)))
-            self.wrl_box.setChecked(bool(settings.get('wrl')))
             self.obj_box.setChecked(bool(settings.get('obj')))
-            # Migrate a previous library-only selection to the default 3D format.
-            if (settings.get('symbol') or settings.get('footprint')) and not any(
-                    box.isChecked() for box in (self.step_box, self.wrl_box, self.obj_box)):
+            self.schlib_box.setChecked(bool(settings.get('schlib')))
+            self.pcblib_box.setChecked(bool(settings.get('pcblib')))
+            # Migrate removed library/WRL-only selections to the default model format.
+            if not any(box.isChecked() for box in (self.step_box, self.obj_box, self.schlib_box, self.pcblib_box)):
                 self.step_box.setChecked(True)
         except (OSError, ValueError):
             pass
@@ -522,7 +565,9 @@ class MainWindow(QMainWindow):
         if not self.settings_enabled:
             return
         try:
-            SETTINGS_PATH.write_text(json.dumps({'destination': self.path_input.text(), 'step': self.step_box.isChecked(), 'wrl': self.wrl_box.isChecked(), 'obj': self.obj_box.isChecked()}, ensure_ascii=False, indent=2), encoding='utf-8')
+            SETTINGS_PATH.write_text(json.dumps({'destination': self.path_input.text(), 'step': self.step_box.isChecked(),
+                'obj': self.obj_box.isChecked(), 'schlib': self.schlib_box.isChecked(),
+                'pcblib': self.pcblib_box.isChecked()}, ensure_ascii=False, indent=2), encoding='utf-8')
         except OSError:
             pass
 
@@ -669,7 +714,7 @@ class MainWindow(QMainWindow):
 
     def set_running(self, running):
         self.batch_running = running
-        for widget in (self.input, self.sample_button, self.clear_button, self.path_input, self.browse_button, self.queue_button, self.start_button, self.step_box, self.wrl_box, self.obj_box, self.overwrite_box):
+        for widget in (self.input, self.sample_button, self.clear_button, self.path_input, self.browse_button, self.queue_button, self.start_button, self.step_box, self.obj_box, self.schlib_box, self.pcblib_box):
             widget.setEnabled(not running)
         self.stop_button.setEnabled(running)
         self.table.blockSignals(True)
@@ -684,9 +729,10 @@ class MainWindow(QMainWindow):
     def start_batch(self):
         if self.batch_running or self.worker and self.worker.isRunning():
             return
-        formats = tuple(name for name, box in [('STEP', self.step_box), ('WRL', self.wrl_box), ('OBJ', self.obj_box)] if box.isChecked())
+        formats = tuple(name for name, box in [('STEP', self.step_box), ('OBJ', self.obj_box),
+                        ('SCHLIB', self.schlib_box), ('PCBLIB', self.pcblib_box)] if box.isChecked())
         if not formats:
-            self.run_status.setText('请至少选择一种 3D 格式')
+            self.run_status.setText('请至少选择一种模型或 AD 元件库格式')
             return
         if not self.path_input.text().strip():
             self.run_status.setText('请选择保存目录')
@@ -723,7 +769,7 @@ class MainWindow(QMainWindow):
         self.save_settings()
         self.set_running(True)
         self.run_status.setText(f'开始下载，共勾选 {len(rows)} 个器件…')
-        worker = BatchWorker(self.batch_ids[:], Options(destination, formats, self.overwrite_box.isChecked()), self, rows=rows)
+        worker = BatchWorker(self.batch_ids[:], Options(destination, formats), self, rows=rows)
         self.worker = worker
         worker.phase.connect(self.update_phase)
         worker.result.connect(self.update_result)
@@ -746,7 +792,7 @@ class MainWindow(QMainWindow):
         item = self.table.item(row, RESULT_COLUMN)
         item.setText(result.status)
         item.setToolTip(result.message)
-        colors = {'成功': '#168878', '已存在': '#168878', '部分完成': '#b47718', '失败': '#c15353', '无模型': '#b47718', '已取消': '#8695a3'}
+        colors = {'成功': '#168878', '部分完成': '#b47718', '失败': '#c15353', '无模型': '#b47718', '已取消': '#8695a3'}
         item.setForeground(QColor(colors.get(result.status, '#23354a')))
         info = self.component_info.get(result.part, {})
         title = result.title or info.get('title', '')
@@ -760,7 +806,7 @@ class MainWindow(QMainWindow):
         self.selection_changed()
 
     def complete_batch(self, results):
-        ok = sum(r.status in ('成功', '已存在') for r in results)
+        ok = sum(r.status == '成功' for r in results)
         partial = sum(r.status == '部分完成' for r in results)
         failed = sum(r.status in ('失败', '无模型') for r in results)
         cancelled = sum(r.status == '已取消' for r in results)
@@ -804,7 +850,7 @@ class MainWindow(QMainWindow):
         self.web.loadFinished.connect(self.on_viewer_page_loaded)
         page.renderProcessTerminated.connect(self.on_viewer_terminated)
         self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.WebGLEnabled, True)
-        self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
         self.web.setContextMenuPolicy(Qt.NoContextMenu)
         self.preview_stack.addWidget(self.web)
         # setPage alone leaves Qt's rendering widget uninitialized. Load a local
@@ -815,7 +861,7 @@ class MainWindow(QMainWindow):
     def set_preview_mode(self, mode):
         self.preview_mode = mode
         self.preview_mode_buttons[mode].setChecked(True)
-        self.fit_button.setVisible(mode != '3d')
+        self.fit_button.setVisible(True)
         self.preview_legend.setVisible(mode == 'footprint')
         self.symbol_unit_box.setVisible(mode == 'symbol' and self.symbol_unit_box.count() > 1)
         part = self.selected_part() or self.current_preview
@@ -837,31 +883,85 @@ class MainWindow(QMainWindow):
             return
         self.library_pending = None
         self.symbol_unit_box.hide()
-        self.preview_caption.setText(part + ' · 商城官方在线查看器')
+        self.preview_caption.setText(part + ' · 3D 模型')
         self.preview_stack.setCurrentWidget(self.web)
         if part == self.current_3d and self.viewer_started and not reload:
+            self.fit_button.setEnabled(self.web_state[0] == 'ready')
             self.on_preview_state(*self.web_state)
             return
         self.current_3d = part
         self.web_revision += 1
-        self.web_state = ('loading', '正在连接商城在线查看器…')
-        self.on_preview_state('loading', '正在连接商城在线查看器…')
+        self.web_model = None
+        self.web_error = ''
+        self.web_state = ('loading', '正在获取官方 3D 模型…')
+        self.on_preview_state(*self.web_state)
+        self.fit_button.setEnabled(False)
         if not self.viewer_started or reload:
             self.viewer_started = True
+            self.viewer_ready = False
             self.viewer_page_loads += 1
             html = (ROOT / 'viewer.html').read_text(encoding='utf-8').replace('__PART_JSON__', json.dumps(part))
             html = html.replace('__REVISION_JSON__', str(self.web_revision))
-            self.web.setHtml(html, QUrl('https://item.szlcsc.com/'))
+            self.web.setHtml(html)
         else:
             self.update_viewer_part()
+        self.request_model_preview(part, self.web_revision, reload)
 
     def update_viewer_part(self):
+        if not self.viewer_ready:
+            return
         args = json.dumps(self.current_3d) + ',' + str(self.web_revision)
         self.web.page().runJavaScript(f'window.loadLcscPart && window.loadLcscPart({args})')
+        if self.web_model is not None:
+            payload = json.dumps(self.web_model, separators=(',', ':'))
+            self.web.page().runJavaScript(f'window.showMesh && window.showMesh({payload},{args})')
+        elif self.web_error:
+            message = json.dumps(self.web_error)
+            self.web.page().runJavaScript(f'window.modelError && window.modelError({args},{message})')
 
     def on_viewer_page_loaded(self, ok):
+        self.viewer_ready = ok
         if ok and self.viewer_started:
             self.update_viewer_part()
+        elif self.viewer_started:
+            self.on_web_preview_state(self.web_revision, 'error', '3D 画布加载失败，请重新加载')
+
+    def request_model_preview(self, part, revision, refresh=False):
+        self.model_pending = (part, revision, refresh)
+        if self.model_worker is not None:
+            self.model_worker.cancelled.set()
+            return
+        pending, self.model_pending = self.model_pending, None
+        worker = ModelPreviewWorker(*pending, parent=self)
+        self.model_worker = worker
+        worker.loaded.connect(self.model_preview_loaded)
+        worker.failed.connect(self.model_preview_failed)
+        worker.finished.connect(self.model_preview_finished)
+        worker.start()
+
+    def model_preview_loaded(self, part, revision, payload):
+        if self.close_when_finished or revision != self.web_revision or part != self.current_3d:
+            return
+        self.web_model = payload
+        self.update_viewer_part()
+
+    def model_preview_failed(self, part, revision, message):
+        if self.close_when_finished or revision != self.web_revision or part != self.current_3d:
+            return
+        self.web_error = message
+        self.on_web_preview_state(revision, 'error', message)
+        args = ','.join(json.dumps(value) for value in (part, revision, message))
+        self.web.page().runJavaScript(f'window.modelError && window.modelError({args})')
+
+    def model_preview_finished(self):
+        worker, self.model_worker = self.model_worker, None
+        if worker:
+            worker.deleteLater()
+        pending, self.model_pending = self.model_pending, None
+        if self.close_when_finished:
+            self.close()
+        elif pending and pending[1] == self.web_revision:
+            self.request_model_preview(*pending)
 
     def on_viewer_terminated(self, *args):
         self.viewer_started = False
@@ -872,6 +972,7 @@ class MainWindow(QMainWindow):
             return
         self.web_state = (status, message)
         if self.preview_mode == '3d':
+            self.fit_button.setEnabled(status == 'ready')
             self.on_preview_state(status, message)
 
     def show_library_preview(self, part, reload=False):
@@ -971,7 +1072,9 @@ class MainWindow(QMainWindow):
             self.display_library_preview(self.current_preview, self.library_cache[self.current_preview])
 
     def fit_preview(self):
-        if self.preview_mode == 'symbol':
+        if self.preview_mode == '3d':
+            self.web.page().runJavaScript('window.fitModel && window.fitModel()')
+        elif self.preview_mode == 'symbol':
             self.symbol_view.fit_content()
         elif self.preview_mode == 'footprint':
             self.footprint_view.fit_content()
@@ -1003,22 +1106,44 @@ class MainWindow(QMainWindow):
             '2. 载入列表后自动查询型号，勾选需要下载的器件；可使用「全选」「反选」。<br>'
             '3. 选择保存目录和 3D 格式，点击「开始下载」，仅下载勾选的器件。<br>'
             '4. 载入列表后自动预览首个器件，单击其他器件即可切换预览。<br><br>'
-            'STEP 是原始 CAD 模型；WRL 适用于 KiCad；OBJ 是官方模型文本。<br>'
-            '每个器件单独保存到“器件名_编号”目录，默认保留已有文件。<br>'
-            '预览使用商城现有的官方查看器，联网加载模型；鼠标拖动旋转，滚轮缩放。<br><br>'
+            '可保存官方 STEP、OBJ，并导出原生 AD SchLib 符号库、PcbLib 封装库；不导出 JSON 或 SVG。<br>'
+            'AD 库保留引脚、焊盘和孔数据，遇到不支持的图元会提示失败；PcbLib 不内嵌 3D 模型。<br>'
+            '每个器件单独保存到“器件名_编号”目录，AD 库文件按元件型号命名；下载时覆盖已有同名文件。<br>'
+            '3D 预览由 LCSC3D 在本地渲染官方模型；拖动旋转，滚轮缩放，右键拖动平移。<br><br>'
             '右侧上方可切换「3D 模型 / 符号 / 封装」，无需先下载。<br>'
             '符号和封装直接加载商城使用的官方 SVG，支持滚轮缩放、拖动平移及「适应窗口」；多单元符号可选择单元。<br><br>'
+            '点击顶部「检查更新」可查询新版；便携 EXE 支持下载、SHA-256 校验并重启更新。<br>'
             '模型来源：<a href="https://lceda.cn/">JLCEDA</a> / <a href="https://easyeda.com/">EasyEDA 官方库</a>。<br>'
-            '基于 <a href="https://github.com/uPesy/easyeda2kicad.py">easyeda2kicad 1.0.1</a>，软件采用 AGPL-3.0-or-later。<br>'
+            '资源下载与本地 3D 预览由本项目实现，软件采用 AGPL-3.0-or-later。<br>'
             '对应源码、构建脚本与第三方说明随交付提供。')
         message.exec()
 
+    def check_updates(self):
+        if self.update_dialog is not None and self.update_dialog.isVisible():
+            self.update_dialog.raise_()
+            self.update_dialog.activateWindow()
+            return
+        self.update_dialog = UpdateDialog(VERSION, self)
+        self.update_dialog.show()
+
+    def begin_update(self, manifest):
+        self.save_settings()
+        launch_update(manifest)
+        self.close_when_finished = True
+        QTimer.singleShot(0, self.close)
+
     def closeEvent(self, event):
-        if self.library_worker is not None or self.info_worker is not None or self.worker and self.worker.isRunning():
+        update_worker = self.update_dialog.worker if self.update_dialog else None
+        if update_worker is not None or self.model_worker is not None or self.library_worker is not None or self.info_worker is not None or self.worker and self.worker.isRunning():
+            if update_worker is not None and not self.close_when_finished:
+                self.update_dialog.closing = True
+                update_worker.cancelled.set()
+                update_worker.finished.connect(self.close)
             self.close_when_finished = True
             self.info_pending = None
             self.library_pending = None
-            for worker in (self.info_worker, self.library_worker):
+            self.model_pending = None
+            for worker in (self.info_worker, self.library_worker, self.model_worker):
                 if worker is not None:
                     worker.cancelled.set()
             self.setEnabled(False)
@@ -1034,7 +1159,13 @@ class MainWindow(QMainWindow):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--self-test', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-ad', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-ad-parts', default='C2765186', help=argparse.SUPPRESS)
+    parser.add_argument('--update-ack', metavar='PLAN', help=argparse.SUPPRESS)
     args = parser.parse_args()
+    ad_test_parts, ad_invalid_parts, _ = parse_part_numbers(args.self_test_ad_parts)
+    if args.self_test_ad and (not ad_test_parts or ad_invalid_parts):
+        parser.error('--self-test-ad-parts requires valid C numbers')
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     app = QApplication([sys.argv[0]])
     app.setApplicationName('LCSC3D')
@@ -1043,8 +1174,60 @@ def main():
     app.setFont(QFont('Microsoft YaHei UI', 9))
     app.setStyleSheet(STYLES)
     logging.getLogger().setLevel(logging.ERROR)
-    window = MainWindow(settings_enabled=not bool(args.self_test))
+    window = MainWindow(settings_enabled=not bool(args.self_test or args.self_test_ad))
     window.show()
+    if args.update_ack:
+        QTimer.singleShot(250, lambda: acknowledge_update(args.update_ack))
+    if getattr(sys, 'frozen', False) and not (args.self_test or args.self_test_ad):
+        QTimer.singleShot(8000, lambda: threading.Thread(target=cleanup_updates, args=(APP_DIR,), daemon=True).start())
+    if args.self_test_ad:
+        destination = Path(args.self_test_ad).resolve()
+        destination.mkdir(parents=True, exist_ok=True)
+        window.path_input.setText(str(destination / 'AD 元件库'))
+        window.step_box.setChecked(False)
+        window.obj_box.setChecked(False)
+        window.schlib_box.setChecked(True)
+        window.pcblib_box.setChecked(True)
+        window.set_preview_mode('symbol')
+        window.input.setPlainText('\n'.join(ad_test_parts))
+        window.load_queue()
+        state = {'done': False, 'batch_done': False}
+
+        def finish_ad_test(force=False):
+            if state['done'] or not (force or state['batch_done'] and window.preview_state in ('ready', 'error')):
+                return
+            state['done'] = True
+            results = list(window.results.values())
+            ok = (set(window.results) == set(ad_test_parts)
+                  and all(result.status == '成功'
+                          and {Path(file).suffix for file in result.files} == {'.SchLib', '.PcbLib'}
+                          for result in results))
+            window.grab().save(str(destination / 'AD导出界面.png'))
+            (destination / 'verification.json').write_text(json.dumps({
+                'version': VERSION, 'frozen': bool(getattr(sys, 'frozen', False)), 'success': ok,
+                'parts': ad_test_parts,
+                'formats': {'step': window.step_box.isChecked(), 'obj': window.obj_box.isChecked(),
+                            'schlib': window.schlib_box.isChecked(), 'pcblib': window.pcblib_box.isChecked()},
+                'results': [vars(result) for result in results], 'preview': window.preview_state,
+            }, ensure_ascii=False, indent=2), encoding='utf-8')
+            if window.worker:
+                window.worker.cancelled.set()
+            window.close()
+            QTimer.singleShot(1000, lambda: app.exit(0 if ok else 1))
+
+        def ad_batch_done(results):
+            state['batch_done'] = True
+            QTimer.singleShot(300, finish_ad_test)
+
+        def start_ad_test():
+            window.start_batch()
+            if window.worker:
+                window.worker.completed.connect(ad_batch_done)
+
+        window.preview_changed.connect(lambda status: finish_ad_test())
+        QTimer.singleShot(500, start_ad_test)
+        QTimer.singleShot(60000, lambda: finish_ad_test(True))
+        return app.exec()
     if args.self_test:
         from PySide6.QtCore import QEvent, QObject
 
@@ -1065,7 +1248,6 @@ def main():
         destination.mkdir(parents=True, exist_ok=True)
         window.path_input.setText(str(destination / '批量下载测试'))
         window.input.setPlainText('C2040\nc20197, C2040\nC163691\nC999999999999')
-        window.wrl_box.setChecked(True)
         window.obj_box.setChecked(True)
         state = {'batch': False, 'preview': False, 'initial_3d_done': False, 'library': False, 'library_started': False,
                  'capture_pending': False, 'step': 0, 'done': False,
@@ -1102,6 +1284,8 @@ def main():
                 },
                 'results': [vars(window.results[part]) for part in window.ids if part in window.results],
                 'csv_files': [str(path) for path in Path(window.path_input.text()).rglob('*.csv')],
+                'non_model_exports': [str(path) for path in Path(window.path_input.text()).rglob('*')
+                                      if path.is_file() and path.suffix.lower() not in ('.step', '.obj')],
                 'library_previews': {
                     part: {'symbol_pins': [unit.count for unit in preview.symbols],
                            'footprint_pads': preview.footprint.count,
@@ -1122,12 +1306,17 @@ def main():
             if window.info_worker is not None:
                 window.info_worker.cancelled.set()
                 window.info_worker.wait(45000)
+            if window.model_worker is not None:
+                window.model_pending = None
+                window.model_worker.cancelled.set()
+                window.model_worker.wait(45000)
             passed = (window.preview_state == 'ready'
                       and state['second_3d_ready']
                       and state['library']
                       and report['preview_window']['hwnd_preserved']
                       and not preview_probe.events
                       and not report['csv_files']
+                      and not report['non_model_exports']
                       and report['titles_before_download'].get('C2040') == 'RP2040'
                       and report['titles_before_download'].get('C20197') == '4D03WGJ0102T5E'
                       and report['titles_before_download'].get('C163691', '') not in
@@ -1135,8 +1324,8 @@ def main():
                       and report['download_selection'] == {
                           'checked_ids': ['C2040', 'C20197', 'C999999999999'],
                           'unchecked_ids': ['C163691'], 'selected_only': True}
-                      and sum(result.status in ('成功', '已存在') for result in window.results.values()) == 2
-                      and all({Path(file).suffix for file in result.files} == {'.step', '.wrl', '.obj'}
+                      and sum(result.status == '成功' for result in window.results.values()) == 2
+                      and all({Path(file).suffix for file in result.files} == {'.step', '.obj'}
                               for result in window.results.values() if result.part in ('C2040', 'C20197')))
             app.exit(0 if passed else 1)
 

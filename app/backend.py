@@ -1,4 +1,4 @@
-"""Batch 3D model downloads from EasyEDA component data."""
+"""Download official models and export native AD symbol/footprint libraries."""
 from __future__ import annotations
 
 import gzip
@@ -18,24 +18,21 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
-from easyeda2kicad.easyeda.easyeda_api import (
-    API_ENDPOINT, ENDPOINT_3D_MODEL, ENDPOINT_3D_MODEL_STEP, EasyedaApi,
-)
-from easyeda2kicad.easyeda.easyeda_importer import Easyeda3dModelImporter
-from easyeda2kicad.kicad.export_kicad_3d_model import Exporter3dModelKicad
-
 from errors import Cancelled, DownloadError
+from model3d import document, model_reference
+from altium import export_schlib, export_pcblib
 import certifi
 import urllib3
 from urllib3.util import Retry, Timeout
 
-UPSTREAM_URL = 'https://github.com/uPesy/easyeda2kicad.py'
-SOURCE_LABEL = 'JLCEDA/EasyEDA 官方库'
 SVG_ENDPOINTS = (
     'https://lceda.cn/api/products/{part}/svgs',
     'https://easyeda.com/api/products/{part}/svgs',
 )
-COMPONENT_ENDPOINTS = ('https://lceda.cn/api/products/{part}/components', API_ENDPOINT.replace('{lcsc_id}', '{part}'))
+COMPONENT_ENDPOINTS = ('https://lceda.cn/api/products/{part}/components',
+                       'https://easyeda.com/api/products/{part}/components')
+ENDPOINT_3D_MODEL = 'https://modules.easyeda.com/3dmodel/{uuid}'
+ENDPOINT_3D_MODEL_STEP = 'https://modules.easyeda.com/qAxj6KHrDKw4blvCG8QJPs7Y/{uuid}'
 
 
 class PayloadCache:
@@ -118,35 +115,27 @@ def safe_filename(name: str) -> str:
     return clean
 
 
-def atomic_write(path: Path, data: bytes, overwrite: bool = False) -> bool:
+def atomic_write(path: Path, data: bytes) -> None:
     """Replace complete files only. Partial downloads never become final files."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() and not overwrite and (not path.is_file() or path.stat().st_size):
-        return False
     fd, name = tempfile.mkstemp(prefix='.lcsc-', suffix='.tmp', dir=path.parent)
     try:
         with os.fdopen(fd, 'wb') as stream:
             stream.write(data)
-        if not overwrite and path.exists() and (not path.is_file() or path.stat().st_size):
-            return False
         os.replace(name, path)
-        return True
     finally:
         if os.path.exists(name):
             os.unlink(name)
 
 
-class NetworkApi(EasyedaApi):
-    """Upstream-compatible API with bounded requests and cancellation checks."""
+class NetworkApi:
+    """Official component/model APIs with bounded requests and cancellation."""
     def __init__(self, cancelled: threading.Event | None = None, use_cache=True):
-        super().__init__()
         self.cancelled = cancelled or threading.Event()
-        self.headers['Accept-Encoding'] = 'gzip'
+        self.headers = {'User-Agent': 'LCSC3D/2.0.0', 'Accept-Encoding': 'gzip',
+                        'Accept': '*/*'}
         self.use_cache = use_cache
         self.proxies = urllib.request.getproxies()
-
-    def _create_ssl_context(self):
-        return shared_ssl_context()
 
     def check_cancelled(self):
         if self.cancelled.is_set():
@@ -209,12 +198,26 @@ class NetworkApi(EasyedaApi):
                     raise DownloadError('接口返回了无法识别的数据，请稍后重试') from exc
                 if not isinstance(data, dict) or not data.get('success') or not isinstance(data.get('result'), dict) or not data['result']:
                     raise DownloadError('未找到器件，请核对立创 C 编号')
+                data['source_url'] = template.format(part=lcsc_id)
                 if self.use_cache:
-                    PAYLOAD_CACHE.put(key, raw, 600)
+                    PAYLOAD_CACHE.put(key, json.dumps(data, ensure_ascii=False).encode('utf-8'), 600)
                 return data
             except DownloadError as exc:
                 last_error = exc
         raise last_error
+
+    def get_cad_data_of_component(self, part: str) -> dict:
+        response = self.get_info_from_easyeda_api(part)
+        data = dict(response['result'])
+        data['_source_url'] = response.get('source_url', '')
+        for key in ('dataStr', 'packageDetail'):
+            if data.get(key):
+                data[key] = document(data[key])
+        if data.get('packageDetail'):
+            package = dict(data['packageDetail'])
+            package['dataStr'] = document(package.get('dataStr'))
+            data['packageDetail'] = package
+        return data
 
     def get_svg_data_of_component(self, part: str) -> dict:
         """Fetch storefront SVGs; use the official mirror if the first host fails."""
@@ -244,6 +247,8 @@ class NetworkApi(EasyedaApi):
         return self._model_payload(uuid, ENDPOINT_3D_MODEL_STEP, 'step')
 
     def _model_payload(self, uuid, template, kind):
+        if not isinstance(uuid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', uuid):
+            raise DownloadError('3D 模型编号不受支持')
         key = kind + ':' + uuid
         self.check_cancelled()
         raw = PAYLOAD_CACHE.get(key) if self.use_cache else None
@@ -276,7 +281,6 @@ class NetworkApi(EasyedaApi):
 class Options:
     destination: Path
     formats: tuple[str, ...] = ('STEP',)
-    overwrite: bool = False
 
 
 @dataclass
@@ -299,10 +303,10 @@ def get_component_metadata(part: str, api: NetworkApi) -> dict[str, str]:
     title = str(data.get('title') or '').strip()
     model_name = ''
     try:
-        model = Easyeda3dModelImporter(data, download_raw_3d_model=False, api=api).output
+        model = model_reference(data)
         if model:
             model_name = model.name
-    except (KeyError, TypeError, ValueError, IndexError, AttributeError):
+    except (DownloadError, KeyError, TypeError, ValueError, IndexError, AttributeError):
         # A missing/malformed 3D association must not hide a valid part title.
         pass
     api.check_cancelled()
@@ -311,8 +315,8 @@ def get_component_metadata(part: str, api: NetworkApi) -> dict[str, str]:
 
 def download_part(part: str, options: Options, api: NetworkApi,
                   progress: Callable[[str, str], None] | None = None) -> Result:
-    if not options.formats or any(fmt not in ('STEP', 'WRL', 'OBJ') for fmt in options.formats):
-        raise DownloadError('请选择 STEP、WRL 或 OBJ 格式')
+    if not options.formats or any(fmt not in ('STEP', 'OBJ', 'SCHLIB', 'PCBLIB') for fmt in options.formats):
+        raise DownloadError('请选择 STEP、OBJ、AD 符号库或 AD 封装库')
     notify = progress or (lambda phase, title: None)
     notify('查询器件', '')
     data = api.get_cad_data_of_component(part)
@@ -321,88 +325,58 @@ def download_part(part: str, options: Options, api: NetworkApi,
     store_url = f'https://item.szlcsc.com/{product_id}.html' if product_id else f'https://so.szlcsc.com/global.html?k={part}'
     result = Result(part, '失败', title=title, store_url=store_url)
     api.check_cancelled()
-    folder = options.destination / f'{safe_filename(title or "未命名器件")}_{part}'
+    component_name = safe_filename(title or '未命名器件')
+    folder = options.destination / f'{component_name}_{part}'
     result.folder = str(folder)
-    completed, skipped, errors = [], [], []
+    completed, errors = [], []
     model, model_error = None, ''
     try:
-        model = Easyeda3dModelImporter(data, download_raw_3d_model=False, api=api).output
-    except (KeyError, TypeError, ValueError, IndexError):
-        model_error = '器件模型信息缺失或格式不受支持'
-    if not model:
+        model = model_reference(data)
+    except (DownloadError, KeyError, TypeError, ValueError, IndexError) as exc:
+        model_error = '器件模型信息缺失或格式不受支持：' + str(exc)
+    if not model and not any(fmt in ('SCHLIB', 'PCBLIB') for fmt in options.formats):
         result.status = '失败' if model_error else '无模型'
         result.message = model_error or '官方库中没有关联的 3D 模型'
         return result
-    result.model = model.name
+    result.model = model.name if model else ''
 
-    def save_payload(fmt: str, path: Path, payload: bytes):
-        if atomic_write(path, payload, overwrite=options.overwrite):
-            completed.append(fmt)
-        else:
-            skipped.append(fmt)
-        result.files.append(str(path))
-
-    basename = f'{part}_{safe_filename(model.name)}'
-    paths = {fmt: folder / f'{basename}.{fmt.lower()}' for fmt in options.formats}
-    needed = {fmt for fmt, path in paths.items()
-              if options.overwrite or not path.is_file() or not path.stat().st_size}
-    # STEP and OBJ are independent network transfers; WRL uses the same OBJ.
-    # Never download one OBJ twice, including when it is unavailable or fails.
+    basename = f'{part}_{safe_filename(model.name)}' if model else part
+    paths = {fmt: folder / (f'{component_name}.SchLib' if fmt == 'SCHLIB' else f'{component_name}.PcbLib' if fmt == 'PCBLIB'
+                            else f'{basename}.{fmt.lower()}') for fmt in options.formats}
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix='model-format') as pool:
-        step = pool.submit(api.get_step_3d_model, model.uuid) if 'STEP' in needed else None
-        obj = pool.submit(api.get_raw_3d_model_obj, model.uuid) if needed & {'OBJ', 'WRL'} else None
+        step = pool.submit(api.get_step_3d_model, model.uuid) if model and 'STEP' in options.formats else None
+        obj = pool.submit(api.get_raw_3d_model_obj, model.uuid) if model and 'OBJ' in options.formats else None
         for fmt in options.formats:
             api.check_cancelled()
             path = paths[fmt]
-            if fmt not in needed:
-                skipped.append(fmt)
-                result.files.append(str(path))
-                continue
-            notify(f'下载 {fmt}', title)
+            notify({'SCHLIB': '导出 AD 符号库', 'PCBLIB': '导出 AD 封装库'}.get(fmt, f'下载 {fmt}'), title)
             try:
-                if fmt == 'STEP':
+                if fmt == 'SCHLIB':
+                    payload = export_schlib(data, part, api.check_cancelled)
+                elif fmt == 'PCBLIB':
+                    payload = export_pcblib(data, part, api.check_cancelled)
+                elif not model:
+                    errors.append(f'{fmt}：' + (model_error or '官方库中没有关联的 3D 模型'))
+                    continue
+                elif fmt == 'STEP':
                     payload = step.result()
                 else:
                     raw_obj = obj.result()
-                    if fmt == 'OBJ':
-                        payload = raw_obj.encode('utf-8') if raw_obj else None
-                    elif raw_obj:
-                        model.raw_obj = raw_obj
-                        exporter = Exporter3dModelKicad(model)
-                        payload = exporter.output.raw_wrl.encode('utf-8') if exporter.output else None
-                    else:
-                        payload = None
+                    payload = raw_obj.encode('utf-8') if raw_obj else None
                 api.check_cancelled()
                 if not payload:
                     errors.append(f'{fmt} 不可用')
                 else:
-                    save_payload(fmt, path, payload)
+                    atomic_write(path, payload)
+                    completed.append(fmt)
+                    result.files.append(str(path))
             except Cancelled:
                 raise
             except Exception as exc:
                 errors.append(f'{fmt}：{exc}')
-    if completed or skipped:
-        result.status = '部分完成' if errors else ('已存在' if not completed else '成功')
-        descriptions = []
-        if completed:
-            descriptions.append('已保存 ' + ' / '.join(completed))
-        if skipped:
-            descriptions.append('已存在 ' + ' / '.join(skipped))
-        result.message = '；'.join(descriptions + errors)
-        metadata = {
-            'part': part, 'title': title, 'model': model.name if model else '', 'model_uuid': model.uuid if model else '',
-            'source': SOURCE_LABEL, 'source_urls': ['https://lceda.cn/', 'https://easyeda.com/'],
-            'store_url': store_url, 'downloaded_at': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
-            'upstream': UPSTREAM_URL, 'upstream_version': '1.0.1',
-            'files': [Path(x).name for x in result.files],
-            'library_notice': data.get('packageDetail', {}).get('dataStr', {}).get('head', {}).get('licence', ''),
-            'symbol_library_notice': data.get('dataStr', {}).get('head', {}).get('licence', ''),
-        }
-        try:
-            atomic_write(folder / 'model-info.json', json.dumps(metadata, ensure_ascii=False, indent=2).encode('utf-8'), overwrite=True)
-        except OSError as exc:
-            result.status = '部分完成'
-            result.message += f'；来源信息保存失败：{exc}'
+    if completed:
+        result.status = '部分完成' if errors else '成功'
+        result.message = '；'.join(['已保存 ' + ' / '.join(completed)] + errors)
     else:
         result.message = '；'.join(errors) or '没有可保存的文件'
     return result
@@ -413,7 +387,7 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
     if not parts:
         return []
     cancelled = cancelled or threading.Event()
-    api = api or NetworkApi(cancelled, use_cache=not options.overwrite)
+    api = api or NetworkApi(cancelled, use_cache=False)
     results = [None] * len(parts)
 
     def run(index, part):

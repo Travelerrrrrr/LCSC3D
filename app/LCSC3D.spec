@@ -1,14 +1,12 @@
-# PyInstaller specification. The browser runtime is bundled inside the EXE.
+# PyInstaller specification. Bundle the native AD encoder and format notices
+# alongside the browser runtime; no external converter is needed.
 from pathlib import Path
 
 root = Path(SPECPATH)
-upstream = root / 'upstream'
-if not upstream.is_dir():
-    upstream = root.parent / 'upstream'
 
 a = Analysis(
     [str(root / 'launcher.py')],
-    pathex=[str(root), str(upstream)],
+    pathex=[str(root)],
     binaries=[],
     datas=[(str(root / 'viewer.html'), '.'), (str(root / 'vector_viewer.html'), '.'),
            (str(root / 'assets'), 'assets'), (str(root / 'licenses'), 'licenses')],
@@ -59,4 +57,5 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     icon=str(root / 'assets' / 'app.ico'),
+    version=str(root / 'version_info.txt'),
 )

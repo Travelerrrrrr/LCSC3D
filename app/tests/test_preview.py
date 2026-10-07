@@ -17,6 +17,7 @@ from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from test_library_preview import fixture
+from updater import Release
 
 
 class WindowEvents(QObject):
@@ -45,6 +46,11 @@ class PreviewWindowTests(unittest.TestCase):
         self.info_patch = patch.object(main.MainWindow, 'request_component_info')
         self.info_patch.start()
         self.addCleanup(self.info_patch.stop)
+        # Most window regressions use a tiny local WebGL shell. Model I/O has
+        # its own tests; never issue a live request from these UI tests.
+        self.model_patch = patch.object(main.ModelPreviewWorker, 'run', new=lambda worker: None)
+        self.model_patch.start()
+        self.addCleanup(self.model_patch.stop)
         self.window = main.MainWindow(settings_enabled=False)
         root = Path(self.directory.name)
         (root / 'viewer.html').write_text('''<!doctype html><html><body>
@@ -79,6 +85,11 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.window.library_worker.cancelled.set()
             self.window.library_worker.wait(5000)
             self.app.processEvents()
+        if self.window.model_worker is not None:
+            self.window.model_pending = None
+            self.window.model_worker.cancelled.set()
+            self.window.model_worker.wait(5000)
+            self.app.processEvents()
         self.root_patch.stop()
         self.window.close()
         self.window.deleteLater()
@@ -101,20 +112,18 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             QTest.qWait(20)
         self.assertIsNone(self.window.info_worker, 'Component query did not finish')
 
-    def test_legacy_library_only_settings_migrate_to_step(self):
+    def test_legacy_wrl_only_settings_migrate_to_step(self):
         settings_path = Path(self.directory.name) / 'settings.json'
-        settings_path.write_text(json.dumps({'step': False, 'wrl': False, 'obj': False,
-                                              'symbol': True, 'footprint': True}), encoding='utf-8')
+        settings_path.write_text(json.dumps({'step': False, 'wrl': True, 'obj': False}), encoding='utf-8')
         self.window.settings_enabled = True
         with patch.object(main, 'SETTINGS_PATH', settings_path):
             self.window._restore_settings()
             self.assertTrue(self.window.step_box.isChecked())
-            self.assertFalse(self.window.wrl_box.isChecked())
             self.assertFalse(self.window.obj_box.isChecked())
             self.window.save_settings()
         self.window.settings_enabled = False
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
-                         {'destination', 'step', 'wrl', 'obj'})
+                         {'destination', 'step', 'obj', 'schlib', 'pcblib'})
 
     def assert_stable(self, hwnd, events, geometry, maximized=False):
         self.assertEqual(int(self.window.winId()), hwnd, 'Preview recreated the native window')
@@ -384,35 +393,62 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.wait_for_preview('C20197')
         self.assertEqual(self.window.viewer_page_loads, 2)
 
-    def test_viewer_script_skips_intermediate_selections_and_ignores_old_model_events(self):
+    def test_local_renderer_draws_mesh_ignores_old_meshes_and_supports_navigation(self):
         self.window.show()
-        self.window.input.setPlainText('C2040\nC20197\nC163691')
-        self.window.load_queue()
-        html = (Path(__file__).resolve().parents[1] / 'viewer.html').read_text(encoding='utf-8')
-        # Run the production queue code with a controlled official message bus.
-        # The two remote scripts are omitted; every model completion is driven here.
-        html = '\n'.join(line for line in html.splitlines() if 'await loadScript(' not in line)
-        html = html.replace('let desired =', '''window._MSG_BUS_ = {
-            subscribe: (topic, callback) => { window.engineNotify = callback; },
-            publish: (topic, part) => { (window.requestedParts ||= []).push(part); }
-        }; let desired =''')
-        html = html.replace('__PART_JSON__', '"C2040"').replace('__REVISION_JSON__', str(self.window.web_revision))
-        self.window.web.setHtml(html)
-        deadline = time.monotonic() + 3
-        while time.monotonic() < deadline and not self.evaluate(self.window.web, 'window.requestedParts || []'):
+        self.wait_for_preview('C2040')
+        with patch.object(main, 'ROOT', Path(__file__).resolve().parents[1]):
+            self.window.reload_button.click()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not self.window.viewer_ready:
             QTest.qWait(20)
-        self.assertEqual(self.evaluate(self.window.web, 'window.requestedParts'), ['C2040'])
-        self.window.table.selectRow(1)
-        self.window.table.selectRow(2)
-        QTest.qWait(50)
-        self.assertEqual(self.evaluate(self.window.web, 'window.requestedParts'), ['C2040'])
-        self.evaluate(self.window.web, '(window.engineNotify({C2040: {missingModel: false}}), true)')
-        self.assertEqual(self.evaluate(self.window.web, 'window.requestedParts'), ['C2040', 'C163691'])
-        self.evaluate(self.window.web, '(window.engineNotify({C20197: {missingModel: false}}), true)')
-        self.assertEqual(self.window.preview_state, 'loading')
-        self.evaluate(self.window.web, '(window.engineNotify({C163691: {missingModel: false}}), true)')
-        self.assertEqual(self.window.preview_state, 'ready')
-        self.assertEqual(self.window.current_preview, 'C163691')
+        # Red marks the top (+Z), blue the bottom (-Z). Verify their actual
+        # framebuffer positions so an inverted initial view cannot pass.
+        payload = {'vertices': [[-.35,-.25,1],[.35,-.25,1],[0,.35,1],
+                                [-.35,-.25,-1],[.35,-.25,-1],[0,.35,-1]],
+                   'faces': [[0,0,1,2],[1,3,4,5]], 'materials': [[.85,.1,.1],[.1,.1,.85]]}
+        revision = self.window.web_revision
+        self.window.model_preview_loaded('C2040', revision, payload)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and self.window.preview_state != 'ready':
+            QTest.qWait(20)
+        self.assertEqual(self.window.preview_state, 'ready', self.window.preview_status.text())
+        initial = self.evaluate(self.window.web, 'window.getModelPreviewState()')
+        self.assertEqual(initial['triangles'], 2)
+        self.assertTrue(initial['loaded'])
+        landmarks = self.evaluate(self.window.web, '''(() => {
+            draw();
+            const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+            gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+            const top = {count:0,y:0}, bottom = {count:0,y:0};
+            for (let i=0; i<pixels.length; i+=4) {
+                const r=pixels[i], g=pixels[i+1], b=pixels[i+2];
+                const mark = r>1.8*g && r>1.8*b ? top : b>1.8*r && b>1.8*g ? bottom : null;
+                if (mark) { mark.count++; mark.y+=Math.floor(i/4/canvas.width); }
+            }
+            return {top:{count:top.count,y:top.y/top.count},
+                    bottom:{count:bottom.count,y:bottom.y/bottom.count}};
+        })()''')
+        self.assertGreater(landmarks['top']['count'], 20)
+        self.assertGreater(landmarks['bottom']['count'], 20)
+        # WebGL framebuffer Y increases upwards, so +Z must be above -Z.
+        self.assertGreater(landmarks['top']['y'], landmarks['bottom']['y'])
+        self.assertFalse(self.evaluate(self.window.web, 'window.showMesh(' + json.dumps(payload) + ',"C20197",0)'))
+        self.assertEqual(self.evaluate(self.window.web, 'window.getModelPreviewState()'), initial)
+        target = self.window.web.focusProxy()
+        center = target.rect().center()
+        wheel = QWheelEvent(QPointF(center), QPointF(target.mapToGlobal(center)), QPoint(), QPoint(0, 360),
+                            Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+        self.app.sendEvent(target, wheel)
+        QTest.qWait(100)
+        self.assertGreater(self.evaluate(self.window.web, 'window.getModelPreviewState().zoom'), initial['zoom'])
+        QTest.mousePress(target, Qt.LeftButton, pos=center)
+        QTest.mouseMove(target, center + QPoint(30, 20), delay=20)
+        QTest.mouseRelease(target, Qt.LeftButton, pos=center + QPoint(30, 20))
+        QTest.qWait(100)
+        self.assertNotEqual(self.evaluate(self.window.web, 'window.getModelPreviewState().yaw'), initial['yaw'])
+        self.window.fit_button.click()
+        QTest.qWait(100)
+        self.assertEqual(self.evaluate(self.window.web, 'window.getModelPreviewState()'), initial)
 
     def test_svg_canvases_start_on_demand_and_share_browser_profile(self):
         self.assertIs(self.window.symbol_view.profile, self.window.web_profile)
@@ -426,6 +462,133 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.wait_for_library()
         self.assertTrue(self.window.footprint_view.shell_started)
         self.assertFalse(self.window.symbol_view.shell_started)
+
+    def wait_for_update_check(self):
+        deadline = time.monotonic() + 5
+        while self.window.update_dialog.worker is not None and time.monotonic() < deadline:
+            QTest.qWait(20)
+        self.assertIsNone(self.window.update_dialog.worker)
+
+    def test_check_update_button_displays_latest_version_and_reuses_open_dialog(self):
+        self.window.show()
+        with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)):
+            self.window.update_button.click()
+            dialog = self.window.update_dialog
+            self.window.check_updates()
+            self.assertIs(self.window.update_dialog, dialog)
+            self.wait_for_update_check()
+        self.assertIn('最新版本', dialog.status.text())
+        dialog.close()
+
+    def test_check_update_failure_can_retry_and_source_run_offers_release_page(self):
+        self.window.show()
+        with patch('update_ui.UpdateClient', side_effect=RuntimeError('offline')):
+            self.window.update_button.click()
+            self.wait_for_update_check()
+        dialog = self.window.update_dialog
+        self.assertIn('offline', dialog.status.text())
+        release = Release('2.1.0', 'https://github.com/Travelerrrrrr/LCSC3D/releases/tag/v2.1.0', '', '', 100, '新版说明')
+        with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: release)):
+            dialog.install.click()
+            self.wait_for_update_check()
+        self.assertIn('2.1.0', dialog.status.text())
+        self.assertEqual(dialog.notes.toPlainText(), '新版说明')
+        self.assertFalse(dialog.install.isEnabled())
+        self.assertTrue(dialog.page.isEnabled())
+        dialog.close()
+
+    def test_closing_update_check_cancels_request_and_keeps_main_window_open(self):
+        started = threading.Event()
+        class Client:
+            def __init__(self, cancelled):
+                self.cancelled = cancelled
+            def check(self, version):
+                started.set()
+                self.cancelled.wait(3)
+                raise main.Cancelled()
+        self.window.show()
+        with patch('update_ui.UpdateClient', side_effect=Client):
+            self.window.update_button.click()
+            self.assertTrue(started.wait(1))
+            self.window.update_dialog.close()
+            self.wait_for_update_check()
+            QTest.qWait(20)
+        self.assertFalse(self.window.update_dialog.isVisible())
+        self.assertTrue(self.window.isVisible())
+
+    def test_removed_library_export_settings_migrate_to_step_download(self):
+        settings_path = Path(self.directory.name) / 'settings.json'
+        settings_path.write_text(json.dumps({'step': False, 'obj': False, 'symbol': True,
+                                             'footprint': True}), encoding='utf-8')
+        self.window.settings_enabled = True
+        with patch.object(main, 'SETTINGS_PATH', settings_path):
+            self.window._restore_settings()
+            self.window.save_settings()
+        self.window.settings_enabled = False
+        self.assertTrue(self.window.step_box.isChecked())
+        self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))), {'destination', 'step', 'obj', 'schlib', 'pcblib'})
+        self.window.path_input.setText(str(Path(self.directory.name) / 'models'))
+        captured = []
+        def download(part, options, api, progress):
+            captured.append(options.formats)
+            return main.Result(part, '成功')
+        with patch('main.NetworkApi', return_value=SimpleNamespace()), patch('backend.download_part', side_effect=download):
+            self.window.start_batch()
+            deadline = time.monotonic() + 5
+            while self.window.batch_running and time.monotonic() < deadline:
+                QTest.qWait(20)
+            self.assertFalse(self.window.batch_running)
+        self.assertEqual(captured, [('STEP',)] * 2)
+
+    def test_ad_only_settings_and_real_batch_export(self):
+        from altium_inspect import schematic, pcb
+        cad = {part: json.loads((Path(__file__).parent / 'fixtures' / (part + '.json')).read_text('utf-8'))
+               for part in ('C2040', 'C20197')}
+        self.window.step_box.setChecked(False)
+        self.window.schlib_box.setChecked(True)
+        self.window.pcblib_box.setChecked(True)
+        self.assertNotIn('覆盖已有文件', [box.text() for box in self.window.findChildren(main.QCheckBox)])
+        settings_path = Path(self.directory.name) / 'settings.json'
+        self.window.settings_enabled = True
+        with patch.object(main, 'SETTINGS_PATH', settings_path):
+            self.window.save_settings()
+            self.window._restore_settings()
+        self.window.settings_enabled = False
+        self.assertFalse(self.window.step_box.isChecked())
+        self.assertTrue(self.window.schlib_box.isChecked())
+        self.assertTrue(self.window.pcblib_box.isChecked())
+        self.window.path_input.setText(str(Path(self.directory.name) / 'AD 导出'))
+        api = SimpleNamespace(get_cad_data_of_component=lambda part: cad[part], check_cancelled=lambda: None)
+        with patch('main.NetworkApi', return_value=api) as network:
+            for attempt in range(2):
+                if attempt:
+                    for result in self.window.results.values():
+                        for file in result.files:
+                            Path(file).write_bytes(b'old library')
+                self.window.start_batch()
+                self.assertFalse(self.window.schlib_box.isEnabled())
+                self.assertFalse(self.window.pcblib_box.isEnabled())
+                deadline = time.monotonic() + 5
+                while self.window.batch_running and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                self.assertFalse(self.window.batch_running)
+                self.assertTrue(self.window.worker.wait(5000))
+            self.assertEqual(network.call_count, 2)
+            self.assertTrue(all(call.kwargs['use_cache'] is False for call in network.call_args_list))
+        self.assertFalse(self.window.batch_running)
+        self.assertTrue(self.window.schlib_box.isEnabled())
+        for part, count in [('C2040', 57), ('C20197', 8)]:
+            result = self.window.results[part]
+            self.assertEqual(result.status, '成功', result.message)
+            self.assertEqual(len(result.files), 2)
+            self.assertEqual(Path(result.folder).name, cad[part]['title'] + '_' + part)
+            self.assertEqual({Path(file).name for file in result.files},
+                             {cad[part]['title'] + '.SchLib', cad[part]['title'] + '.PcbLib'})
+            for file in result.files:
+                if file.endswith('.SchLib'):
+                    self.assertEqual(len(schematic(Path(file).read_bytes())[2]), count)
+                else:
+                    self.assertEqual(len(pcb(Path(file).read_bytes())[1]), count)
 
     def test_out_of_order_results_update_progress_by_completion_count(self):
         self.window.update_result(1, main.Result('C20197', '成功', message='done'))
@@ -599,7 +762,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
     def test_checked_batch_maps_noncontiguous_rows_and_counts_only_current_results(self):
         self.window.input.setPlainText('C2040\nC20197\nC163691\nC1')
         self.window.load_queue()
-        previous = main.Result('C2040', '已存在', title='Previous', message='kept')
+        previous = main.Result('C2040', '成功', title='Previous', message='kept')
         self.window.update_result(0, previous)
         self.window.table.item(0, main.DOWNLOAD_COLUMN).setCheckState(Qt.Unchecked)
         self.window.table.item(2, main.DOWNLOAD_COLUMN).setCheckState(Qt.Unchecked)
@@ -679,7 +842,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         finished = []
         self.window.batch_done.connect(lambda: finished.append(True))
         with patch('main.NetworkApi', return_value=Api()), \
-                patch('backend.Easyeda3dModelImporter', return_value=SimpleNamespace(output=model)):
+                patch('backend.model_reference', return_value=model):
             self.window.start_batch()
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline and (not finished or self.window.worker.isRunning()):

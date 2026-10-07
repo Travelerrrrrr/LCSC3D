@@ -5,8 +5,12 @@ import traceback
 from pathlib import Path
 
 try:
-    from main import main
-    code = main()
+    if len(sys.argv) == 3 and sys.argv[1] == '--apply-update':
+        from updater import apply_update
+        code = apply_update(sys.argv[2])
+    else:
+        from main import main
+        code = main()
 except Exception:
     details = traceback.format_exc()
     base = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent

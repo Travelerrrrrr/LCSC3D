@@ -12,11 +12,11 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import backend
-from test_backend import FakeApi, STEP
+from test_backend import FakeApi, STEP, OBJ
 
 
 class DownloadPerformanceTests(unittest.TestCase):
-    def test_step_and_obj_overlap_and_share_one_obj_for_wrl(self):
+    def test_step_and_obj_overlap(self):
         barrier = threading.Barrier(2)
 
         class Api(FakeApi):
@@ -29,15 +29,13 @@ class DownloadPerformanceTests(unittest.TestCase):
             def get_raw_3d_model_obj(self, uuid):
                 self.obj_calls += 1
                 barrier.wait(timeout=2)
-                return 'v 0 0 0'
+                return OBJ
 
         api = Api()
         model = SimpleNamespace(name='QFN', uuid='model-id')
-        exporter = SimpleNamespace(output=SimpleNamespace(raw_wrl='#VRML V2.0 utf8'))
         with tempfile.TemporaryDirectory() as folder, \
-                patch('backend.Easyeda3dModelImporter', return_value=SimpleNamespace(output=model)), \
-                patch('backend.Exporter3dModelKicad', return_value=exporter):
-            result = backend.download_part('C2040', backend.Options(Path(folder), ('STEP', 'WRL', 'OBJ')), api)
+                patch('backend.model_reference', return_value=model):
+            result = backend.download_part('C2040', backend.Options(Path(folder), ('STEP', 'OBJ')), api)
         self.assertEqual(result.status, '成功')
         self.assertEqual(api.step_calls, 1)
         self.assertEqual(api.obj_calls, 1)
@@ -46,9 +44,9 @@ class DownloadPerformanceTests(unittest.TestCase):
         api = FakeApi()
         model = SimpleNamespace(name='QFN', uuid='model-id')
         with tempfile.TemporaryDirectory() as folder, \
-                patch('backend.Easyeda3dModelImporter', return_value=SimpleNamespace(output=model)), \
+                patch('backend.model_reference', return_value=model), \
                 patch.object(api, 'get_raw_3d_model_obj', return_value=None) as fetch:
-            result = backend.download_part('C2040', backend.Options(Path(folder), ('STEP', 'WRL', 'OBJ')), api)
+            result = backend.download_part('C2040', backend.Options(Path(folder), ('STEP', 'OBJ')), api)
         self.assertEqual(result.status, '部分完成')
         self.assertEqual(fetch.call_count, 1)
         self.assertEqual(len(result.files), 1)
@@ -87,10 +85,10 @@ class DownloadPerformanceTests(unittest.TestCase):
         self.assertEqual(fetch.call_count, 1)
         self.assertEqual([result.status for result in results], ['成功', '已取消', '已取消'])
 
-    def test_overwrite_bypasses_cached_network_payloads(self):
+    def test_download_always_bypasses_cached_network_payloads(self):
         with patch('backend.NetworkApi', return_value=FakeApi()) as factory, \
                 patch('backend.download_part', return_value=backend.Result('C1', '成功')):
-            backend.download_batch(['C1'], backend.Options(Path('unused'), overwrite=True))
+            backend.download_batch(['C1'], backend.Options(Path('unused')))
         self.assertFalse(factory.call_args.kwargs['use_cache'])
 
     def test_component_and_model_mirrors_recover_invalid_primary_payloads(self):

@@ -6,7 +6,7 @@ on:
       release_tag:
         description: Release tag matching app/main.py VERSION
         required: true
-        default: v1.6.1
+        default: v2.0.0
       build_run_id:
         description: Successful Windows build run to use
         required: true
@@ -26,7 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          submodules: recursive
           fetch-depth: 0
       - uses: actions/setup-python@v7.0.0
         with:
@@ -48,7 +47,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $build.conclusion -ne 'success' -or $build.status -ne 'completed' -or $build.workflowName -ne 'Windows build') {
             throw 'A successful completed Windows build is required'
           }
-          git diff --quiet $build.headSha -- app upstream
+          git diff --quiet $build.headSha -- app
           if ($LASTEXITCODE -ne 0) { throw 'Application source differs from the tested build' }
       - name: Download verified build and package complete source
         shell: pwsh
