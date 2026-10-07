@@ -113,8 +113,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 以下是提供的 AD 实机截图，展示多单元符号、BGA 封装、焊盘和连接器。三维截图展示的是在 AD 中**另外添加 STEP 模型后**的效果；软件导出的 PcbLib 本身不自动包含这些模型。
 
-<details>
-<summary>展开查看 10 张 AD 截图：符号、封装与添加 STEP 后的三维效果</summary>
+**符号、封装与添加 STEP 后的三维效果 ↓↓↓**
 
 | 多单元原理图符号 | BGA 封装 |
 | --- | --- |
@@ -136,7 +135,6 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 | --- | --- |
 | <a href="docs/images/screenshots/12.png"><img src="docs/images/screenshots/12.png" alt="AD 中添加 STEP 后的 Type-C 连接器" width="440"></a> | <a href="docs/images/screenshots/13.png"><img src="docs/images/screenshots/13.png" alt="AD 中添加 STEP 后的 Type-C 连接器底部" width="440"></a> |
 
-</details>
 
 ## 便携运行与自更新
 
