@@ -9,8 +9,6 @@
 
 LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。软件直接读取嘉立创官方元件资源，将型号查询、模型下载、Altium Designer 元件库导出和预览放在一起。下载 `LCSC3D.exe` 即可运行，无须安装 Python；导出 AD 库也无须在电脑上安装 Altium Designer。
 
-Batch download LCSC STEP/OBJ models, export Altium Designer SchLib/PcbLib libraries, and preview electronic components on Windows.
-
 **当前版本：2.0.0** · **[下载 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整使用说明](app/README.md) · [版本记录](docs/releases/v2.0.0.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
 ![LCSC3D 软件界面与 Type-C 连接器 3D 模型预览](docs/images/screenshots/1.png)
