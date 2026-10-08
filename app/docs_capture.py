@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import time
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtWidgets import QApplication
 
 from favorites import LoginDialog
@@ -32,8 +32,26 @@ def start(window, destination):
               'public_products_only': True, 'saved_session_accessed': False, 'screenshots': []}
 
     def capture(widget, name):
-        assert widget.grab().save(str(destination / (name + '.png'))), name
+        pixmap = widget.grab()
+        if name in ('symbol', 'footprint'):
+            view = window.symbol_view if name == 'symbol' else window.footprint_view
+            origin = view.mapTo(widget, QPoint(0, 0))
+            scale = pixmap.devicePixelRatio()
+            image = pixmap.toImage().copy(int(origin.x() * scale), int(origin.y() * scale),
+                                         int(view.width() * scale), int(view.height() * scale))
+            background = 255 if name == 'symbol' else 0
+            visible = sum(max(abs(channel - background) for channel in image.pixelColor(x, y).getRgb()[:3]) > 32
+                          for y in range(8, image.height() - 8, 8)
+                          for x in range(8, image.width() - 8, 8))
+            assert visible > 15, name + ': preview pixels are blank'
+        assert pixmap.save(str(destination / (name + '.png'))), name
         report['screenshots'].append(name + '.png')
+
+    def vector_frame_ready(phase):
+        # DOM readiness precedes WebEngine's composited frame on Windows.
+        if state.get('frame_phase') != phase:
+            state.update(frame_phase=phase, frame_ready_at=time.monotonic())
+        return time.monotonic() - state['frame_ready_at'] >= 2
 
     def finish(error=''):
         if state['done']:
@@ -66,10 +84,14 @@ def start(window, destination):
                 window.set_preview_mode('symbol')
                 state['phase'] = 'symbol'
             elif phase == 'symbol' and window.preview_state == 'ready' and window.library_worker is None:
+                if not vector_frame_ready(phase):
+                    return
                 capture(window, 'symbol')
                 window.set_preview_mode('footprint')
                 state['phase'] = 'footprint'
             elif phase == 'footprint' and window.preview_state == 'ready':
+                if not vector_frame_ready(phase):
+                    return
                 capture(window, 'footprint')
                 window.open_favorites('search')
                 dialog = window.favorites_dialog
