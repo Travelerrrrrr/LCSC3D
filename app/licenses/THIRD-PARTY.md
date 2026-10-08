@@ -8,6 +8,7 @@ This application is distributed under AGPL-3.0-or-later. Complete application so
 - **PyInstaller 6.20.0 bootloader** — GPL with the bootloader distribution exception; `PyInstaller-COPYING.txt`. https://github.com/pyinstaller/pyinstaller
 - **certifi 2026.7.22** — Mozilla Public License 2.0; `certifi-LICENSE.txt`. https://github.com/certifi/python-certifi
 - **urllib3 2.7.0** — Andrey Petrov and contributors; MIT. `urllib3-LICENSE.txt`. https://github.com/urllib3/urllib3
+- **gmalg 1.1.2** — dongmanyu and contributors; MIT. `gmalg-MIT.txt`. Used for the official CAS SM2 C1C3C2 login encryption, with secure random numbers from Python `secrets`. https://github.com/ww-rm/gmalg
 - **OpenSSL**, as included with Python — OpenSSL licenses applicable to the Python runtime distribution. https://www.openssl.org/source/
 
 Qt libraries remain dynamically linked DLLs in the extracted temporary runtime. The provided build script can rebuild the application with modified compatible Qt/PySide libraries.

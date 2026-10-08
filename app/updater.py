@@ -58,7 +58,9 @@ def parse_release(data, current_version: str) -> Release | None:
         raise UpdateError('更新接口没有返回正式发行版本')
     tag = data.get('tag_name')
     version = version_tuple(tag)
-    if version <= version_tuple(current_version):
+    demo = isinstance(current_version, str) and re.fullmatch(r'v?\d+\.\d+\.\d+-demo\.\d+', current_version)
+    current = version_tuple(current_version.split('-')[0] if demo else current_version)
+    if version < current or (version == current and not demo):
         return None
     prefix = f'https://github.com/{REPOSITORY}/releases/download/{quote(tag, safe="")}/'
     assets = data.get('assets')

@@ -4,6 +4,7 @@ The candidate is a byte-identical copy of the tested release. Version discovery
 and corrupted downloads are covered by offline tests; this check covers the
 actual Windows executable locks, process exit, helper and restarted Qt window.
 """
+import argparse
 import json
 import os
 from pathlib import Path
@@ -19,7 +20,11 @@ root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root / 'app'))
 from updater import STAGE_PREFIX, file_hash
 
-source = root / 'outputs' / 'LCSC3D.exe'
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--output-dir', type=Path, default=root / 'outputs')
+parser.add_argument('--report', type=Path, default=root / 'work/self-update-verification.json')
+args = parser.parse_args()
+source = args.output_dir.resolve() / 'LCSC3D.exe'
 version = re.search(r"VERSION = '([^']+)'", (root / 'app/main.py').read_text(encoding='utf-8')).group(1)
 directory = Path(tempfile.mkdtemp(prefix='自更新 验证 ', dir=root / 'work')).resolve()
 target = directory / 'LCSC3D.exe'
@@ -37,6 +42,8 @@ environment = {key: value for key, value in os.environ.items()
 windows = Path(os.environ['SystemRoot'])
 environment['PATH'] = os.pathsep.join(str(path) for path in (windows / 'System32', windows))
 environment['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
+environment['LOCALAPPDATA'] = str(directory / '隔离账号数据')
+Path(environment['LOCALAPPDATA']).mkdir()
 started = time.monotonic()
 old = subprocess.Popen([str(target), '--self-test', str(directory / '原程序验证')], cwd=directory,
                        env=environment, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -68,7 +75,8 @@ try:
               'replacement_verified': True, 'startup_acknowledged': True, 'settings_preserved': True,
               'candidate': 'byte-identical copy of the tested release',
               'seconds': round(time.monotonic()-started, 2)}
-    (root / 'work' / 'self-update-verification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    args.report.resolve().parent.mkdir(parents=True, exist_ok=True)
+    args.report.resolve().write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(report, ensure_ascii=False), flush=True)
 finally:
     # Only these explicitly launched test processes can be stopped here.

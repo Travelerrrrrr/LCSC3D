@@ -1,4 +1,5 @@
 """Package source and user-facing documentation, excluding scratch/cache files."""
+import argparse
 import hashlib
 import shutil
 import zipfile
@@ -6,8 +7,11 @@ from pathlib import Path
 
 workspace = Path(__file__).resolve().parent.parent
 app = workspace / 'app'
-outputs = workspace / 'outputs'
-outputs.mkdir(exist_ok=True)
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--output-dir', type=Path, default=workspace / 'outputs',
+                    help='Delivery folder; use a separate folder for a development demo')
+outputs = parser.parse_args().output_dir.resolve()
+outputs.mkdir(parents=True, exist_ok=True)
 target = outputs / 'LCSC3D.zip'
 with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
     for base, prefix in [(workspace / folder, Path('LCSC3D') / folder)
