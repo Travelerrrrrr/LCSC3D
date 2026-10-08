@@ -16,7 +16,7 @@ from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal, QStandardPaths, QR
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPixmap, QPainter
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
+    QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
     QPushButton, QSizePolicy, QSplitter, QSplitterHandle, QStackedWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget, QAbstractItemView,
 )
@@ -28,8 +28,9 @@ from model3d import model_reference, read_obj
 from library_preview import build_library_preview, VectorPreviewView, SYMBOL_BACKGROUND, FOOTPRINT_BACKGROUND
 from update_ui import UpdateDialog
 from updater import acknowledge_update, cleanup_updates, launch_update
+from favorites import FavoritesDialog, normalize_items
 
-VERSION = '2.0.0'
+VERSION = '2.1.0'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
@@ -54,6 +55,9 @@ QPushButton#primary:hover { background:#117767; }
 QPushButton#primary:disabled { background:#b4d1c9; border-color:#b4d1c9; }
 QPushButton#previewMode:checked { background:#e0f3ee; color:#117767; border-color:#168878; font-weight:600; }
 QComboBox { border:1px solid #cfd9e2; border-radius:5px; padding:5px; background:white; }
+QTabWidget::pane { background:#fff; border:1px solid #dee5eb; border-radius:7px; }
+QTabBar::tab { background:#f4f7fa; padding:9px 18px; border:1px solid #dee5eb; border-bottom:0; }
+QTabBar::tab:selected { background:#e0f3ee; color:#117767; font-weight:600; }
 QCheckBox { spacing:6px; }
 QCheckBox::indicator { width:16px; height:16px; }
 QTableWidget { background:#fff; border:1px solid #e2e8ed; border-radius:7px; gridline-color:#eef2f5; outline:0; selection-background-color:#e5f3ee; selection-color:#244538; }
@@ -280,10 +284,14 @@ class MainWindow(QMainWindow):
         self.web_profile.setHttpCacheMaximumSize(8 * 1024 * 1024)
         self.close_when_finished = False
         self.update_dialog = None
+        self.favorites_dialog = None
+        self.account_menu = None
         self._setup_ui()
         self._setup_preview()
         self.setMinimumHeight(max(self.minimumHeight(), self.minimumSizeHint().height()))
         self._restore_settings()
+        if self.settings_enabled:
+            QTimer.singleShot(0, self.ensure_store)
 
     def _setup_ui(self):
         canvas = QWidget()
@@ -304,6 +312,10 @@ class MainWindow(QMainWindow):
         heading.addLayout(title_col)
         heading.addStretch()
         heading.addWidget(label('版本 ' + VERSION, 'badge'))
+        self.account_button = QPushButton('账号登录')
+        self.account_button.setToolTip('登录立创商城账号，支持记住登录')
+        self.account_button.clicked.connect(self.open_account)
+        heading.addWidget(self.account_button)
         self.update_button = QPushButton('检查更新')
         self.update_button.clicked.connect(self.check_updates)
         heading.addWidget(self.update_button)
@@ -341,6 +353,10 @@ class MainWindow(QMainWindow):
         self.input_info = label('输入立创商城 C 开头的器件编号', 'muted')
         self.input_info.setWordWrap(True)
         count_row.addWidget(self.input_info, 1)
+        self.market_button = QPushButton('立创商城')
+        self.market_button.setToolTip('搜索商品、查看原图、登录及管理账号收藏')
+        self.market_button.clicked.connect(self.open_favorites)
+        count_row.addWidget(self.market_button)
         self.queue_button = QPushButton('载入列表')
         self.queue_button.clicked.connect(self.load_queue)
         count_row.addWidget(self.queue_button)
@@ -440,6 +456,11 @@ class MainWindow(QMainWindow):
         self.invert_selection_button.setEnabled(False)
         self.invert_selection_button.clicked.connect(self.invert_download_selection)
         list_actions.addWidget(self.invert_selection_button)
+        self.remove_checked_button = QPushButton('删除已勾选器件')
+        self.remove_checked_button.setEnabled(False)
+        self.remove_checked_button.setToolTip('从下载列表及输入框移除勾选器件，保留已下载文件')
+        self.remove_checked_button.clicked.connect(self.remove_checked_downloads)
+        list_actions.addWidget(self.remove_checked_button)
         self.selection_summary = label('已勾选 0 / 0', 'muted')
         list_actions.addWidget(self.selection_summary)
         list_actions.addStretch()
@@ -625,6 +646,122 @@ class MainWindow(QMainWindow):
         self.request_component_info()
         return True
 
+    def bind_store(self, dialog):
+        self.favorites_dialog = dialog
+        dialog.import_requested.connect(self.import_favorites)
+        dialog.preview_requested.connect(self.preview_store_product)
+        dialog.activity_finished.connect(self.store_activity_finished)
+        dialog.account_changed.connect(self.refresh_store_account)
+        self.refresh_store_account()
+        return dialog
+
+    def ensure_store(self):
+        if self.favorites_dialog is None:
+            self.bind_store(FavoritesDialog(self, vault=None if self.settings_enabled else False))
+        return self.favorites_dialog
+
+    def refresh_store_account(self):
+        dialog = self.favorites_dialog
+        account = dialog.client.account if dialog else None
+        restoring = bool(dialog and dialog.restoring)
+        self.account_button.setEnabled(not restoring)
+        name = account['name'] if account else ''
+        self.account_button.setText('恢复登录…' if restoring else '账号：' + name[:12] if account else '账号登录')
+        self.account_button.setToolTip('已登录：' + name + '，点击管理登录状态' if account else '登录立创商城账号，支持记住登录')
+        if self.account_menu:
+            self.account_menu.close()
+
+    def open_account(self):
+        dialog = self.ensure_store()
+        if dialog.client.account:
+            self.account_menu = QMenu(self)
+            self.account_menu.addAction('已登录：' + dialog.client.account['name']).setEnabled(False)
+            self.account_menu.addAction('退出登录', dialog.clear_session)
+            self.account_menu.popup(self.account_button.mapToGlobal(self.account_button.rect().bottomLeft()))
+        else:
+            dialog.open_login()
+
+    def preview_store_product(self, part):
+        self.show_preview(part)
+        if self.isMinimized():
+            self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        if sys.platform == 'win32':
+            # Preview is an explicit user action in another window of this app.
+            # Ask Windows to activate the restored native main window as well.
+            import ctypes
+            activate = ctypes.windll.user32.SetForegroundWindow
+            activate.argtypes, activate.restype = [ctypes.c_void_p], ctypes.c_int
+            activate(int(self.winId()))
+
+    def open_favorites(self, mode=None):
+        self.ensure_store()
+        if isinstance(mode, str):
+            self.favorites_dialog.set_mode(mode)
+        self.favorites_dialog.set_import_enabled(not self.batch_running)
+        self.favorites_dialog.show()
+        self.favorites_dialog.raise_()
+        self.favorites_dialog.activateWindow()
+
+    def store_activity_finished(self):
+        if self.close_when_finished:
+            self.close()
+
+    def import_favorites(self, items):
+        """Append catalog/favorite products and preserve existing queue state."""
+        def status(message):
+            self.run_status.setText(message)
+            if self.favorites_dialog:
+                self.favorites_dialog.status.setText(message)
+
+        if self.batch_running or self.close_when_finished:
+            status('请等待当前下载任务完成后再导入元件。')
+            return 0
+        items = normalize_items(items)
+        if not items:
+            status('没有可导入的有效 C 编号。')
+            return 0
+        pending, invalid, _ = parse_part_numbers(self.input.toPlainText())
+        if invalid:
+            status('请先修正主窗口输入框中的无效内容，再导入元件：' + ', '.join(invalid[:4]))
+            return 0
+        existing = set(self.ids)
+        merged = list(dict.fromkeys(self.ids + pending + [item['part'] for item in items]))
+        new_parts = [part for part in merged if part not in existing]
+        titles = {item['part']: item['title'] for item in items if item['title']}
+        self.table.blockSignals(True)
+        try:
+            for part in new_parts:
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                check = QTableWidgetItem()
+                check.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
+                check.setCheckState(Qt.Checked)
+                check.setToolTip('勾选后下载此器件；单击器件行可预览')
+                self.table.setItem(row, DOWNLOAD_COLUMN, check)
+                self.table.setItem(row, PART_COLUMN, QTableWidgetItem(part))
+                if part in titles:
+                    self.component_info[part] = {'title': titles[part]}
+                self.table.setItem(row, MODEL_COLUMN, QTableWidgetItem(titles.get(part) or '查询中…'))
+                self.table.setItem(row, RESULT_COLUMN, QTableWidgetItem('等待下载'))
+        finally:
+            self.table.blockSignals(False)
+        self.ids = merged
+        self.info_rows = {part: row for row, part in enumerate(self.ids)}
+        self.input.setPlainText('\n'.join(self.ids))
+        self.summary.setText(f'{len(self.ids)} 个器件')
+        self.download_selection_changed()
+        if new_parts:
+            self.info_revision += 1
+            self.request_component_info()
+            if self.table.currentRow() < 0:
+                self.table.selectRow(0)
+        added = sum(item['part'] not in existing for item in items)
+        status(f'元件导入完成：新增 {added} 个，跳过 {len(items) - added} 个已有元件；下载列表共 {len(self.ids)} 个。')
+        return added
+
     @staticmethod
     def component_tooltip(info):
         return '\n'.join(f'{label}：{info[key]}' for key, label in (('title', '型号'), ('model', '模型')) if info.get(key))
@@ -680,6 +817,76 @@ class MainWindow(QMainWindow):
         enabled = bool(self.ids) and not self.batch_running
         self.select_all_button.setEnabled(enabled)
         self.invert_selection_button.setEnabled(enabled)
+        self.remove_checked_button.setEnabled(enabled and bool(self.checked_rows()) and not self.close_when_finished)
+
+    def remove_checked_downloads(self):
+        if self.batch_running or self.close_when_finished or self.worker and self.worker.isRunning():
+            return 0
+        rows = self.checked_rows()
+        if not rows:
+            return 0
+        removed = {self.ids[row] for row in rows}
+        old_row, selected = self.table.currentRow(), self.selected_part()
+        pending, invalid, _ = parse_part_numbers(self.input.toPlainText())
+        self.info_revision += 1
+        self.info_pending = None
+        if self.info_worker:
+            self.info_worker.cancelled.set()
+        self.table.blockSignals(True)
+        try:
+            for row in reversed(rows):
+                self.table.removeRow(row)
+            self.ids = [part for part in self.ids if part not in removed]
+            self.results = {part: result for part, result in self.results.items() if part not in removed}
+            self.component_info = {part: info for part, info in self.component_info.items() if part not in removed}
+            self.info_rows = {part: row for row, part in enumerate(self.ids)}
+            self.batch_ids = []
+            self.table.clearSelection()
+            self.table.setCurrentCell(-1, -1)
+            if self.ids:
+                self.table.selectRow(self.ids.index(selected) if selected in self.ids else min(max(old_row, 0), len(self.ids) - 1))
+        finally:
+            self.table.blockSignals(False)
+        extra = [part for part in pending if part not in removed and part not in self.ids]
+        self.input.setPlainText('\n'.join(self.ids + extra + invalid))
+        if self.ids:
+            self.update_download_detail(self.selected_part())
+            if self.current_preview in removed:
+                self.show_preview(self.selected_part())
+        elif self.current_preview in removed:
+            self.clear_preview()
+        if not self.ids:
+            self.detail.setText('选择器件自动预览，并查看结果详情')
+            self.detail.setToolTip('')
+            self.part_folder_button.setEnabled(False)
+        self.summary.setText(f'{len(self.ids)} 个器件')
+        self.progress_bar.setRange(0, max(1, len(self.ids)))
+        self.progress_bar.setValue(sum(part in self.results for part in self.ids))
+        self.download_selection_changed()
+        self.run_status.setText(f'已从下载列表删除 {len(removed)} 个器件，剩余 {len(self.ids)} 个。已下载文件保留。')
+        if self.ids:
+            self.request_component_info()
+        return len(removed)
+
+    def clear_preview(self):
+        self.current_preview = self.current_3d = ''
+        self.web_revision += 1
+        self.model_pending = self.library_pending = None
+        for worker in (self.model_worker, self.library_worker):
+            if worker:
+                worker.cancelled.set()
+        self.web_model, self.web_error = None, ''
+        self.web_state = ('empty', '选择器件后加载预览')
+        self.preview_stack.setCurrentWidget(self.preview_empty)
+        self.preview_caption.setText('选择左侧列表中的器件')
+        self.preview_hint.setText('载入列表后自动预览所选器件\n鼠标拖动旋转，滚轮缩放')
+        self.symbol_unit_box.hide()
+        self.symbol_unit_box.clear()
+        self.symbol_unit_part = ''
+        self.reload_button.setEnabled(False)
+        self.fit_button.setEnabled(False)
+        self.store_button.setEnabled(False)
+        self.on_preview_state(*self.web_state)
 
     def select_all_downloads(self):
         self.change_download_selection()
@@ -714,6 +921,8 @@ class MainWindow(QMainWindow):
 
     def set_running(self, running):
         self.batch_running = running
+        if self.favorites_dialog:
+            self.favorites_dialog.set_import_enabled(not running)
         for widget in (self.input, self.sample_button, self.clear_button, self.path_input, self.browse_button, self.queue_button, self.start_button, self.step_box, self.obj_box, self.schlib_box, self.pcblib_box):
             widget.setEnabled(not running)
         self.stop_button.setEnabled(running)
@@ -831,6 +1040,11 @@ class MainWindow(QMainWindow):
 
     def selection_changed(self):
         part = self.selected_part()
+        self.update_download_detail(part)
+        if part and part != self.current_preview:
+            self.show_preview(part)
+
+    def update_download_detail(self, part):
         self.store_button.setEnabled(bool(part or self.current_preview))
         result = self.results.get(part)
         self.part_folder_button.setEnabled(bool(result and result.folder and Path(result.folder).is_dir()))
@@ -839,8 +1053,7 @@ class MainWindow(QMainWindow):
             self.detail.setToolTip(result.message)
         elif part:
             self.detail.setText(part + ' · 右侧自动预览，可切换 3D 模型、符号和封装')
-        if part and part != self.current_preview:
-            self.show_preview(part)
+            self.detail.setToolTip('')
 
     def _setup_preview(self):
         self.web = QWebEngineView(self.preview_stack)
@@ -864,7 +1077,7 @@ class MainWindow(QMainWindow):
         self.fit_button.setVisible(True)
         self.preview_legend.setVisible(mode == 'footprint')
         self.symbol_unit_box.setVisible(mode == 'symbol' and self.symbol_unit_box.count() > 1)
-        part = self.selected_part() or self.current_preview
+        part = self.current_preview or self.selected_part()
         if part:
             self.show_preview(part)
         else:
@@ -1103,9 +1316,17 @@ class MainWindow(QMainWindow):
         message.setTextFormat(Qt.RichText)
         message.setText('<b>LCSC3D</b><br>版本：' + VERSION + '<br><br>'
             '1. 输入 C 开头的立创编号，支持换行、空格和逗号。<br>'
-            '2. 载入列表后自动查询型号，勾选需要下载的器件；可使用「全选」「反选」。<br>'
+            '2. 载入列表后自动查询型号，勾选需要下载的器件；可使用「全选」「反选」「删除已勾选器件」。删除只移除列表记录，保留已下载文件。<br>'
             '3. 选择保存目录和 3D 格式，点击「开始下载」，仅下载勾选的器件。<br>'
             '4. 载入列表后自动预览首个器件，单击其他器件即可切换预览。<br><br>'
+            '立创商城：按 C 编号、型号或关键词搜索，每页 50 个，翻页读取；勾选跨页保留，新搜索清空。<br>'
+            '搜索结果显示现货库存与人民币单价，每个商品独立选择价格梯度，默认 1+ 或最低起订量；翻页保留选择。<br>'
+            '商品介绍和参数自动换行，可在右侧文字详情区滚动阅读完整内容。<br>'
+            '顶部「账号登录」支持微信扫码、账号密码和手机验证码；服务端图片验证也在原生界面完成。<br>'
+            '账号收藏：登录后获取收藏，搜索商品可收藏到账号，也可取消当前元件的收藏。'
+            '搜索结果和账号收藏均可勾选加入下载列表，保留已有勾选与下载结果。'
+            '商城元件默认不勾选；预览当前高亮行会将主窗口置于前台，商城窗口保持打开。'
+            '默认记住登录，重启后自动恢复；取消勾选时只保留本次登录。「退出登录」可清除已保存会话。<br><br>'
             '可保存官方 STEP、OBJ，并导出原生 AD SchLib 符号库、PcbLib 封装库；不导出 JSON 或 SVG。<br>'
             'AD 库保留引脚、焊盘和孔数据，遇到不支持的图元会提示失败；PcbLib 不内嵌 3D 模型。<br>'
             '每个器件单独保存到“器件名_编号”目录，AD 库文件按元件型号命名；下载时覆盖已有同名文件。<br>'
@@ -1133,8 +1354,12 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self.close)
 
     def closeEvent(self, event):
+        if self.favorites_dialog:
+            self.favorites_dialog.shutdown()
+            self.favorites_dialog.close()
+        store_running = self.favorites_dialog and self.favorites_dialog.has_jobs()
         update_worker = self.update_dialog.worker if self.update_dialog else None
-        if update_worker is not None or self.model_worker is not None or self.library_worker is not None or self.info_worker is not None or self.worker and self.worker.isRunning():
+        if store_running or update_worker is not None or self.model_worker is not None or self.library_worker is not None or self.info_worker is not None or self.worker and self.worker.isRunning():
             if update_worker is not None and not self.close_when_finished:
                 self.update_dialog.closing = True
                 update_worker.cancelled.set()
@@ -1161,6 +1386,9 @@ def main():
     parser.add_argument('--self-test', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-ad', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-ad-parts', default='C2765186', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-store', '--self-test-favorites', dest='self_test_favorites', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-store-live', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--capture-docs', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--update-ack', metavar='PLAN', help=argparse.SUPPRESS)
     args = parser.parse_args()
     ad_test_parts, ad_invalid_parts, _ = parse_part_numbers(args.self_test_ad_parts)
@@ -1174,8 +1402,20 @@ def main():
     app.setFont(QFont('Microsoft YaHei UI', 9))
     app.setStyleSheet(STYLES)
     logging.getLogger().setLevel(logging.ERROR)
-    window = MainWindow(settings_enabled=not bool(args.self_test or args.self_test_ad))
+    window = MainWindow(settings_enabled=not bool(args.self_test or args.self_test_ad or args.self_test_favorites or args.self_test_store_live or args.capture_docs))
     window.show()
+    if args.capture_docs:
+        from docs_capture import start
+        start(window, args.capture_docs)
+        return app.exec()
+    if args.self_test_favorites:
+        from favorites_selftest import start
+        start(window, args.self_test_favorites)
+        return app.exec()
+    if args.self_test_store_live:
+        from favorites_selftest import start_live
+        start_live(window, args.self_test_store_live)
+        return app.exec()
     if args.update_ack:
         QTimer.singleShot(250, lambda: acknowledge_update(args.update_ack))
     if getattr(sys, 'frozen', False) and not (args.self_test or args.self_test_ad):

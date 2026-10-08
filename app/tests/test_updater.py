@@ -77,6 +77,13 @@ class UpdateTests(unittest.TestCase):
         with self.assertRaises(updater.UpdateError):
             updater.parse_release(data, '2.0.0')
 
+    def test_demo_can_upgrade_to_same_version_stable_without_downgrading(self):
+        self.assertEqual(updater.parse_release(release_data(), '2.1.0-demo.1').version, '2.1.0')
+        self.assertIsNone(updater.parse_release(release_data(), '2.2.0-demo.1'))
+        self.assertIsNone(updater.parse_release(release_data(), '2.1.0'))
+        with self.assertRaises(updater.UpdateError):
+            updater.parse_release(release_data(), '2.1.0-malformed')
+
     def test_check_uses_release_api_and_rejects_malformed_responses(self):
         with patch.object(self.client, '_open', side_effect=self.open):
             self.assertEqual(self.client.check('2.0.0').version, '2.1.0')

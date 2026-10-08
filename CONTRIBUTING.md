@@ -29,16 +29,35 @@ AD 导出回归也需要 Windows，以 `olefile` 独立读取 CFB 并核对引�
 New-Item -ItemType Directory -Path outputs -Force
 Copy-Item -LiteralPath app/dist/LCSC3D.exe -Destination outputs/LCSC3D.exe
 python scripts/verify_portable.py
-python scripts/package_source.py
 python scripts/verify_self_update.py
-python scripts/finalize_delivery.py --test-count 134
+python scripts/finalize_delivery.py --test-count 229
 ```
 
 `verify_portable.py` 从独立中文目录运行 EXE，清理 Python/Qt 环境变量并限制 PATH，验证下载前型号、勾选过滤、STEP/OBJ、符号/封装及本地 3D 预览与窗口稳定性，并确认下载目录没有 JSON/SVG 或其他非模型文件。它只重建 `work/便携验证/验证结果/` 中的生成数据，保留正式 EXE；验证结束会删除临时 EXE 副本。
 
 `verify_self_update.py` 使用隔离目录内的真实 EXE 副本验证等待退出、替换、重启确认及设置保留，只关闭本次验证启动的进程。更新 API、校验失败、取消和启动失败恢复由本地测试覆盖。
 
-完整源码包为 `outputs/LCSC3D.zip`，包含应用、构建脚本、文档和许可证。`finalize_delivery.py` 核对原始验证结果，生成交付说明、截图和 SHA-256，并更新 `docs/验证记录.md`。上例的测试数量需与实际测试结果一致。
+完整源码包为 `outputs/LCSC3D.zip`，包含应用、构建脚本、文档和许可证。`finalize_delivery.py` 核对成品、更新记录后重新打包源码，逐文件核对 ZIP，比较 EXE 内模块与工作区并生成 SHA-256。上例的测试数量需与实际测试结果一致。可用 `--output-dir`、`--portable-dir`、`--update-report` 和 `--store-dir` 指向独立发行准备目录。
+
+`LCSC3D.exe --capture-docs <目录>` 从实际程序抓取主窗口、符号、封装、商城搜索、完整详情、商品原图与空白登录表单。此模式只访问公开商品资料，不读取用户保存会话，不发送短信或账号登录请求，不保存个人设置；完成后输出截图和验证报告。
+
+收藏导入 Demo 可在独立目录构建，避免覆盖正式版：
+
+```powershell
+python -m PyInstaller --noconfirm --clean --distpath outputs/demo-2.1.0-demo.5 --workpath work/store-demo5-build app/LCSC3D.spec
+```
+
+以上命令从仓库根目录运行。
+
+源码打包使用 `python scripts/package_source.py --output-dir outputs/demo-2.1.0-demo.5`，默认不传参数时仍打包到 `outputs/`。
+
+`LCSC3D.exe --self-test-store <目录>` 使用本地 HTTP 服务验证统一商城入口、独立原生窗口与预览后主窗口进入前台、默认不勾选、50 条分页与跨页勾选、详情和原图画廊、三种原生登录及图片验证、账号收藏添加和取消、收藏导入，并验证 DPAPI 加密、重建窗口后的自动恢复及退出清除，输出 JSON 和截图。兼容旧参数 `--self-test-favorites`。开发时执行 `python app/main.py --self-test-store work/store-smoke` 可运行相同流程。验证时必须同时检查进程退出码与报告中的 `success`。
+
+此项验证的会话文件位于给定的隔离目录，验证结束后清除，不接触用户真实会话。测试不联网、不使用真实账号；真实扫码及收藏读取另行联调。不得把用户的 Cookie、授权码、账号资料或会话文件放入源码、日志及交付包。
+
+Demo.5 的商城离线验证还覆盖单价精度、库存与缺失值、最低起订量、独立梯度与翻页恢复、长文本换行和文字详情滚动，以及删除勾选器件后保留文件和未勾选的下载结果。实网验证额外查询 C499531，检查价格下拉框、库存及「功能特性」的完整内容。实网商城截图必须隐藏账号标签，报告不得包含账号身份。
+
+`--self-test-store-live <目录>` 使用用户已授权且加密保存的会话，只读验证实际 EXE 的自动恢复、真实收藏与勾选导入、C2040 搜索详情、C20618009 完整商城资料、C5879483 三张原图及放大，以及「单片机」前两页、总数与跨页勾选。无可用会话时失败，不自动发起扫码；报告不包含身份、Cookie 或授权码。仅在获准使用该账号联调时执行，不清除用户的已保存登录。实际账号收藏写入另行验证，只添加并取消临时测试收藏，核对原有收藏完整保留。
 
 ## 发行
 

@@ -1,4 +1,5 @@
 """Run LCSC3D from an isolated Chinese directory with only the system PATH."""
+import argparse
 import json
 import os
 import shutil
@@ -7,9 +8,13 @@ import time
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
-source = root / 'outputs' / 'LCSC3D.exe'
-sandbox = root / 'work' / '便携验证'
-sandbox.mkdir(exist_ok=True)
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--output-dir', type=Path, default=root / 'outputs')
+parser.add_argument('--verify-dir', type=Path, default=root / 'work' / '便携验证')
+args = parser.parse_args()
+source = args.output_dir.resolve() / 'LCSC3D.exe'
+sandbox = args.verify_dir.resolve()
+sandbox.mkdir(parents=True, exist_ok=True)
 executable = sandbox / source.name
 shutil.copy2(source, executable)
 environment = os.environ.copy()

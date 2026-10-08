@@ -6,7 +6,7 @@ on:
       release_tag:
         description: Release tag matching app/main.py VERSION
         required: true
-        default: v2.0.0
+        default: v2.1.0
       build_run_id:
         description: Successful Windows build run to use
         required: true

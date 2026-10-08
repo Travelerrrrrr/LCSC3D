@@ -19,6 +19,8 @@ dist/
 *.log
 LCSC3D-settings.json
 LCSC3D-error.log
+store-session.bin
+.store-session-*
 
 .env
 .env.*

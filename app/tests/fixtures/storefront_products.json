@@ -1,0 +1,118 @@
+{
+  "C20618009": {
+    "productRecord": {
+      "productCode": "C20618009",
+      "productId": "21993682",
+      "productModel": "OD1EL89CEIBXE6YLC-100M",
+      "productName": "YSV220PR 100MHZ 3.3V FS±50PPM -40~85℃ 牵引±50PPM LVDS",
+      "productGradePlateName": "YXC(扬兴晶振)",
+      "encapsulationModel": "SMD5032-6P",
+      "productType": "压控晶体振荡器(VCXO)",
+      "remark": "差分VCXO压控 低抖动 YSV220PR系列 总频差：±50PPM 温度：-40~85℃ 牵引：±50PPM",
+      "breviaryImageUrl": "https://alimg.szlcsc.com/upload/public/product/breviary/20240229/9C64FA3BC26FDC86ACA0D903C9BBEFCF.jpg",
+      "luceneBreviaryImageUrls": "https://alimg.szlcsc.com/upload/public/product/breviary/20240229/9C64FA3BC26FDC86ACA0D903C9BBEFCF.jpg<$>https://alimg.szlcsc.com/upload/public/product/breviary/20240229/C2C4802EB533383EF4AC231C7CEC40C3.jpg<$>https://alimg.szlcsc.com/upload/public/product/breviary/20240229/8A8AA7AAA99F0E8187759B983B607F6D.jpg<$>https://alimg.szlcsc.com/upload/public/brand/product/certificate/20240102/F02288A17C3668E053B70B5D5DDC09B1.jpg"
+    },
+    "paramList": [
+      {
+        "parameterName": "频率",
+        "parameterCode": "param_13816_n",
+        "parameterDetailValue": "100MHz",
+        "parameterValue": "100MHz"
+      },
+      {
+        "parameterName": "频率稳定度",
+        "parameterCode": "param_13817_s",
+        "parameterDetailValue": "±30ppm",
+        "parameterValue": "±30ppm"
+      },
+      {
+        "parameterName": "压控电压",
+        "parameterCode": "param_19370_s",
+        "parameterDetailValue": "-",
+        "parameterValue": "-"
+      },
+      {
+        "parameterName": "输出模式",
+        "parameterCode": "param_13820",
+        "parameterDetailValue": "LVDS",
+        "parameterValue": "LVDS"
+      },
+      {
+        "parameterName": "绝对牵引范围",
+        "parameterCode": "param_19373_s",
+        "parameterDetailValue": "±50ppm",
+        "parameterValue": "±50ppm"
+      },
+      {
+        "parameterName": "工作电压",
+        "parameterCode": "param_13818_s",
+        "parameterDetailValue": "3.3V",
+        "parameterValue": "3.3V"
+      },
+      {
+        "parameterName": "工作温度",
+        "parameterCode": "param_13821_s",
+        "parameterDetailValue": "-40℃~+85℃",
+        "parameterValue": "-40℃~+85℃"
+      }
+    ],
+    "pdfFileDetailVO": {
+      "fileUrl": "/upload/public/pdf/source/20240329/0D0B50ADD77BBCD9296BC6BB3CB3DB17.pdf"
+    }
+  },
+  "C5879483": {
+    "productRecord": {
+      "productCode": "C5879483",
+      "productId": "6813573",
+      "productModel": "RT0603BRD0750RL",
+      "productName": "薄膜电阻 50Ω ±0.1% 100mW",
+      "productGradePlateName": "YAGEO(国巨)",
+      "encapsulationModel": "0603",
+      "productType": "贴片电阻",
+      "remark": "特性：无卤环氧树脂。符合RoHS标准。减少对环境有害的废物。提高组件和设备的可靠性。节省PCB空间。产品/生产中不使用禁用材料。应用：转换器。印刷设备",
+      "breviaryImageUrl": "https://alimg.szlcsc.com/upload/public/product/breviary/20250925/22B74E8DF673620CD5A2D9105AD9DE74.jpg",
+      "luceneBreviaryImageUrls": "https://alimg.szlcsc.com/upload/public/product/breviary/20250925/22B74E8DF673620CD5A2D9105AD9DE74.jpg<$>https://alimg.szlcsc.com/upload/public/product/breviary/20250925/2AC5A08134D03F9EB65E4CCE06F462CC.jpg<$>https://alimg.szlcsc.com/upload/public/product/breviary/20250925/58FB4A3C5F940E6EDACFD539E111C412.jpg"
+    },
+    "paramList": [
+      {
+        "parameterName": "电阻类型",
+        "parameterCode": "param_11154",
+        "parameterDetailValue": "薄膜电阻",
+        "parameterValue": "薄膜电阻"
+      },
+      {
+        "parameterName": "阻值",
+        "parameterCode": "param_10835_n",
+        "parameterDetailValue": "50Ω",
+        "parameterValue": "50Ω"
+      },
+      {
+        "parameterName": "精度",
+        "parameterCode": "param_10836_s",
+        "parameterDetailValue": "±0.1%",
+        "parameterValue": "±0.1%"
+      },
+      {
+        "parameterName": "功率",
+        "parameterCode": "param_10837_n",
+        "parameterDetailValue": "100mW",
+        "parameterValue": "100mW"
+      },
+      {
+        "parameterName": "温度系数",
+        "parameterCode": "param_10847_s",
+        "parameterDetailValue": "±25ppm/℃",
+        "parameterValue": "±25ppm/℃"
+      },
+      {
+        "parameterName": "工作温度",
+        "parameterCode": "param_11156_s",
+        "parameterDetailValue": "-55℃~+155℃",
+        "parameterValue": "-55℃~+155℃"
+      }
+    ],
+    "pdfFileDetailVO": {
+      "fileUrl": "/upload/public/pdf/source/20250609/0E6D5617EADA80FA3B707391883DF2D5.pdf"
+    }
+  }
+}
