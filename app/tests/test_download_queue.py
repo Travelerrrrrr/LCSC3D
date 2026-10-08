@@ -118,4 +118,3 @@ class QueueDeletionTests(unittest.TestCase):
         self.check({0})
         self.window.remove_checked_button.click()
         self.assertEqual(self.window.current_preview, 'C499531')
-
