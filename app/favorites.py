@@ -101,6 +101,39 @@ def plain_label(value='', role=None):
     return label
 
 
+class DetailLabel(QLabel):
+    """Recompute wrapped text height from its actual scroll-area width."""
+    def __init__(self, value='', role=None):
+        super().__init__(value)
+        self.setTextFormat(Qt.PlainText)
+        self.setWordWrap(True)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        if role:
+            self.setObjectName(role)
+        self.reflow = QTimer(self)
+        self.reflow.setSingleShot(True)
+        self.reflow.timeout.connect(self.fit_text)
+        self.reflow.start(0)
+
+    def setText(self, value):
+        super().setText(value)
+        self.reflow.start(0)
+
+    def clear(self):
+        self.setText('')
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if event.size().width() != event.oldSize().width():
+            self.reflow.start(0)
+
+    def fit_text(self):
+        height = max(0, self.heightForWidth(self.width())) if self.text() else 0
+        if self.minimumHeight() != height or self.maximumHeight() != height:
+            self.setFixedHeight(height)
+
+
 class ParameterTable(QTableWidget):
     """Wrap every value and let the surrounding details area scroll the table."""
     def __init__(self):
@@ -627,12 +660,10 @@ class FavoritesDialog(QDialog):
         self.detail_body = QVBoxLayout(content)
         self.detail_body.setContentsMargins(0, 0, 0, 0)
         self.detail_body.setSpacing(10)
-        self.product_title = plain_label('选择一个元件', 'section')
-        self.product_meta = plain_label('', 'muted')
-        self.product_description = plain_label('')
+        self.product_title = DetailLabel('选择一个元件', 'section')
+        self.product_meta = DetailLabel('', 'muted')
+        self.product_description = DetailLabel('')
         for label in (self.product_title, self.product_meta, self.product_description):
-            label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
-            label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             self.detail_body.addWidget(label)
         self.parameters = ParameterTable()
         self.detail_body.addWidget(self.parameters)

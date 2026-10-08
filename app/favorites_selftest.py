@@ -602,7 +602,8 @@ def start(window, destination):
                     'parameters': [('普通参数', str(i)) for i in range(12)] +
                         [('功能特性', ('轻载高效模式；外部补偿；逐波限流；可调软启动；' * 12) + '参数结束标记')]})
                 state['phase'] = 'long-detail'
-            elif state['phase'] == 'long-detail' and dialog.detail_scroll.verticalScrollBar().maximum() > 0:
+            elif (state['phase'] == 'long-detail' and dialog.detail_scroll.verticalScrollBar().maximum() > 0
+                    and dialog.product_description.height() >= dialog.product_description.heightForWidth(dialog.product_description.width())):
                 label = dialog.product_description
                 assert label.height() >= label.heightForWidth(label.width())
                 assert dialog.parameters.rowHeight(12) > 60

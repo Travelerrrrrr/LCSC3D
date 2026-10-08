@@ -612,9 +612,10 @@ class NativeStoreWindowTests(unittest.TestCase):
         feature = ('轻载高效模式；外部补偿；逐波限流；热保护；软启动。' * 10) + '参数结束标记'
         self.dialog.show_detail({'part': 'C499531', 'title': 'SIC461ED-T1-GE3', 'description': description,
                                  'parameters': [('普通参数', str(i)) for i in range(12)] + [('功能特性', feature)]})
-        self.wait_until(lambda: self.dialog.detail_scroll.verticalScrollBar().maximum() > 0
-                        and self.dialog.parameters.rowHeight(12) > 60)
         label = self.dialog.product_description
+        self.wait_until(lambda: self.dialog.detail_scroll.verticalScrollBar().maximum() > 0
+                        and self.dialog.parameters.rowHeight(12) > 60
+                        and label.height() >= label.heightForWidth(label.width()))
         self.assertEqual(label.text(), description)
         self.assertGreaterEqual(label.height(), label.heightForWidth(label.width()))
         self.assertEqual(self.dialog.parameters.item(12, 1).text(), feature)
@@ -625,6 +626,9 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.assertTrue(self.dialog.image_label.isVisible())
         self.assertFalse(self.dialog.detail_scroll.isAncestorOf(self.dialog.image_label))
         self.assertFalse(self.dialog.detail_scroll.isAncestorOf(self.dialog.collect_button))
+        self.dialog.resize(1420, 820)
+        self.wait_until(lambda: label.height() >= label.heightForWidth(label.width()))
+        self.assertEqual(label.text(), description)
 
     @classmethod
     def setUpClass(cls):
