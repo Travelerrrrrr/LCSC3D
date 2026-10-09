@@ -16,6 +16,8 @@ from store import (FAVORITES_URL, SEARCH_PAGE_SIZE, StoreClient, StoreError, Ses
                    CaptchaRequired, is_favorites_url, normalize_items)
 from store_session import SessionVault, MemoryOnlyVault
 from store_images import ImageGallery, ProductImage
+from store_diagnostics import record_request_error
+from app_logging import (log_event, new_context, log_context, contextual, record_error, traced, safe_part)
 
 
 class RequestWorker(QThread):
@@ -26,17 +28,33 @@ class RequestWorker(QThread):
         super().__init__(parent)
         self.channel, self.revision, self.operation = channel, revision, operation
         self.cancelled = threading.Event()
+        self.log_context = new_context(operation=channel, revision=revision, feature='store')
 
+    @contextual
     def run(self):
+        if self.cancelled.is_set():
+            return
         try:
+            log_event('DEBUG', 'store.job_started', operation=self.channel)
             value = self.operation(self.cancelled, self.progress.emit)
             if not self.cancelled.is_set():
+                log_event('DEBUG', 'store.job_completed', operation=self.channel)
                 self.loaded.emit(value, None)
         except Cancelled:
-            pass
+            log_event('DEBUG', 'store.job_cancelled', operation=self.channel)
         except Exception as exc:
             if not self.cancelled.is_set():
-                self.loaded.emit(None, exc if isinstance(exc, StoreError) else StoreError('请求失败，请重试。'))
+                if isinstance(exc, StoreError):
+                    if isinstance(exc, CaptchaRequired):
+                        log_event('INFO', 'store.challenge_required', operation=self.channel)
+                    else:
+                        record_request_error(exc, self.channel)
+                    error = exc
+                else:
+                    recorded = record_request_error(exc, self.channel)
+                    detail = '，诊断已保存到日志，可在「设置」中打开' if recorded else ''
+                    error = StoreError(f'请求处理异常（{type(exc).__name__}）{detail}，请重试。')
+                self.loaded.emit(None, error)
 
 
 class Jobs(QObject):
@@ -50,6 +68,8 @@ class Jobs(QObject):
         self.revisions[channel] = self.revisions.get(channel, 0) + 1
         for worker in self.workers:
             if worker.channel == channel:
+                with log_context(worker.log_context):
+                    log_event('INFO', 'store.cancel_requested')
                 worker.cancelled.set()
 
     def cancel_all(self, except_channels=()):
@@ -75,13 +95,22 @@ class Jobs(QObject):
         worker = self.sender()
         if self.current(worker):
             success, failure, _ = self.workers[worker]
-            (failure if error is not None else success)(error if error is not None else value)
+            with log_context(worker.log_context):
+                try:
+                    (failure if error is not None else success)(error if error is not None else value)
+                except Exception as exc:
+                    record_error(exc, 'store.ui_callback_failed')
+                    raise
+        elif worker is not None:
+            with log_context(worker.log_context):
+                log_event('DEBUG', 'store.stale_result_ignored')
 
     @Slot(int, object)
     def _progress(self, page, items):
         worker = self.sender()
         if self.current(worker) and self.workers[worker][2]:
-            self.workers[worker][2](page, items)
+            with log_context(worker.log_context):
+                self.workers[worker][2](page, items)
 
     @Slot()
     def _finished(self):
@@ -413,6 +442,7 @@ class LoginDialog(QDialog):
     def captcha_loaded(self, value):
         pixmap = QPixmap()
         if not pixmap.loadFromData(value['image']):
+            log_event('ERROR', 'login.qr_image_decode_failed', bytes=len(value['image']))
             self.status.setText('验证码图片加载失败，请点击「换一张」。')
             return
         self.captcha_ticket_code = value['ticket_code']
@@ -451,6 +481,7 @@ class LoginDialog(QDialog):
             self.expired()
 
     def expired(self):
+        log_event('INFO', 'login.qr_expired')
         self.poll.stop()
         self.countdown.stop()
         self.jobs.cancel('poll')
@@ -1216,11 +1247,14 @@ class FavoritesDialog(QDialog):
         if image and pixmap.loadFromData(image):
             self.image_label.set_image(pixmap)
         else:
+            log_event('WARNING', 'image.product_decode_failed', bytes=len(image or b''))
             self.image_label.setText('暂无商品图片')
 
     def open_link(self, key):
         if self.current_product and self.current_product.get(key):
-            QDesktopServices.openUrl(QUrl(self.current_product[key]))
+            opened = QDesktopServices.openUrl(QUrl(self.current_product[key]))
+            log_event('INFO' if opened else 'WARNING', 'navigation.product_link', opened=opened,
+                      kind=key if key in ('datasheet','store_url') else 'product', part=safe_part(self.current_product.get('part')))
 
     def preview_selected(self):
         product = self.selected_product()

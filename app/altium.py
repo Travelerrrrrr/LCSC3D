@@ -6,6 +6,8 @@ Unsupported input raises DownloadError before any output is committed.
 """
 from __future__ import annotations
 
+from app_logging import traced, safe_part
+
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import math
 import re
@@ -166,6 +168,7 @@ def _source_parameters(head):
             **({'LibraryLicence': head['licence']} if head.get('licence') else {})}
 
 
+@traced('export.schlib', lambda data, part, *a, **kw: {'part': safe_part(part), 'format': 'SCHLIB'}, level='INFO')
 def export_schlib(data, part, check_cancelled=lambda: None):
     doc = document(data.get('dataStr'))
     head = document(doc.get('head'))
@@ -475,6 +478,7 @@ The legacy reader requires numeric fields even when their value is zero.
     return p
 
 
+@traced('export.pcblib', lambda data, part, *a, **kw: {'part': safe_part(part), 'format': 'PCBLIB'}, level='INFO')
 def export_pcblib(data, part, check_cancelled=lambda: None):
     doc, head, name = _pcb_documents(data, part)
     shapes = _shapes(doc, '封装')

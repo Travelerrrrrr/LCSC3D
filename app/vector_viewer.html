@@ -16,8 +16,8 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; }
 (() => {
   const canvas = document.getElementById('canvas');
   let svg = null, content = null, fitted = null, box = null, zoom = 1, autoFit = true, drag = null, token = 0;
-  function signal(status, message, revision = token) {
-    console.log('LCSC3D_SVG_STATE:' + JSON.stringify({token: revision, status, message}));
+  function signal(status, message, revision = token, diagnostic = '') {
+    console.log('LCSC3D_SVG_STATE:' + JSON.stringify({token: revision, status, message, diagnostic}));
   }
   function fittedBox() {
     const rect = canvas.getBoundingClientRect();
@@ -94,7 +94,7 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; }
       }));
     } catch (error) {
       canvas.replaceChildren(); svg = null; content = null; box = null;
-      signal('error', '官方 SVG 无法显示：' + error.message, revision);
+      signal('error', '官方 SVG 无法显示：' + error.message, revision, 'svg_render');
     }
   };
   canvas.addEventListener('wheel', event => {

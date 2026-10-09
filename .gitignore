@@ -17,7 +17,9 @@ dist/
 
 # Per-machine application settings and logs.
 *.log
+*.log.*
 LCSC3D-settings.json
+.LCSC3D-settings-*.tmp
 LCSC3D-error.log
 store-session.bin
 .store-session-*

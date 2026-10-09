@@ -10,6 +10,8 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPro
 
 from errors import Cancelled
 from updater import RELEASES_URL, UpdateClient, discard_update
+from app_logging import log_event, new_context, contextual, record_error
+from store_diagnostics import record_request_error
 
 
 class UpdateWorker(QThread):
@@ -23,9 +25,13 @@ class UpdateWorker(QThread):
         super().__init__(parent)
         self.version, self.release = version, release
         self.cancelled = threading.Event()
+        self.log_context = new_context(feature='update')
 
+    @contextual
     def run(self):
         try:
+            operation = '检查更新' if self.release is None else '下载更新'
+            log_event('INFO', 'update.job_started', operation=operation)
             client = UpdateClient(self.cancelled)
             if self.release is None:
                 self.checked.emit(client.check(self.version))
@@ -33,9 +39,12 @@ class UpdateWorker(QThread):
                 manifest = client.download(self.release, Path(sys.executable),
                                            lambda done, total: self.progress.emit(done, total))
                 self.prepared.emit(manifest)
+            log_event('INFO', 'update.job_completed', operation=operation)
         except Cancelled:
+            log_event('INFO', 'update.job_cancelled')
             self.cancelled_download.emit()
         except Exception as exc:
+            record_request_error(exc, '检查更新' if self.release is None else '下载更新')
             self.failed.emit(str(exc))
 
 
@@ -148,6 +157,7 @@ class UpdateDialog(QDialog):
                 self.accept()
                 return
             except Exception as exc:
+                record_error(exc, 'update.helper_launch_failed')
                 self.on_failed('无法启动更新：' + str(exc))
                 discard_update(self.manifest)
                 self.manifest = None

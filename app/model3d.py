@@ -5,6 +5,8 @@ STEP/OBJ files; this module does not convert EDA library formats.
 """
 from __future__ import annotations
 
+from app_logging import traced, operation
+
 from dataclasses import dataclass, field
 import json
 import math
@@ -22,13 +24,15 @@ class ModelReference:
 
 def document(value) -> dict:
     if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except ValueError as exc:
-            raise DownloadError('器件文档不是有效的 JSON') from exc
+        with operation('model.document_parse'):
+            try:
+                value = json.loads(value)
+            except ValueError as exc:
+                raise DownloadError('器件文档不是有效的 JSON') from exc
     return value if isinstance(value, dict) else {}
 
 
+@traced('model.reference')
 def model_reference(component: dict) -> ModelReference | None:
     """Read the footprint's explicit 3D node, then its legacy head link."""
     package = document(component.get('packageDetail'))
@@ -80,6 +84,7 @@ class Mesh:
         }
 
 
+@traced('model.obj_parse', lambda raw, *a, **kw: {'bytes': len(raw)})
 def read_obj(raw: str, check_cancelled: Callable = lambda: None) -> Mesh:
     """Read inline MTLs and v/vt/vn faces, including relative vertex indices.
 

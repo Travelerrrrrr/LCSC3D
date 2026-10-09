@@ -123,7 +123,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.window.save_settings()
         self.window.settings_enabled = False
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
-                         {'destination', 'step', 'obj', 'schlib', 'pcblib'})
+                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level'})
 
     def assert_stable(self, hwnd, events, geometry, maximized=False):
         self.assertEqual(int(self.window.winId()), hwnd, 'Preview recreated the native window')
@@ -526,7 +526,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.window.save_settings()
         self.window.settings_enabled = False
         self.assertTrue(self.window.step_box.isChecked())
-        self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))), {'destination', 'step', 'obj', 'schlib', 'pcblib'})
+        self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
+                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level'})
         self.window.path_input.setText(str(Path(self.directory.name) / 'models'))
         captured = []
         def download(part, options, api, progress):
@@ -568,7 +569,10 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                 self.window.start_batch()
                 self.assertFalse(self.window.schlib_box.isEnabled())
                 self.assertFalse(self.window.pcblib_box.isEnabled())
-                deadline = time.monotonic() + 5
+                # Native CFB writes, AppData cross-volume moves and Qt delivery
+                # share the desktop runner. This is a correctness check, not a
+                # five-second performance contract.
+                deadline = time.monotonic() + 15
                 while self.window.batch_running and time.monotonic() < deadline:
                     QTest.qWait(20)
                 self.assertFalse(self.window.batch_running)

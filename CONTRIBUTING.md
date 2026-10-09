@@ -30,16 +30,20 @@ New-Item -ItemType Directory -Path outputs -Force
 Copy-Item -LiteralPath app/dist/LCSC3D.exe -Destination outputs/LCSC3D.exe
 python scripts/verify_portable.py
 python scripts/verify_self_update.py
-python scripts/finalize_delivery.py --test-count 229
+python scripts/finalize_delivery.py --test-count 302
 ```
 
 `verify_portable.py` 从独立中文目录运行 EXE，清理 Python/Qt 环境变量并限制 PATH，验证下载前型号、勾选过滤、STEP/OBJ、符号/封装及本地 3D 预览与窗口稳定性，并确认下载目录没有 JSON/SVG 或其他非模型文件。它只重建 `work/便携验证/验证结果/` 中的生成数据，保留正式 EXE；验证结束会删除临时 EXE 副本。
 
-`verify_self_update.py` 使用隔离目录内的真实 EXE 副本验证等待退出、替换、重启确认及设置保留，只关闭本次验证启动的进程。更新 API、校验失败、取消和启动失败恢复由本地测试覆盖。
+`verify_self_update.py` 使用隔离目录内的真实 EXE 副本验证等待退出、替换、重启确认及设置保留，只关闭本次验证启动的进程。配置和更新暂存位于隔离的 LOCALAPPDATA，额外验证 EXE 目录没有配置和更新子目录，并报告是否跨盘更新。更新 API、校验失败、取消和启动失败恢复由本地测试覆盖。
 
-完整源码包为 `outputs/LCSC3D.zip`，包含应用、构建脚本、文档和许可证。`finalize_delivery.py` 核对成品、更新记录后重新打包源码，逐文件核对 ZIP，比较 EXE 内模块与工作区并生成 SHA-256。上例的测试数量需与实际测试结果一致。可用 `--output-dir`、`--portable-dir`、`--update-report` 和 `--store-dir` 指向独立发行准备目录。
+`verify_app_data.py --output-dir <成品目录> --verify-dir <验证目录>` 使用真实 EXE 和独立 Windows 用户数据目录，普通启动后只关闭本次复制的程序窗口，验证旧配置迁移、新用户默认配置、AppData 日志和运行时解压，以及 EXE 目录没有新增文件。原有用户文件必须保留。
 
-`LCSC3D.exe --capture-docs <目录>` 从实际程序抓取主窗口、符号、封装、商城搜索、完整详情、商品原图与空白登录表单。此模式只访问公开商品资料，不读取用户保存会话，不发送短信或账号登录请求，不保存个人设置；完成后输出截图和验证报告。
+完整源码包为 `outputs/LCSC3D.zip`，包含应用、构建脚本、文档和许可证。`finalize_delivery.py` 核对成品、更新记录后重新打包源码，逐文件核对 ZIP，比较 EXE 内模块与工作区并生成 SHA-256。上例的测试数量需与实际测试结果一致。可用 `--output-dir`、`--portable-dir`、`--update-report` 和 `--store-dir` 指向独立发行准备目录；本地设置和离线商城记录可分别通过 `--settings-dir` 和 `--store-offline-dir` 提供，`--verification-date` 指定验证日期。即使使用版本子目录，也必须在任务结束前将验证后的最新 EXE、源码 ZIP、使用说明和校验和同步到 `outputs/` 根目录。每次有改动的任务完成后本地提交 Git，详见 [AGENTS.md](AGENTS.md)。
+
+`LCSC3D.exe --capture-docs <目录>` 从实际程序抓取主窗口、设置、符号、封装、商城搜索、完整详情、商品原图与空白登录表单。此模式只访问公开商品资料，不读取用户保存会话，不发送短信或账号登录请求，不保存个人设置；完成后输出截图和验证报告。
+
+`LCSC3D.exe --self-test-settings <目录>` 在隔离目录验证实际 EXE 的设置入口、两个默认系统代理选项、Debug 默认等级、独立保存与恢复、取消保留及日志等级过滤，并实际打包 ZIP、核对诊断内容、取消/确认清除和验证清除后继续记录，输出主窗口和设置截图。须提供隔离的 `LOCALAPPDATA`，它不访问用户保存会话或写入程序旁的正式配置。代理是否真正生效另由本地 HTTP 代理服务回归验证，不只检查下拉框文本。
 
 收藏导入 Demo 可在独立目录构建，避免覆盖正式版：
 
@@ -60,6 +64,8 @@ Demo.5 的商城离线验证还覆盖单价精度、库存与缺失值、最低�
 `--self-test-store-live <目录>` 使用用户已授权且加密保存的会话，只读验证实际 EXE 的自动恢复、真实收藏与勾选导入、C2040 搜索详情、C20618009 完整商城资料、C5879483 三张原图及放大，以及「单片机」前两页、总数与跨页勾选。无可用会话时失败，不自动发起扫码；报告不包含身份、Cookie 或授权码。仅在获准使用该账号联调时执行，不清除用户的已保存登录。实际账号收藏写入另行验证，只添加并取消临时测试收藏，核对原有收藏完整保留。
 
 ## 发行
+
+日志改动需运行 `test_logging_diagnostics.py` 的故障注入回归，核对事件是否包含元件/格式/阶段、异常原因链与代码位置，确认后台线程关联、更新助手关联和敏感信息排除。功能事件及排查方法见 [日志覆盖与排查](docs/日志排查.md)。
 
 版本信息在 `app/main.py` 的 `VERSION` 与 `app/version_info.txt` 的 Windows 版本资源中。同步使用说明与版本记录后，通过测试、构建和成品验证，再创建对应的 `vX.Y.Z` Git 标签和 GitHub Release。
 

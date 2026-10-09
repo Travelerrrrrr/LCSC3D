@@ -12,7 +12,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal, QStandardPaths, QRectF
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal, QRectF
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPixmap, QPainter
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
@@ -29,12 +29,19 @@ from library_preview import build_library_preview, VectorPreviewView, SYMBOL_BAC
 from update_ui import UpdateDialog
 from updater import acknowledge_update, cleanup_updates, launch_update
 from favorites import FavoritesDialog, normalize_items
+from app_settings import Preferences, set_preferences, write_settings, read_settings, initial_log_level
+from app_logging import (configure_logging, log_event, set_log_level, record_error, traced,
+                         new_context, current_context, log_context, contextual, submit_logged,
+                         safe_part, install_exception_hooks, log_runtime)
+from settings_ui import SettingsDialog
+from app_paths import data_directory, configure_runtime_paths, updates_directory
 
-VERSION = '2.1.0'
+VERSION = '2.1.1'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
-SETTINGS_PATH = APP_DIR / 'LCSC3D-settings.json'
+SETTINGS_PATH = data_directory() / 'LCSC3D-settings.json'
+LEGACY_SETTINGS_PATH = APP_DIR / 'LCSC3D-settings.json'
 
 STYLES = '''
 QWidget { font-family:"Microsoft YaHei UI"; font-size:13px; color:#23354a; }
@@ -55,6 +62,8 @@ QPushButton#primary:hover { background:#117767; }
 QPushButton#primary:disabled { background:#b4d1c9; border-color:#b4d1c9; }
 QPushButton#previewMode:checked { background:#e0f3ee; color:#117767; border-color:#168878; font-weight:600; }
 QComboBox { border:1px solid #cfd9e2; border-radius:5px; padding:5px; background:white; }
+QGroupBox { background:white; border:1px solid #dee5eb; border-radius:9px; margin-top:10px; font-weight:600; }
+QGroupBox::title { subcontrol-origin:margin; left:14px; padding:0 5px; }
 QTabWidget::pane { background:#fff; border:1px solid #dee5eb; border-radius:7px; }
 QTabBar::tab { background:#f4f7fa; padding:9px 18px; border:1px solid #dee5eb; border-bottom:0; }
 QTabBar::tab:selected { background:#e0f3ee; color:#117767; font-weight:600; }
@@ -97,12 +106,16 @@ class BatchWorker(QThread):
         self.ids, self.options = ids, options
         self.rows = list(range(len(ids))) if rows is None else rows
         self.cancelled = threading.Event()
+        self.log_context = new_context(feature='download')
 
+    @contextual
     def run(self):
+        log_event('INFO', 'download.batch_started', count=len(self.ids))
         results = download_batch(self.ids, self.options, self.cancelled,
                                  lambda index, status, title: self.phase.emit(self.rows[index], status, title),
                                  lambda index, result: self.result.emit(self.rows[index], result),
                                  api=NetworkApi(self.cancelled, use_cache=False))
+        log_event('INFO', 'download.batch_completed', count=len(results), cancelled=self.cancelled.is_set())
         self.completed.emit(results)
 
 
@@ -113,7 +126,9 @@ class ComponentInfoWorker(QThread):
         super().__init__(parent)
         self.ids, self.revision = ids, revision
         self.cancelled = threading.Event()
+        self.log_context = new_context(feature='component_lookup', revision=revision)
 
+    @contextual
     def run(self):
         remaining = iter(self.ids)
         lock = threading.Lock()
@@ -135,10 +150,11 @@ class ComponentInfoWorker(QThread):
                     return
                 except Exception as exc:
                     if not self.cancelled.is_set():
+                        record_error(exc, 'component.lookup_failed', part=safe_part(part))
                         self.loaded.emit(self.revision, part, {}, str(exc))
 
         with ThreadPoolExecutor(max_workers=3, thread_name_prefix='component-info') as pool:
-            tasks = [pool.submit(query_parts) for _ in range(min(3, len(self.ids)))]
+            tasks = [submit_logged(pool, query_parts) for _ in range(min(3, len(self.ids)))]
             for task in tasks:
                 task.result()
 
@@ -147,14 +163,33 @@ class PreviewPage(QWebEnginePage):
     state = Signal(int, str, str)
 
     def javaScriptConsoleMessage(self, level, message, line, source):
-        if message.startswith('LCSC3D_STATE:'):
+        if message.startswith('LCSC3D_GRAPHICS:'):
+            try:
+                data = json.loads(message.removeprefix('LCSC3D_GRAPHICS:'))
+                with log_context(getattr(self, 'diagnostic_context', {})):
+                    log_event('INFO', 'preview.graphics_environment',
+                              **{'graphics_' + key: data[key][:160] for key in ('vendor', 'renderer', 'version')
+                                 if isinstance(data.get(key), str)})
+            except (ValueError, TypeError, AttributeError) as exc:
+                record_error(exc, 'preview.graphics_metadata_failed', level='WARNING')
+        elif message.startswith('LCSC3D_STATE:'):
             try:
                 info = json.loads(message[len('LCSC3D_STATE:'):])
+                with log_context(getattr(self, 'diagnostic_context', {})):
+                    if info.get('status') == 'error':
+                        log_event('ERROR', 'preview.render_failed', viewer='3d',
+                                  reason=info.get('diagnostic') if info.get('diagnostic') in
+                                  ('webgl_unavailable', 'shader_compile', 'program_link', 'mesh_upload', 'context_lost', 'model_load', 'initialization') else 'renderer_error')
                 self.state.emit(int(info['token']), info['status'], info['message'])
-            except (ValueError, KeyError):
-                pass
+            except (ValueError, KeyError) as exc:
+                record_error(exc, 'preview.state_parse_failed', viewer='3d')
         elif 'faild to initial webgl' in message.lower():
+            log_event('ERROR', 'preview.webgl_initialization_failed', viewer='3d', script_line=line)
             self.state.emit(-1, 'error', '显卡未能初始化在线预览，可打开商城页面查看')
+        elif getattr(level, 'value', 0) >= 1:
+            from app_logging import log_script_error
+            with log_context(getattr(self, 'diagnostic_context', {})):
+                log_script_error(level, message, line, '3d')
 
 
 class LibraryPreviewWorker(QThread):
@@ -165,18 +200,23 @@ class LibraryPreviewWorker(QThread):
         super().__init__(parent)
         self.part = part
         self.cancelled = threading.Event()
+        self.log_context = new_context(feature='preview', part=safe_part(part), viewer='library')
 
+    @contextual
     def run(self):
         try:
+            log_event('DEBUG', 'preview.library_load_started')
             api = NetworkApi(self.cancelled)
             data = api.get_svg_data_of_component(self.part)
             api.check_cancelled()
             preview = build_library_preview(data, self.part)
             api.check_cancelled()
             self.loaded.emit(self.part, preview)
+            log_event('DEBUG', 'preview.library_load_completed', symbol_count=len(preview.symbols))
         except Cancelled:
-            pass
+            log_event('INFO', 'preview.library_load_cancelled')
         except Exception as exc:
+            record_error(exc, 'preview.library_load_failed')
             self.failed.emit(self.part, str(exc))
 
 
@@ -188,9 +228,12 @@ class ModelPreviewWorker(QThread):
         super().__init__(parent)
         self.part, self.revision, self.refresh = part, revision, refresh
         self.cancelled = threading.Event()
+        self.log_context = new_context(feature='preview', part=safe_part(part), viewer='3d', revision=revision)
 
+    @contextual
     def run(self):
         try:
+            log_event('DEBUG', 'preview.model_load_started', refresh=self.refresh)
             api = NetworkApi(self.cancelled, use_cache=not self.refresh)
             model = model_reference(api.get_cad_data_of_component(self.part))
             if model is None:
@@ -201,10 +244,12 @@ class ModelPreviewWorker(QThread):
             mesh = read_obj(raw, api.check_cancelled)
             api.check_cancelled()
             self.loaded.emit(self.part, self.revision, mesh.preview_payload())
+            log_event('DEBUG', 'preview.model_load_completed')
         except Cancelled:
-            pass
+            log_event('INFO', 'preview.model_load_cancelled')
         except Exception as exc:
             if not self.cancelled.is_set():
+                record_error(exc, 'preview.model_load_failed')
                 self.failed.emit(self.part, self.revision, str(exc))
 
 
@@ -252,6 +297,8 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1060, 740)
         self.setWindowIcon(QIcon(str(ROOT / 'assets' / 'app.ico')))
         self.settings_enabled = settings_enabled
+        self.preferences = Preferences()
+        self.settings_dialog = None
         self.worker = None
         self.batch_running = False
         self.batch_ids = []
@@ -319,6 +366,9 @@ class MainWindow(QMainWindow):
         self.update_button = QPushButton('检查更新')
         self.update_button.clicked.connect(self.check_updates)
         heading.addWidget(self.update_button)
+        self.settings_button = QPushButton('设置')
+        self.settings_button.clicked.connect(self.open_settings)
+        heading.addWidget(self.settings_button)
         about = QPushButton('使用说明')
         about.clicked.connect(self.show_help)
         heading.addWidget(about)
@@ -563,34 +613,57 @@ class MainWindow(QMainWindow):
         layout.addLayout(footer)
 
     def _restore_settings(self):
-        default = str(Path(QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)) / 'LCSC3D')
+        default = str(data_directory() / 'downloads')
         self.path_input.setText(default)
-        if not self.settings_enabled:
-            return
-        try:
-            settings = json.loads(SETTINGS_PATH.read_text(encoding='utf-8'))
-            if not isinstance(settings, dict):
-                return
-            self.path_input.setText(settings.get('destination') or default)
-            self.step_box.setChecked(bool(settings.get('step', True)))
-            self.obj_box.setChecked(bool(settings.get('obj')))
-            self.schlib_box.setChecked(bool(settings.get('schlib')))
-            self.pcblib_box.setChecked(bool(settings.get('pcblib')))
-            # Migrate removed library/WRL-only selections to the default model format.
-            if not any(box.isChecked() for box in (self.step_box, self.obj_box, self.schlib_box, self.pcblib_box)):
-                self.step_box.setChecked(True)
-        except (OSError, ValueError):
-            pass
+        settings = {}
+        if self.settings_enabled:
+            settings = read_settings(SETTINGS_PATH, LEGACY_SETTINGS_PATH)
+        destination = settings.get('destination')
+        self.path_input.setText(destination if isinstance(destination, str) and destination else default)
+        self.step_box.setChecked(bool(settings.get('step', True)))
+        self.obj_box.setChecked(bool(settings.get('obj')))
+        self.schlib_box.setChecked(bool(settings.get('schlib')))
+        self.pcblib_box.setChecked(bool(settings.get('pcblib')))
+        # Migrate removed library/WRL-only selections to the default model format.
+        if not any(box.isChecked() for box in (self.step_box, self.obj_box, self.schlib_box, self.pcblib_box)):
+            self.step_box.setChecked(True)
+        self.preferences = Preferences.from_mapping(settings)
+        set_preferences(self.preferences)
+        set_log_level(self.preferences.log_level)
 
-    def save_settings(self):
+    def save_settings(self, preferences=None):
         if not self.settings_enabled:
-            return
+            return True
+        preferences = preferences or self.preferences
         try:
-            SETTINGS_PATH.write_text(json.dumps({'destination': self.path_input.text(), 'step': self.step_box.isChecked(),
+            write_settings(SETTINGS_PATH, {'destination': self.path_input.text(), 'step': self.step_box.isChecked(),
                 'obj': self.obj_box.isChecked(), 'schlib': self.schlib_box.isChecked(),
-                'pcblib': self.pcblib_box.isChecked()}, ensure_ascii=False, indent=2), encoding='utf-8')
-        except OSError:
-            pass
+                'pcblib': self.pcblib_box.isChecked(), **preferences.to_mapping()})
+            return True
+        except OSError as exc:
+            record_error(exc, 'settings.save_failed', level='WARNING')
+            return False
+
+    @traced('settings.apply')
+    def apply_preferences(self, preferences):
+        if not self.save_settings(preferences):
+            return False
+        self.preferences = preferences
+        set_preferences(preferences)
+        set_log_level(preferences.log_level)
+        log_event('INFO', 'settings.saved', **preferences.to_mapping())
+        return True
+
+    @traced('settings.open')
+    def open_settings(self):
+        if self.settings_dialog is not None and self.settings_dialog.isVisible():
+            self.settings_dialog.raise_()
+            self.settings_dialog.activateWindow()
+            return
+        if self.settings_dialog is not None:
+            self.settings_dialog.deleteLater()
+        self.settings_dialog = SettingsDialog(self.preferences, self.apply_preferences, self)
+        self.settings_dialog.show()
 
     def input_changed(self):
         ids, invalid, duplicates = parse_part_numbers(self.input.toPlainText())
@@ -601,14 +674,17 @@ class MainWindow(QMainWindow):
             text += ' · 请修正：' + ', '.join(invalid[:4]) + ('…' if len(invalid) > 4 else '')
         self.input_info.setText(text)
 
+    @traced('queue.load', level='INFO')
     def load_queue(self):
         if self.batch_running:
             return False
         ids, invalid, duplicates = parse_part_numbers(self.input.toPlainText())
         if invalid:
+            log_event('WARNING', 'queue.input_rejected', reason='invalid_part_numbers', count=len(invalid))
             self.run_status.setText('请先修正输入中无法识别的内容：' + ', '.join(invalid[:6]))
             return False
         if not ids:
+            log_event('DEBUG', 'queue.input_rejected', reason='empty')
             self.run_status.setText('请先输入 C 开头的立创器件编号')
             return False
         checks = {part: self.table.item(row, DOWNLOAD_COLUMN).checkState()
@@ -638,6 +714,7 @@ class MainWindow(QMainWindow):
         finally:
             self.table.blockSignals(False)
         self.summary.setText(f'{len(ids)} 个器件')
+        log_event('INFO', 'queue.loaded', count=len(ids), duplicate_count=duplicates)
         self.download_selection_changed()
         self.progress_bar.setRange(0, len(ids))
         self.progress_bar.setValue(0)
@@ -671,6 +748,7 @@ class MainWindow(QMainWindow):
         if self.account_menu:
             self.account_menu.close()
 
+    @traced('login.open')
     def open_account(self):
         dialog = self.ensure_store()
         if dialog.client.account:
@@ -696,6 +774,7 @@ class MainWindow(QMainWindow):
             activate.argtypes, activate.restype = [ctypes.c_void_p], ctypes.c_int
             activate(int(self.winId()))
 
+    @traced('store.open')
     def open_favorites(self, mode=None):
         self.ensure_store()
         if isinstance(mode, str):
@@ -709,6 +788,7 @@ class MainWindow(QMainWindow):
         if self.close_when_finished:
             self.close()
 
+    @traced('queue.import', lambda self, items: {'count': len(items)}, level='INFO')
     def import_favorites(self, items):
         """Append catalog/favorite products and preserve existing queue state."""
         def status(message):
@@ -819,6 +899,7 @@ class MainWindow(QMainWindow):
         self.invert_selection_button.setEnabled(enabled)
         self.remove_checked_button.setEnabled(enabled and bool(self.checked_rows()) and not self.close_when_finished)
 
+    @traced('queue.delete_checked', level='INFO')
     def remove_checked_downloads(self):
         if self.batch_running or self.close_when_finished or self.worker and self.worker.isRunning():
             return 0
@@ -864,6 +945,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(sum(part in self.results for part in self.ids))
         self.download_selection_changed()
         self.run_status.setText(f'已从下载列表删除 {len(removed)} 个器件，剩余 {len(self.ids)} 个。已下载文件保留。')
+        log_event('INFO', 'queue.deleted', count=len(removed), remaining=len(self.ids))
         if self.ids:
             self.request_component_info()
         return len(removed)
@@ -895,6 +977,7 @@ class MainWindow(QMainWindow):
         self.change_download_selection(invert=True)
 
     def change_download_selection(self, invert=False):
+        log_event('DEBUG', 'queue.selection_changed', action='invert' if invert else 'select_all')
         if self.batch_running:
             return
         self.table.blockSignals(True)
@@ -906,17 +989,23 @@ class MainWindow(QMainWindow):
             self.table.blockSignals(False)
         self.download_selection_changed()
 
+    @traced('settings.choose_export_folder')
     def choose_folder(self):
         folder = QFileDialog.getExistingDirectory(self, '选择模型保存目录', self.path_input.text())
         if folder:
             self.path_input.setText(folder)
             self.save_settings()
+            log_event('INFO', 'settings.export_folder_changed')
+        else:
+            log_event('DEBUG', 'settings.export_folder_cancelled')
 
     def open_output(self):
         path = Path(self.path_input.text().strip())
         if path.is_dir():
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve())))
+            opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve())))
+            log_event('INFO' if opened else 'WARNING', 'navigation.output_folder', opened=opened)
         else:
+            log_event('WARNING', 'navigation.output_folder', opened=False, reason='not_created')
             self.run_status.setText('目录尚未创建，开始下载时会自动创建')
 
     def set_running(self, running):
@@ -957,11 +1046,10 @@ class MainWindow(QMainWindow):
         destination = Path(self.path_input.text().strip()).expanduser().resolve()
         try:
             destination.mkdir(parents=True, exist_ok=True)
-            # Use a unique temporary file, never replace an existing file.
-            import tempfile
-            with tempfile.TemporaryFile(dir=destination):
-                pass
+            if not os.access(destination, os.W_OK):
+                raise PermissionError('下载目录不可写')
         except OSError as exc:
+            record_error(exc, 'download.destination_unwritable')
             self.run_status.setText('保存目录不可写：' + str(exc))
             return
         self.batch_ids = [self.ids[row] for row in rows]
@@ -1028,6 +1116,7 @@ class MainWindow(QMainWindow):
         if self.close_when_finished:
             self.close()
 
+    @traced('download.stop_requested', level='INFO')
     def stop_batch(self):
         if self.worker:
             self.worker.cancelled.set()
@@ -1085,10 +1174,14 @@ class MainWindow(QMainWindow):
             self.preview_stack.setCurrentWidget(self.preview_empty)
             self.on_preview_state('empty', '选择器件后加载预览')
 
+    @traced('preview.select', lambda self, part, *a, **kw: {'part': safe_part(part)})
     def show_preview(self, part, reload=False):
         if not part or self.close_when_finished:
             return
         self.current_preview = part
+        self.preview_diagnostic_context = current_context()
+        if self.web is not None:
+            self.web.page().diagnostic_context = self.preview_diagnostic_context
         self.reload_button.setEnabled(True)
         self.store_button.setEnabled(True)
         if self.preview_mode != '3d':
@@ -1145,7 +1238,8 @@ class MainWindow(QMainWindow):
             self.model_worker.cancelled.set()
             return
         pending, self.model_pending = self.model_pending, None
-        worker = ModelPreviewWorker(*pending, parent=self)
+        with log_context(getattr(self, 'preview_diagnostic_context', {})):
+            worker = ModelPreviewWorker(*pending, parent=self)
         self.model_worker = worker
         worker.loaded.connect(self.model_preview_loaded)
         worker.failed.connect(self.model_preview_failed)
@@ -1154,6 +1248,7 @@ class MainWindow(QMainWindow):
 
     def model_preview_loaded(self, part, revision, payload):
         if self.close_when_finished or revision != self.web_revision or part != self.current_3d:
+            log_event('DEBUG', 'preview.stale_result_ignored', part=safe_part(part), revision=revision)
             return
         self.web_model = payload
         self.update_viewer_part()
@@ -1177,6 +1272,9 @@ class MainWindow(QMainWindow):
             self.request_model_preview(*pending)
 
     def on_viewer_terminated(self, *args):
+        log_event('ERROR', 'preview.renderer_terminated', viewer='3d', part=safe_part(self.current_3d),
+                  termination_status=getattr(args[0], 'value', None) if args else None,
+                  exit_code=args[1] if len(args) > 1 else None, revision=self.web_revision)
         self.viewer_started = False
         self.on_web_preview_state(self.web_revision, 'error', '3D 查看器已停止，请重新加载')
 
@@ -1188,7 +1286,9 @@ class MainWindow(QMainWindow):
             self.fit_button.setEnabled(status == 'ready')
             self.on_preview_state(status, message)
 
+    @traced('preview.library_select', lambda self, part, *a, **kw: {'part': safe_part(part)})
     def show_library_preview(self, part, reload=False):
+        self.preview_diagnostic_context = current_context()
         if reload:
             self.library_cache.pop(part, None)
         if part in self.library_cache:
@@ -1209,7 +1309,8 @@ class MainWindow(QMainWindow):
         self.start_library_preview(part)
 
     def start_library_preview(self, part):
-        worker = LibraryPreviewWorker(part, self)
+        with log_context(getattr(self, 'preview_diagnostic_context', {})):
+            worker = LibraryPreviewWorker(part, self)
         self.library_worker = worker
         worker.loaded.connect(self.library_preview_loaded)
         worker.failed.connect(self.library_preview_failed)
@@ -1262,7 +1363,9 @@ class MainWindow(QMainWindow):
             document = preview.footprint
             view, label = self.footprint_view, '封装'
         self.preview_caption.setText(part + ' · ' + label + (' · ' + document.name if document.name else ''))
-        if document.error or not view.show_document(document):
+        with log_context(getattr(self, 'preview_diagnostic_context', {})):
+            displayed = not document.error and view.show_document(document)
+        if not displayed:
             self.fit_button.setEnabled(False)
             self.preview_hint.setText(document.error or '此器件预览暂不可用')
             self.preview_stack.setCurrentWidget(self.preview_empty)
@@ -1284,6 +1387,7 @@ class MainWindow(QMainWindow):
         if self.preview_mode == 'symbol' and self.current_preview in self.library_cache:
             self.display_library_preview(self.current_preview, self.library_cache[self.current_preview])
 
+    @traced('preview.fit')
     def fit_preview(self):
         if self.preview_mode == '3d':
             self.web.page().runJavaScript('window.fitModel && window.fitModel()')
@@ -1293,22 +1397,31 @@ class MainWindow(QMainWindow):
             self.footprint_view.fit_content()
 
     def on_preview_state(self, status, message):
+        with log_context(getattr(self, 'preview_diagnostic_context', {})):
+            log_event('ERROR' if status == 'error' else 'DEBUG', 'preview.display_state',
+                      viewer=self.preview_mode, part=safe_part(self.current_preview),
+                      state=status if status in ('empty', 'loading', 'ready', 'error') else 'unknown',
+                      revision=self.web_revision)
         self.preview_state = status
         self.preview_status.setText(message)
         self.preview_status.setStyleSheet('color:#b45745;' if status == 'error' else 'color:#168878;' if status == 'ready' else 'color:#788898;')
         self.preview_changed.emit(status)
 
+    @traced('navigation.store')
     def open_store(self):
         part = self.current_preview or self.selected_part()
         if part:
             result = self.results.get(part)
             url = result.store_url if result else f'https://so.szlcsc.com/global.html?k={part}'
-            QDesktopServices.openUrl(QUrl(url))
+            opened = QDesktopServices.openUrl(QUrl(url))
+            log_event('INFO' if opened else 'WARNING', 'navigation.store_result', opened=opened, part=safe_part(part))
 
+    @traced('navigation.export_folder')
     def open_part_folder(self):
         result = self.results.get(self.selected_part())
         if result and result.folder:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(result.folder))
+            opened = QDesktopServices.openUrl(QUrl.fromLocalFile(result.folder))
+            log_event('INFO' if opened else 'WARNING', 'navigation.export_folder_result', opened=opened)
 
     def show_help(self):
         message = QMessageBox(self)
@@ -1327,6 +1440,7 @@ class MainWindow(QMainWindow):
             '搜索结果和账号收藏均可勾选加入下载列表，保留已有勾选与下载结果。'
             '商城元件默认不勾选；预览当前高亮行会将主窗口置于前台，商城窗口保持打开。'
             '默认记住登录，重启后自动恢复；取消勾选时只保留本次登录。「退出登录」可清除已保存会话。<br><br>'
+            '顶部「设置」可分别选择商城与检查更新是否使用系统代理，并调整日志等级；默认 Debug。「打开日志」可打开日志目录。<br><br>'
             '可保存官方 STEP、OBJ，并导出原生 AD SchLib 符号库、PcbLib 封装库；不导出 JSON 或 SVG。<br>'
             'AD 库保留引脚、焊盘和孔数据，遇到不支持的图元会提示失败；PcbLib 不内嵌 3D 模型。<br>'
             '每个器件单独保存到“器件名_编号”目录，AD 库文件按元件型号命名；下载时覆盖已有同名文件。<br>'
@@ -1359,11 +1473,14 @@ class MainWindow(QMainWindow):
             self.favorites_dialog.close()
         store_running = self.favorites_dialog and self.favorites_dialog.has_jobs()
         update_worker = self.update_dialog.worker if self.update_dialog else None
-        if store_running or update_worker is not None or self.model_worker is not None or self.library_worker is not None or self.info_worker is not None or self.worker and self.worker.isRunning():
+        log_worker = self.settings_dialog.worker if self.settings_dialog else None
+        if store_running or update_worker is not None or log_worker is not None or self.model_worker is not None or self.library_worker is not None or self.info_worker is not None or self.worker and self.worker.isRunning():
             if update_worker is not None and not self.close_when_finished:
                 self.update_dialog.closing = True
                 update_worker.cancelled.set()
                 update_worker.finished.connect(self.close)
+            if log_worker is not None and not self.close_when_finished:
+                log_worker.finished.connect(self.close)
             self.close_when_finished = True
             self.info_pending = None
             self.library_pending = None
@@ -1374,20 +1491,23 @@ class MainWindow(QMainWindow):
             self.setEnabled(False)
             if self.worker and self.worker.isRunning():
                 self.stop_batch()
-            self.run_status.setText('正在关闭，等待网络请求结束…')
+            self.run_status.setText('正在关闭，等待后台任务结束…')
             event.ignore()
             return
         self.save_settings()
+        log_event('INFO', 'application.closed')
         event.accept()
 
 
 def main():
+    configure_runtime_paths()
     parser = argparse.ArgumentParser()
     parser.add_argument('--self-test', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-ad', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-ad-parts', default='C2765186', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-store', '--self-test-favorites', dest='self_test_favorites', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-store-live', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-settings', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--capture-docs', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--update-ack', metavar='PLAN', help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -1402,8 +1522,22 @@ def main():
     app.setFont(QFont('Microsoft YaHei UI', 9))
     app.setStyleSheet(STYLES)
     logging.getLogger().setLevel(logging.ERROR)
-    window = MainWindow(settings_enabled=not bool(args.self_test or args.self_test_ad or args.self_test_favorites or args.self_test_store_live or args.capture_docs))
+    test_destination = next((value for value in (args.self_test, args.self_test_ad, args.self_test_favorites,
+                                                  args.self_test_store_live, args.self_test_settings, args.capture_docs) if value), None)
+    configure_logging('DEBUG' if test_destination else initial_log_level(SETTINGS_PATH), version=VERSION,
+                      directory=Path(test_destination) / 'logs' if test_destination else None)
+    install_exception_hooks()
+    log_runtime()
+    from app_logging import install_qt_logging, start_crash_capture
+    install_qt_logging()
+    start_crash_capture()
+    window = MainWindow(settings_enabled=not bool(test_destination))
+    log_event('INFO', 'application.started', **window.preferences.to_mapping())
     window.show()
+    if args.self_test_settings:
+        from settings_selftest import start
+        start(window, args.self_test_settings)
+        return app.exec()
     if args.capture_docs:
         from docs_capture import start
         start(window, args.capture_docs)
@@ -1419,7 +1553,7 @@ def main():
     if args.update_ack:
         QTimer.singleShot(250, lambda: acknowledge_update(args.update_ack))
     if getattr(sys, 'frozen', False) and not (args.self_test or args.self_test_ad):
-        QTimer.singleShot(8000, lambda: threading.Thread(target=cleanup_updates, args=(APP_DIR,), daemon=True).start())
+        QTimer.singleShot(8000, lambda: threading.Thread(target=cleanup_updates, args=(updates_directory(),), daemon=True).start())
     if args.self_test_ad:
         destination = Path(args.self_test_ad).resolve()
         destination.mkdir(parents=True, exist_ok=True)

@@ -9,8 +9,6 @@ import ssl
 import tempfile
 import threading
 import time
-import urllib.request
-from urllib.parse import urlsplit
 from collections import OrderedDict
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
@@ -19,6 +17,11 @@ from pathlib import Path
 from typing import Callable
 
 from errors import Cancelled, DownloadError
+from app_settings import proxy_for_url, proxy_mode
+from app_logging import (log_event, record_error, traced, log_context, submit_logged,
+                         safe_part, network_target)
+from store_diagnostics import record_request_error
+from app_paths import temporary_directory, replace_file
 from model3d import document, model_reference
 from altium import export_schlib, export_pcblib
 import certifi
@@ -115,14 +118,17 @@ def safe_filename(name: str) -> str:
     return clean
 
 
+@traced('file.write', lambda path, data: {'format': path.suffix.lower(), 'bytes': len(data)})
 def atomic_write(path: Path, data: bytes) -> None:
     """Replace complete files only. Partial downloads never become final files."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(prefix='.lcsc-', suffix='.tmp', dir=path.parent)
+    fd, name = tempfile.mkstemp(prefix='.lcsc-', suffix='.tmp', dir=temporary_directory())
     try:
         with os.fdopen(fd, 'wb') as stream:
             stream.write(data)
-        os.replace(name, path)
+            stream.flush()
+            os.fsync(stream.fileno())
+        replace_file(name, path)
     finally:
         if os.path.exists(name):
             os.unlink(name)
@@ -132,28 +138,31 @@ class NetworkApi:
     """Official component/model APIs with bounded requests and cancellation."""
     def __init__(self, cancelled: threading.Event | None = None, use_cache=True):
         self.cancelled = cancelled or threading.Event()
-        self.headers = {'User-Agent': 'LCSC3D/2.0.0', 'Accept-Encoding': 'gzip',
+        self.headers = {'User-Agent': 'LCSC3D/2.1.1', 'Accept-Encoding': 'gzip',
                         'Accept': '*/*'}
         self.use_cache = use_cache
-        self.proxies = urllib.request.getproxies()
 
     def check_cancelled(self):
         if self.cancelled.is_set():
             raise Cancelled()
 
+    @traced('resources.request', lambda self, url, **kw: {'host': network_target(url)})
     def fetch(self, url: str, optional: bool = False) -> bytes | None:
         for attempt in range(2):
             self.check_cancelled()
-            parsed = urlsplit(url)
-            proxy = None if urllib.request.proxy_bypass(parsed.hostname or '') else self.proxies.get(parsed.scheme)
+            proxy = proxy_for_url(url, 'store')
             response = None
             try:
+                log_event('DEBUG', 'resources.request_started', operation='元件资源请求',
+                          proxy_mode=proxy_mode('store'), using_proxy=proxy is not None, attempt=attempt + 1)
                 response = connection_pool(proxy).request('GET', url, headers=self.headers, preload_content=False,
                     timeout=Timeout(connect=6, read=18), pool_timeout=18,
                     retries=Retry(total=2, connect=0, read=0, status=0, redirect=2))
                 if optional and response.status in (404, 410):
+                    log_event('WARNING', 'resources.unavailable', status=response.status)
                     return None
                 if response.status >= 400:
+                    log_event('WARNING', 'resources.http_rejected', status=response.status, attempt=attempt + 1)
                     if response.status < 500 or attempt:
                         raise DownloadError(f'服务器返回 HTTP {response.status}')
                 else:
@@ -165,12 +174,17 @@ class NetworkApi:
                             break
                         chunks.append(block)
                     raw = b''.join(chunks)
+                    status = response.status
                     response.release_conn()
                     response = None
-                    return gzip.decompress(raw) if raw.startswith(b'\x1f\x8b') else raw
+                    body = gzip.decompress(raw) if raw.startswith(b'\x1f\x8b') else raw
+                    log_event('DEBUG', 'resources.request_completed', bytes=len(body), status=status)
+                    return body
             except (urllib3.exceptions.HTTPError, TimeoutError, OSError) as exc:
                 self.check_cancelled()
+                record_error(exc, 'resources.attempt_failed', level='WARNING', attempt=attempt + 1)
                 if attempt:
+                    record_request_error(exc, '元件资源请求')
                     raise DownloadError(f'网络请求失败：{getattr(exc, "reason", exc)}') from exc
             finally:
                 if response is not None:
@@ -180,12 +194,14 @@ class NetworkApi:
                 raise Cancelled()
         raise DownloadError('网络请求失败')
 
+    @traced('resources.component', lambda self, lcsc_id: {'part': safe_part(lcsc_id)})
     def get_info_from_easyeda_api(self, lcsc_id: str) -> dict:
         if not re.fullmatch(r'C[0-9]+', lcsc_id):
             raise DownloadError('请使用有效的立创 C 编号')
         key = 'component:' + lcsc_id
         raw = PAYLOAD_CACHE.get(key) if self.use_cache else None
         if raw is not None:
+            log_event('DEBUG', 'resources.cache_hit', resource='component')
             self.check_cancelled()
             return json.loads(raw)
         for template in COMPONENT_ENDPOINTS:
@@ -203,9 +219,11 @@ class NetworkApi:
                     PAYLOAD_CACHE.put(key, json.dumps(data, ensure_ascii=False).encode('utf-8'), 600)
                 return data
             except DownloadError as exc:
+                record_error(exc, 'resources.mirror_failed', level='WARNING', host=network_target(template))
                 last_error = exc
         raise last_error
 
+    @traced('resources.cad_parse', lambda self, part: {'part': safe_part(part)})
     def get_cad_data_of_component(self, part: str) -> dict:
         response = self.get_info_from_easyeda_api(part)
         data = dict(response['result'])
@@ -219,6 +237,7 @@ class NetworkApi:
             data['packageDetail'] = package
         return data
 
+    @traced('resources.svg', lambda self, part: {'part': safe_part(part)})
     def get_svg_data_of_component(self, part: str) -> dict:
         """Fetch storefront SVGs; use the official mirror if the first host fails."""
         if not re.fullmatch(r'C[0-9]+', part):
@@ -237,6 +256,7 @@ class NetworkApi:
                 self.check_cancelled()
                 return {**data, 'source_url': url}
             except DownloadError as exc:
+                record_error(exc, 'resources.svg_mirror_failed', level='WARNING', host=network_target(template))
                 last_error = exc
         raise DownloadError(f'官方 SVG 预览获取失败：{last_error}') from last_error
 
@@ -246,6 +266,7 @@ class NetworkApi:
     def get_step_3d_model(self, uuid: str) -> bytes | None:
         return self._model_payload(uuid, ENDPOINT_3D_MODEL_STEP, 'step')
 
+    @traced('resources.model', lambda self, uuid, template, kind: {'format': kind.upper()})
     def _model_payload(self, uuid, template, kind):
         if not isinstance(uuid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', uuid):
             raise DownloadError('3D 模型编号不受支持')
@@ -269,6 +290,7 @@ class NetworkApi:
                         PAYLOAD_CACHE.put(key, raw, 3600)
                     break
                 except (DownloadError, UnicodeDecodeError) as exc:
+                    record_error(exc, 'resources.model_mirror_failed', level='WARNING', host=network_target(endpoint))
                     last_error = exc
                     raw = None
             if raw is None and last_error is not None:
@@ -295,6 +317,7 @@ class Result:
     store_url: str = ''
 
 
+@traced('component.lookup', lambda part, api: {'part': safe_part(part)})
 def get_component_metadata(part: str, api: NetworkApi) -> dict[str, str]:
     """Read the part title and linked model name without downloading model files."""
     api.check_cancelled()
@@ -306,13 +329,14 @@ def get_component_metadata(part: str, api: NetworkApi) -> dict[str, str]:
         model = model_reference(data)
         if model:
             model_name = model.name
-    except (DownloadError, KeyError, TypeError, ValueError, IndexError, AttributeError):
+    except (DownloadError, KeyError, TypeError, ValueError, IndexError, AttributeError) as exc:
         # A missing/malformed 3D association must not hide a valid part title.
-        pass
+        record_error(exc, 'component.model_reference_invalid', level='WARNING')
     api.check_cancelled()
     return {'title': title, 'model': model_name}
 
 
+@traced('download.part', lambda part, options, *a, **kw: {'part': safe_part(part), 'formats': options.formats}, level='INFO')
 def download_part(part: str, options: Options, api: NetworkApi,
                   progress: Callable[[str, str], None] | None = None) -> Result:
     if not options.formats or any(fmt not in ('STEP', 'OBJ', 'SCHLIB', 'PCBLIB') for fmt in options.formats):
@@ -333,10 +357,12 @@ def download_part(part: str, options: Options, api: NetworkApi,
     try:
         model = model_reference(data)
     except (DownloadError, KeyError, TypeError, ValueError, IndexError) as exc:
+        record_error(exc, 'download.model_reference_failed')
         model_error = '器件模型信息缺失或格式不受支持：' + str(exc)
     if not model and not any(fmt in ('SCHLIB', 'PCBLIB') for fmt in options.formats):
         result.status = '失败' if model_error else '无模型'
         result.message = model_error or '官方库中没有关联的 3D 模型'
+        log_event('WARNING', 'download.part_result', status=result.status, reason='invalid_model' if model_error else 'no_model')
         return result
     result.model = model.name if model else ''
 
@@ -344,18 +370,21 @@ def download_part(part: str, options: Options, api: NetworkApi,
     paths = {fmt: folder / (f'{component_name}.SchLib' if fmt == 'SCHLIB' else f'{component_name}.PcbLib' if fmt == 'PCBLIB'
                             else f'{basename}.{fmt.lower()}') for fmt in options.formats}
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix='model-format') as pool:
-        step = pool.submit(api.get_step_3d_model, model.uuid) if model and 'STEP' in options.formats else None
-        obj = pool.submit(api.get_raw_3d_model_obj, model.uuid) if model and 'OBJ' in options.formats else None
+        step = submit_logged(pool, api.get_step_3d_model, model.uuid) if model and 'STEP' in options.formats else None
+        obj = submit_logged(pool, api.get_raw_3d_model_obj, model.uuid) if model and 'OBJ' in options.formats else None
         for fmt in options.formats:
             api.check_cancelled()
             path = paths[fmt]
             notify({'SCHLIB': '导出 AD 符号库', 'PCBLIB': '导出 AD 封装库'}.get(fmt, f'下载 {fmt}'), title)
+            stage = 'convert' if fmt in ('SCHLIB', 'PCBLIB') else 'download'
+            log_event('INFO', 'download.format_started', format=fmt, stage=stage)
             try:
                 if fmt == 'SCHLIB':
                     payload = export_schlib(data, part, api.check_cancelled)
                 elif fmt == 'PCBLIB':
                     payload = export_pcblib(data, part, api.check_cancelled)
                 elif not model:
+                    log_event('WARNING', 'download.format_unavailable', format=fmt, reason='no_model')
                     errors.append(f'{fmt}：' + (model_error or '官方库中没有关联的 3D 模型'))
                     continue
                 elif fmt == 'STEP':
@@ -365,23 +394,32 @@ def download_part(part: str, options: Options, api: NetworkApi,
                     payload = raw_obj.encode('utf-8') if raw_obj else None
                 api.check_cancelled()
                 if not payload:
+                    log_event('WARNING', 'download.format_unavailable', format=fmt, reason='empty_resource')
                     errors.append(f'{fmt} 不可用')
                 else:
-                    atomic_write(path, payload)
+                    stage = 'write'
+                    with log_context(format=fmt):
+                        atomic_write(path, payload)
                     completed.append(fmt)
                     result.files.append(str(path))
+                    log_event('INFO', 'download.format_completed', format=fmt, bytes=len(payload))
             except Cancelled:
+                log_event('INFO', 'download.format_cancelled', format=fmt, stage=stage)
                 raise
             except Exception as exc:
+                record_error(exc, 'download.format_failed', format=fmt, stage=stage)
                 errors.append(f'{fmt}：{exc}')
     if completed:
         result.status = '部分完成' if errors else '成功'
         result.message = '；'.join(['已保存 ' + ' / '.join(completed)] + errors)
     else:
         result.message = '；'.join(errors) or '没有可保存的文件'
+    log_event('INFO' if not errors else 'WARNING', 'download.part_result', status=result.status,
+              completed_formats=completed, failure_count=len(errors))
     return result
 
 
+@traced('download.batch', lambda parts, options, *a, **kw: {'count': len(parts), 'formats': options.formats}, level='INFO')
 def download_batch(parts, options, cancelled=None, progress=None, on_result=None, api=None, workers=3):
     """Download with bounded concurrency; callbacks may finish out of row order."""
     if not parts:
@@ -397,8 +435,10 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
             return download_part(part, options, api,
                 (lambda status, title: progress(index, status, title)) if progress else None)
         except Cancelled:
+            log_event('INFO', 'download.part_cancelled', part=safe_part(part))
             return Result(part, '已取消', message='任务已取消；已保存的完整文件保留')
         except Exception as exc:
+            record_error(exc, 'download.part_failed', part=safe_part(part))
             return Result(part, '失败', message=str(exc))
 
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='model-part') as pool:
@@ -411,7 +451,7 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                 if item is None:
                     break
                 index, part = item
-                pending[pool.submit(run, index, part)] = index
+                pending[submit_logged(pool, run, index, part)] = index
 
         fill_workers()
         while pending:
@@ -422,4 +462,9 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                 if on_result:
                     on_result(index, result)
             fill_workers()
+    log_event('INFO', 'download.batch_result', count=len(results),
+              succeeded=sum(r.status == '成功' for r in results),
+              partial=sum(r.status == '部分完成' for r in results),
+              failed=sum(r.status in ('失败', '无模型') for r in results),
+              cancelled=sum(r.status == '已取消' for r in results))
     return results

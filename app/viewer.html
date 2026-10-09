@@ -27,8 +27,8 @@
     let program, buffer, count = 0, vertexCount = 0, faceCount = 0;
     const initialView = {yaw:-0.45, pitch:-0.85};
     let yaw = initialView.yaw, pitch = initialView.pitch, zoom = 1, pan = [0,0], dragging = null;
-    function state(status, message, token = desired.token) {
-      console.log('LCSC3D_STATE:' + JSON.stringify({token, status, message}));
+    function state(status, message, token = desired.token, diagnostic = '') {
+      console.log('LCSC3D_STATE:' + JSON.stringify({token, status, message, diagnostic}));
       const notice = document.getElementById('notice');
       notice.textContent = message;
       notice.classList.toggle('hidden', status === 'ready');
@@ -36,11 +36,13 @@
     function shader(type, source) {
       const value = gl.createShader(type);
       gl.shaderSource(value, source); gl.compileShader(value);
-      if (!gl.getShaderParameter(value, gl.COMPILE_STATUS)) throw Error('3D 着色器初始化失败');
+      if (!gl.getShaderParameter(value, gl.COMPILE_STATUS)) throw Object.assign(Error('3D 着色器初始化失败'), {diagnostic:'shader_compile'});
       return value;
     }
     function initialise() {
-      if (!gl) throw Error('显卡未能初始化 WebGL，请检查显卡驱动');
+      if (!gl) throw Object.assign(Error('显卡未能初始化 WebGL，请检查显卡驱动'), {diagnostic:'webgl_unavailable'});
+      console.log('LCSC3D_GRAPHICS:' + JSON.stringify({vendor:gl.getParameter(gl.VENDOR),
+        renderer:gl.getParameter(gl.RENDERER), version:gl.getParameter(gl.VERSION)}));
       program = gl.createProgram();
       gl.attachShader(program, shader(gl.VERTEX_SHADER, `
         attribute vec3 position, normal, color;
@@ -65,7 +67,7 @@
           gl_FragColor = vec4(surfaceColor * (0.38 + 0.62 * diffuse) + 0.12 * highlight, 1.0);
         }`));
       gl.linkProgram(program);
-      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw Error('3D 渲染器初始化失败');
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw Object.assign(Error('3D 渲染器初始化失败'), {diagnostic:'program_link'});
       gl.useProgram(program);
       buffer = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -127,10 +129,10 @@
         window.fitModel();
         state('ready',part + ' · ' + faceCount + ' 个面 · 拖动旋转，滚轮缩放');
         return true;
-      } catch (error) { state('error',error.message); return false; }
+      } catch (error) { state('error',error.message,desired.token,'mesh_upload'); return false; }
     };
     window.modelError = (part,token,message) => {
-      if (token === desired.token && part === desired.part) state('error',message);
+      if (token === desired.token && part === desired.part) state('error',message,token,'model_load');
     };
     window.getModelPreviewState = () => ({part:desired.part,token:desired.token,loaded:count>0,
       vertices:vertexCount,faces:faceCount,triangles:count/3,yaw,pitch,zoom,pan:[...pan]});
@@ -149,10 +151,10 @@
     canvas.addEventListener('contextmenu',event=>event.preventDefault());
     canvas.addEventListener('wheel',event=>{event.preventDefault();zoom=Math.max(0.1,Math.min(20,zoom*Math.exp(-event.deltaY*0.001)));draw();},{passive:false});
     canvas.addEventListener('dblclick',window.fitModel);
-    canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();state('error','3D 渲染器已停止，请重新加载');});
+    canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();state('error','3D 渲染器已停止，请重新加载',desired.token,'context_lost');});
     window.addEventListener('resize',draw);
     try { initialise(); window.loadLcscPart(desired.part,desired.token); }
-    catch (error) { state('error',error.message); }
+    catch (error) { state('error',error.message,desired.token,error.diagnostic || 'initialization'); }
   </script>
 </body>
 </html>

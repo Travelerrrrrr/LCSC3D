@@ -9,11 +9,11 @@
 
 LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。它把商城选型、账号收藏、模型下载、Altium Designer 元件库导出和三类预览放在一起。下载 `LCSC3D.exe` 即可运行，无须安装 Python；导出 AD 库也无须在电脑上安装 Altium Designer。
 
-**当前版本：2.1.0** · **[下载 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.1.0.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**当前开发版本：2.1.1** · **[下载已发布的 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [已发布源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.1.1.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
-2.1.0 将商城功能正式整合到软件：独立商城窗口、每页 50 条搜索、每个商品独立选择价格梯度、库存和完整资料、账号收藏添加/取消、原图查看与放大，以及扫码、账号密码、手机验证码登录。下载列表新增删除已勾选器件。下方软件截图均由本版实际程序生成，使用公开商品资料和空白登录表单。
+2.1.1 增加设置窗口，可独立控制商城与检查更新是否使用系统代理，调整日志等级、打包或清除日志；同时完善登录失败提示和诊断。商城搜索、独立价格梯度、库存与完整资料、账号收藏、三种原生登录、模型下载和 AD 库导出继续支持。下方截图由实际程序生成，使用公开商品资料和空白登录表单。
 
-![LCSC3D 2.1.0 主窗口：Type-C 连接器预览、四种下载格式及删除勾选器件](docs/images/2.1.0/main.png)
+![LCSC3D 2.1.1 主窗口：设置入口、Type-C 连接器预览与四种下载格式](docs/images/2.1.1/main.png)
 
 ## 功能一览
 
@@ -31,6 +31,19 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 | 下载选择 | 按器件勾选，支持全选、反选，删除勾选的列表记录，可自由组合四种输出格式。 |
 | 任务与文件管理 | 显示进度和逐项结果；可以停止任务、打开器件目录、重新获取同名文件。 |
 | 便携与自更新 | 单个 EXE 直接运行，保存目录及格式设置自动记忆，支持检查更新、校验和重启更新。 |
+| 设置与日志 | 商城和检查更新独立选择系统代理或直连；调整日志等级，打开、打包或清除日志。 |
+
+## 代理设置与日志
+
+主窗口顶部点击 **设置**，可分别为 **立创商城** 和 **检查更新** 选择 **使用系统代理 / 不使用系统代理**，默认均使用系统代理。商城选项覆盖登录、搜索、收藏、图片及元件资源，更新选项覆盖新版检查和更新包下载。保存后对新请求立即生效，当前登录保留，重启后恢复设置。
+
+**日志** 支持 Debug、Info、Warning、Error、Critical，默认 Debug。点击 **打开日志** 打开日志目录。商城、登录、下载、AD 导出、三类预览及自更新均记录关键步骤、结果和错误，包含操作关联编号、元件/格式、系统码、原因链及代码位置；不保存登录凭据，并自动轮转限制大小。详见 [日志排查](docs/日志排查.md)。
+
+**打包日志** 将主程序、更新助手、轮转和崩溃日志，以及软件/系统版本、当前代理模式和日志等级打成 ZIP，保存到 `%LOCALAPPDATA%/LCSC3D/diagnostics/`，完成后打开所在目录。反馈时发送 ZIP，并附发生时间、操作步骤与截图。**清除日志** 经确认后清除日志，随后继续记录；已打包的 ZIP 保留。
+
+配置、日志、会话、缓存、临时文件及更新数据统一存放在 `%LOCALAPPDATA%/LCSC3D/`，不在 EXE 旁生成配置文件。旧配置自动迁移，默认导出目录为其中的 `downloads/`，可主动选择其他目录。
+
+![LCSC3D 2.1.1 设置：独立代理选项与日志等级](docs/images/2.1.1/settings.png)
 
 ## 商城搜索、价格与商品详情
 
@@ -38,13 +51,13 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 每页最多 **50 个元件**，点击上一页或下一页才获取目标页。跨页勾选会保留，**加入下载列表** 导入本次搜索各页勾选的元件；全选只作用于当前页。新搜索清空上一轮的勾选与价格梯度选择。
 
-![商城搜索结果：50 条分页、独立价格梯度和现货库存](docs/images/2.1.0/store-search.png)
+![商城搜索结果：50 条分页、独立价格梯度和现货库存](docs/images/2.1.1/store-search.png)
 
 价格列列出每个商品实际提供的人民币单价梯度，保留原始小数精度。默认显示 **1+**；最低 5 个起订时显示 **5+ 对应单价**，只有更高起始梯度时使用最低可用梯度。库存显示商城现货数量，零库存显示 `0`，缺少价格或库存显示 `—`。翻页后返回仍保留该商品手动选择的梯度。
 
 右侧商品介绍和参数自动换行，文字详情区可以上下滚动。图片、原图入口、数据手册和收藏按钮保持可见，长参数完整显示。
 
-![C499531 的完整介绍与参数，价格默认 1+](docs/images/2.1.0/store-details.png)
+![C499531 的完整介绍与参数，价格默认 1+](docs/images/2.1.1/store-details.png)
 
 ## 登录、记住登录与账号收藏
 
@@ -52,7 +65,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 | 账号密码登录 | 手机验证码登录 |
 | --- | --- |
-| <img src="docs/images/2.1.0/login-password.png" alt="原生账号密码登录空白表单" width="360"> | <img src="docs/images/2.1.0/login-sms.png" alt="原生手机验证码登录空白表单" width="360"> |
+| <img src="docs/images/2.1.1/login-password.png" alt="原生账号密码登录空白表单" width="360"> | <img src="docs/images/2.1.1/login-sms.png" alt="原生手机验证码登录空白表单" width="360"> |
 
 **记住登录** 默认开启，会话有效时重启软件自动恢复。登录状态使用 Windows 当前用户加密，只保存会话，不保存账号密码；**退出登录** 清除保存的会话。
 
@@ -62,7 +75,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 点击商品图片或 **查看全部原图** 打开图片窗口。缩略图、上一张/下一张和方向键可切换图片；滚轮或按钮缩放，拖动平移，支持原始大小和适应窗口。
 
-![C499531 的全部商品原图与缩放操作](docs/images/2.1.0/gallery.png)
+![C499531 的全部商品原图与缩放操作](docs/images/2.1.1/gallery.png)
 
 ## 原生 Altium Designer 元件库
 
@@ -104,13 +117,13 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 同一 Type-C 连接器的符号预览，可查看 A1～A12、B1～B12 等实际引脚编号。
 
-![LCSC3D 2.1.0 中 Type-C 连接器的原理图符号预览](docs/images/2.1.0/symbol.png)
+![LCSC3D 2.1.1 中 Type-C 连接器的原理图符号预览](docs/images/2.1.1/symbol.png)
 
 ### PCB 封装预览
 
 同一元件的封装预览，可查看焊盘编号、固定孔、轮廓和图层颜色。
 
-![LCSC3D 2.1.0 中 Type-C 连接器的 PCB 封装预览](docs/images/2.1.0/footprint.png)
+![LCSC3D 2.1.1 中 Type-C 连接器的 PCB 封装预览](docs/images/2.1.1/footprint.png)
 
 ### 与立创商城官方页面对照
 
@@ -210,7 +223,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m unittest discover -s app/tests -v
 ```
 
-运行 `app/build.ps1` 进行测试并生成 `app/dist/LCSC3D.exe`。构建与发行验证流程见 [贡献指南](CONTRIBUTING.md)。
+运行 `app/build.ps1` 进行测试并构建，最新 EXE 自动同步到 `outputs/LCSC3D.exe`。构建与发行验证流程见 [贡献指南](CONTRIBUTING.md)。
 
 ## 许可证与数据来源
 

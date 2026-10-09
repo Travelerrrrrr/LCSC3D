@@ -1,22 +1,31 @@
 """Process-local storefront sessions and public catalog data for the native UI."""
 from __future__ import annotations
 
+from app_logging import traced, safe_part, network_target, record_error
+
 import gzip
 import base64
 from html.parser import HTMLParser
 import http.cookiejar
+import http.client
 import json
 import re
+import socket
+import ssl
 from decimal import Decimal, InvalidOperation
 import threading
 import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlencode, urlsplit
+import zlib
 
 from backend import shared_ssl_context
 from errors import Cancelled
 from store_crypto import encrypt_login_value, decode_login_values
+from store_diagnostics import record_request_error
+from app_settings import proxy_settings, proxy_mode
+from app_logging import log_event
 
 PASSPORT = 'https://passport.jlc.com'
 STOREFRONT = 'https://www.szlcsc.com'
@@ -35,7 +44,9 @@ PART = re.compile(r'C[0-9]{1,18}\Z', re.I)
 
 
 class StoreError(ValueError):
-    pass
+    def __init__(self, message, *, service_code=None):
+        super().__init__(message)
+        self.service_code = service_code if type(service_code) is int else None
 
 
 class SessionExpired(StoreError):
@@ -352,17 +363,56 @@ def favorite_products(payload, expected_page):
     return products, total, size
 
 
+def request_operation(url):
+    """Use fixed labels so an error never displays query strings or auth codes."""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return '商城请求'
+    if parsed.hostname == 'passport.jlc.com':
+        return {'/api/cas/login/get-official-qrcode': '获取登录二维码',
+                '/api/cas/login/get-official-scan-result': '查询扫码状态',
+                '/api/cas/config/get-public-key': '获取登录加密配置',
+                '/api/cas/secret/update': '初始化登录加密通道',
+                '/api/cas/secure/check-login-risk': '账号登录前校验',
+                '/api/cas/secure/check-sms-risk': '短信发送前校验',
+                '/api/cas/login/with-sms/send-code': '发送短信验证码',
+                '/api/cas/login/with-sms/check-code': '验证短信验证码',
+                '/api/cas/login/with-password': '账号密码登录',
+                '/api/cas/login/get-init-session': '初始化登录会话',
+                '/api/cas/login/with-official-qrcode': '确认扫码登录',
+                '/api/cas/captcha/get-static-verify-img': '获取图片验证码',
+                '/api/cas/captcha/check-static-verify-img': '验证图片验证码',
+                }.get(parsed.path, '登录服务请求')
+    if parsed.hostname == 'mp.weixin.qq.com':
+        return '加载二维码图片'
+    return '商城请求'
+
+
 class MemorySession:
     """No file-backed cookie jar, account logging, automatic POST retries or disk cache."""
     def __init__(self):
         self.cookies = http.cookiejar.CookieJar()
-        self.opener = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(self.cookies),
-            urllib.request.HTTPSHandler(context=shared_ssl_context()))
+        self._proxies = proxy_settings('store')
+        self.opener = self._build_opener(self._proxies)
         self.lock = threading.RLock()
 
+    def _build_opener(self, proxies):
+        return urllib.request.build_opener(
+            urllib.request.ProxyHandler(proxies),
+            urllib.request.HTTPCookieProcessor(self.cookies),
+            urllib.request.HTTPSHandler(context=shared_ssl_context()))
+
+    @traced('store.http', lambda self, url, **kw: {'host': network_target(url), 'operation': request_operation(url)})
     def request(self, url, *, method='GET', data=None, headers=None, cancelled=None, limit=8 * 1024 * 1024):
         check_cancelled(cancelled)
+        operation = request_operation(url)
+
+        def failed(error, message):
+            check_cancelled(cancelled)
+            record_request_error(error, operation)
+            raise StoreError(f'{operation}失败：{message}') from None
+
         request_headers = {'User-Agent': USER_AGENT, 'Accept': 'application/json,text/html,*/*',
                            'Referer': FAVORITES_URL, 'Cache-Control': 'no-cache'}
         request_headers.update(headers or {})
@@ -370,7 +420,15 @@ class MemorySession:
         with self.lock:
             check_cancelled(cancelled)
             try:
+                proxies = proxy_settings('store')
+                if proxies != self._proxies:
+                    self.opener = self._build_opener(proxies)
+                    self._proxies = proxies
+                started = time.monotonic()
+                log_event('DEBUG', 'store.request_started', operation=operation, method=method,
+                          proxy_mode=proxy_mode('store'))
                 with self.opener.open(req, timeout=12) as response:
+                    log_event('DEBUG', 'store.http_response', status=getattr(response, 'status', None))
                     chunks, size = [], 0
                     while True:
                         check_cancelled(cancelled)
@@ -387,14 +445,38 @@ class MemorySession:
                         if len(body) > limit:
                             raise StoreError('商城返回的数据过大，已停止读取。')
                     check_cancelled(cancelled)
+                    log_event('DEBUG', 'store.request_completed', operation=operation, bytes=len(body),
+                              elapsed_ms=round((time.monotonic() - started) * 1000))
                     return body, response.geturl()
             except urllib.error.HTTPError as exc:
                 if exc.code == 401:
                     raise SessionExpired('商城登录已失效，请重新登录。') from None
-                raise StoreError(f'商城请求失败（HTTP {exc.code}），请稍后重试。') from None
-            except (urllib.error.URLError, TimeoutError, OSError):
-                # Exception strings can include the one-time code in the URL.
-                raise StoreError('连接商城失败，请检查网络后重试。') from None
+                failed(exc, f'服务器返回 HTTP {exc.code}，请稍后重试。')
+            except http.client.InvalidURL as exc:
+                failed(exc, '请求地址或代理配置无效，请检查代理设置。')
+            except http.client.HTTPException as exc:
+                failed(exc, '网络响应异常或不完整，请检查网络或代理后重试。')
+            except (gzip.BadGzipFile, EOFError, zlib.error) as exc:
+                failed(exc, '压缩响应损坏或不完整，请检查网络或代理后重试。')
+            except urllib.error.URLError as exc:
+                reason = exc.reason
+                if isinstance(reason, ssl.SSLCertVerificationError):
+                    failed(exc, '安全证书校验失败，请检查系统时间及网络代理。')
+                if isinstance(reason, ssl.SSLError):
+                    failed(exc, '安全连接建立失败，请检查网络或代理。')
+                if isinstance(reason, socket.gaierror):
+                    failed(exc, '域名解析失败，请检查网络或 DNS 设置。')
+                if isinstance(reason, TimeoutError):
+                    failed(exc, '连接超时，请检查网络后重试。')
+                failed(exc, '连接失败，请检查网络或代理后重试。')
+            except TimeoutError as exc:
+                failed(exc, '连接超时，请检查网络后重试。')
+            except StoreError:
+                raise
+            except ValueError as exc:
+                failed(exc, '请求地址或代理配置无效，请检查代理设置。')
+            except OSError as exc:
+                failed(exc, '连接中断，请检查网络或代理后重试。')
 
     def clear(self):
         with self.lock:
@@ -436,38 +518,58 @@ class StoreClient:
             raise StoreError('商城返回了无法识别的数据，请重试。') from None
         if not isinstance(result, dict):
             raise StoreError('商城返回了无法识别的数据，请重试。')
+        code = result.get('code')
+        log_event('DEBUG', 'store.response_parsed', operation=request_operation(url),
+                  code=code if isinstance(code, int) and not isinstance(code, bool) else None,
+                  data_type=type(result.get('data')).__name__)
         if self._auth_keys and url.startswith(PASSPORT + '/api/cas/'):
             try:
                 result = decode_login_values(result, self._auth_keys['privateHexKey'])
-            except Exception:
+            except Exception as exc:
+                record_error(exc, 'login.response_decrypt_failed')
                 raise StoreError('登录响应校验失败，请刷新登录后重试。') from None
         if result.get('needLogin') or result.get('msg') in ('needLogin', '请先登录') or result.get('code') in (401, 10219):
-            raise SessionExpired('商城登录已失效，请重新登录。')
+            raise SessionExpired('商城登录已失效，请重新登录。', service_code=result.get('code'))
         return result
 
     def _cas(self, path, payload, cancelled=None):
         result = self._json(PASSPORT + '/api/cas/' + path, payload=payload, cancelled=cancelled)
         if result.get('code') != 200:
-            raise StoreError('扫码登录请求失败，请刷新二维码重试。')
-        return result.get('data') or {}
+            code = result.get('code')
+            code = code if isinstance(code, int) and not isinstance(code, bool) else '未知'
+            raise StoreError(f'登录服务请求失败（服务代码 {code}），请重新登录。', service_code=result.get('code'))
+        data = result.get('data')
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            raise StoreError('登录服务返回的数据格式异常，请重新登录。')
+        return data
 
+    @traced('login.qr_create', level='INFO')
     def start_qr(self, cancelled=None):
         result = self._cas('login/get-official-qrcode', {'appId': 'LC_PUB'}, cancelled)
         token, url = result.get('token'), public_url(result.get('url'))
-        if not token or not url or urlsplit(url).hostname != 'mp.weixin.qq.com':
+        if not isinstance(token, str) or not token or not url or urlsplit(url).hostname != 'mp.weixin.qq.com':
             raise StoreError('未能获取官方登录二维码，请重试。')
+        try:
+            expires = max(1, min(int(result.get('expireSeconds') or 300), 600))
+        except (ValueError, TypeError, OverflowError):
+            raise StoreError('登录二维码有效期数据异常，请刷新重试。') from None
         image, _ = self.session.request(url, cancelled=cancelled, limit=2 * 1024 * 1024)
-        return {'token': token, 'image': image, 'expires': max(1, min(int(result.get('expireSeconds') or 300), 600))}
+        return {'token': token, 'image': image, 'expires': expires}
 
+    @traced('login.qr_poll')
     def scan_status(self, token, cancelled=None):
         result = self._cas('login/get-official-scan-result', {'token': token}, cancelled)
         status = result.get('status')
+        log_event('DEBUG', 'login.qr_state', state=status if status in ('CREATED', 'SCANNED', 'EXPIRED', 'SUCCESS', 'LOGIN_SUCCESS', 'REGISTER_SUCCESS') else 'unknown')
         if status == 'SUCCESS':
             return 'LOGIN_SUCCESS'
         if status not in ('CREATED', 'SCANNED', 'EXPIRED', 'LOGIN_SUCCESS', 'REGISTER_SUCCESS'):
             raise StoreError('无法识别扫码状态，请刷新二维码。')
         return status
 
+    @traced('login.qr_confirm', level='INFO')
     def finish_login(self, token, cancelled=None, *, remember=False):
         # The official form creates its flow session immediately before submitting.
         self._cas('login/get-init-session', {'appId': 'LC_PUB', 'clientType': 'WEB'}, cancelled)
@@ -475,11 +577,14 @@ class StoreClient:
                             payload={'token': token, 'isAutoLogin': bool(remember)}, cancelled=cancelled)
         return self._finish_auth(result, cancelled)
 
+    @traced('login.authorization_exchange')
     def _finish_auth(self, result, cancelled=None):
         if result.get('code') not in (200, 2017):
             flow = result.get('code')
-            raise StoreError(f'此账号需要补充绑定或身份验证，当前登录未完成（{flow}）。')
+            raise StoreError(f'此账号需要补充绑定或身份验证，当前登录未完成（{flow}）。', service_code=flow)
         info = result.get('data') or {}
+        if not isinstance(info, dict):
+            raise StoreError('登录授权数据格式异常，请重新登录。')
         code = info.get('authCode') or info.get('code')
         if not code:
             checked = self._cas('sso/check-login', {'appId': 'LC_PUB'}, cancelled)
@@ -490,8 +595,10 @@ class StoreClient:
         account = self.account_info(cancelled)
         check_cancelled(cancelled)
         self.account = account
+        log_event('INFO', 'login.authenticated')
         return account
 
+    @traced('login.encryption_initialize')
     def _prepare_credentials(self, cancelled=None):
         if self._auth_keys and self._login_public_key and time.monotonic() < self._auth_expires:
             return
@@ -530,14 +637,15 @@ class StoreClient:
         if code in (29001, 29003):
             self._auth_keys = {}
             self._login_public_key = ''
-            raise StoreError('登录加密会话已更新，请再次提交。')
+            raise StoreError('登录加密会话已更新，请再次提交。', service_code=code)
         if code == 10210:
-            raise StoreError('此手机号尚未注册商城账号，请使用已有账号登录。')
+            raise StoreError('此手机号尚未注册商城账号，请使用已有账号登录。', service_code=code)
         if code not in success_codes:
             message = text(result.get('message'), 200)
-            raise StoreError(message or '登录验证失败，请检查输入后重试。')
+            raise StoreError(message or '登录验证失败，请检查输入后重试。', service_code=code)
         return result
 
+    @traced('login.password', level='INFO')
     def login_password(self, username, password, cancelled=None, *, remember=False, captcha_ticket=''):
         username = username.strip()
         if not username or len(username) > 160 or not password or len(password) > 200:
@@ -551,8 +659,7 @@ class StoreClient:
         else:
             risk = self._json(PASSPORT + '/api/cas/secure/check-login-risk',
                               payload={'username': payload['username']}, cancelled=cancelled)
-            if risk.get('code') == 102280:
-                raise CaptchaRequired('pass_word_login')
+            self._credential_response(risk, 'pass_word_login', success_codes=(200,))
         result = self._json(PASSPORT + '/api/cas/login/with-password', payload=payload, cancelled=cancelled)
         if result.get('code') in (2011, 2012, 2013, 2014, 2015, 2016, 2018, 20191):
             return self._finish_auth(result, cancelled)
@@ -567,6 +674,7 @@ class StoreClient:
             raise StoreError('请输入有效的 11 位手机号码。')
         return phone
 
+    @traced('login.sms_send', level='INFO')
     def send_sms(self, phone, cancelled=None, *, captcha_ticket=''):
         phone = self._phone_number(phone)
         self._prepare_credentials(cancelled)
@@ -574,8 +682,7 @@ class StoreClient:
         if not captcha_ticket:
             risk = self._json(PASSPORT + '/api/cas/secure/check-sms-risk',
                 payload={'recipient': encrypted, 'sceneType': 'login'}, cancelled=cancelled)
-            if risk.get('code') == 102280:
-                raise CaptchaRequired('login')
+            self._credential_response(risk, 'login', success_codes=(200,))
         payload = {'phoneNumber': encrypted, 'appId': 'LC_PUB'}
         if captcha_ticket:
             payload['captchaTicket'] = captcha_ticket
@@ -583,6 +690,7 @@ class StoreClient:
         self._credential_response(result, 'login', success_codes=(200,))
         return {'sent': True}
 
+    @traced('login.sms_verify', level='INFO')
     def login_sms(self, phone, code, cancelled=None, *, remember=False, captcha_ticket=''):
         phone = self._phone_number(phone)
         if not re.fullmatch(r'[0-9]{4,8}', code.strip()):
@@ -598,6 +706,7 @@ class StoreClient:
             return self._finish_auth(result, cancelled)
         return self._finish_auth(self._credential_response(result, 'login'), cancelled)
 
+    @traced('login.challenge_image')
     def captcha_image(self, scene, cancelled=None):
         if scene not in ('pass_word_login', 'login'):
             raise StoreError('验证码场景无效，请重新登录。')
@@ -612,6 +721,7 @@ class StoreClient:
         except (ValueError, KeyError, TypeError):
             raise StoreError('获取图片验证码失败，请刷新重试。') from None
 
+    @traced('login.challenge_verify')
     def check_captcha(self, scene, ticket_code, verify_code, cancelled=None):
         if not ticket_code or not verify_code.strip() or scene not in ('pass_word_login', 'login'):
             raise StoreError('请输入图片验证码。')
@@ -622,6 +732,7 @@ class StoreClient:
             raise StoreError('图片验证码错误或已过期，请刷新后重试。')
         return data['captchaTicket']
 
+    @traced('session.verify')
     def account_info(self, cancelled=None):
         result = self._json(STOREFRONT + '/cas/user/info', cancelled=cancelled)
         data = result.get('result')
@@ -631,6 +742,7 @@ class StoreClient:
         return {'code': text(data.get('customerCode')),
                 'name': text(data.get('customerName') or data.get('nickName') or data.get('customerCode'))}
 
+    @traced('session.restore', level='INFO')
     def restore_account(self, cancelled=None):
         try:
             return self.account_info(cancelled)
@@ -662,6 +774,7 @@ class StoreClient:
                             headers={'Origin': 'https://so.szlcsc.com', 'Referer': 'https://so.szlcsc.com/global.html'})
         return search_page_products(result, page)
 
+    @traced('catalog.search_page', lambda self, keyword, page=1, **kw: {'page': page, 'query_length': len(keyword)}, level='INFO')
     def search_results_page(self, keyword, page=1, cancelled=None):
         """Read just the native pages covering one 50-result software page."""
         keyword = keyword.strip()[:160]
@@ -703,6 +816,7 @@ class StoreClient:
         exact = keyword.upper()
         products.sort(key=lambda p: (p['part'] != exact, p['title'].upper() != exact))
         check_cancelled(cancelled)
+        log_event('INFO', 'catalog.search_result', page=page, total=total, count=len(products), pages=pages)
         return {'items': products, 'total': total, 'page': page, 'pages': pages, 'size': SEARCH_PAGE_SIZE}
 
     def search(self, keyword, cancelled=None):
@@ -718,6 +832,7 @@ class StoreClient:
         payload = self._json(SEARCH_URL + '?' + urlencode({'wd': keyword}), cancelled=cancelled)
         return catalog_products(payload, keyword)
 
+    @traced('catalog.detail', lambda self, product, *a, **kw: {'part': safe_part(product.get('part') if isinstance(product, dict) else product)})
     def product(self, product, cancelled=None):
         base = dict(product) if isinstance(product, dict) else {'part': str(product).strip().upper()}
         part = base.get('part', '')
@@ -763,6 +878,7 @@ class StoreClient:
             raise detail_error
         return None
 
+    @traced('favorites.check')
     def favorite_state(self, identity, cancelled=None):
         identity = product_id(identity)
         if not identity:
@@ -776,6 +892,7 @@ class StoreClient:
         return any(product_id(row.get('productId') if isinstance(row, dict) else row) == identity
                    for row in rows)
 
+    @traced('favorites.add', lambda self, product, *a, **kw: {'part': safe_part(product.get('part'))}, level='INFO')
     def add_favorite(self, product, cancelled=None):
         identity = product_id(product.get('product_id')) if isinstance(product, dict) else ''
         if not identity:
@@ -794,6 +911,7 @@ class StoreClient:
                 raise StoreError('未能确认收藏成功，请刷新账号收藏后重试。')
             return {'product': product, 'added': True}
 
+    @traced('favorites.remove', lambda self, product, *a, **kw: {'part': safe_part(product.get('part'))}, level='INFO')
     def remove_favorite(self, product, cancelled=None):
         identity = product_id(product.get('product_id')) if isinstance(product, dict) else ''
         if not identity:
@@ -810,6 +928,7 @@ class StoreClient:
                 raise StoreError('未能确认取消收藏，请刷新账号收藏后重试。')
             return {'product': product, 'removed': True}
 
+    @traced('image.fetch', lambda self, url, *a, **kw: {'host': network_target(url)})
     def image(self, url, cancelled=None):
         url = public_url(url)
         host = urlsplit(url).hostname if url else ''
@@ -818,6 +937,7 @@ class StoreClient:
             return b''
         return self.session.request(url, cancelled=cancelled, limit=16 * 1024 * 1024)[0]
 
+    @traced('favorites.read', level='INFO')
     def favorites(self, cancelled=None, on_page=None):
         self.account_info(cancelled)
         result, seen_parts, seen_pages = [], set(), set()
@@ -839,6 +959,7 @@ class StoreClient:
             if len(result) > MAX_PARTS:
                 raise StoreError(f'收藏超过 {MAX_PARTS:,} 个，已停止读取。')
             self.pages_read = page
+            log_event('DEBUG', 'favorites.page_read', page=page, count=len(products), collected=len(result), total=total)
             check_cancelled(cancelled)
             if on_page:
                 on_page(page, products)
@@ -846,6 +967,7 @@ class StoreClient:
                 return result
         raise StoreError(f'收藏超过 {MAX_PAGES} 页，已停止读取。')
 
+    @traced('session.logout', level='INFO')
     def clear(self):
         self.account = None
         self._auth_keys = {}

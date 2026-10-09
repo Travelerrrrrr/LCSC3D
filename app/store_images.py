@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 
 from errors import Cancelled
 from store import StoreError, check_cancelled
+from app_logging import traced, log_event, record_error, safe_part
 
 
 class ProductImage(QLabel):
@@ -90,6 +91,7 @@ class PhotoView(QGraphicsView):
 
     def set_zoom(self, zoom):
         if self.photo:
+            log_event('DEBUG', 'image.zoom', zoom=round(float(zoom), 3))
             zoom = max(0.01, min(32.0, zoom))
             self.fitted = False
             self.scale(zoom / self.zoom, zoom / self.zoom)
@@ -178,6 +180,7 @@ class ImageGallery(QDialog):
             self.shortcuts.append(shortcut)
         QTimer.singleShot(0, self.begin)
 
+    @traced('image.gallery_open', lambda self: {'part': safe_part(self.part), 'image_count': len(self.urls)})
     def begin(self):
         if not self.isVisible() or not self.urls:
             return
@@ -192,19 +195,23 @@ class ImageGallery(QDialog):
                 progress(index, data)
             except Cancelled:
                 raise
-            except StoreError:
+            except StoreError as exc:
+                record_error(exc, 'image.thumbnail_failed', level='WARNING', index=index, part=safe_part(self.part))
                 continue
 
     def thumbnail_loaded(self, index, data):
         pixmap = QPixmap()
         if data and pixmap.loadFromData(data):
             self.thumbnails.item(index).setIcon(QIcon(pixmap))
+        else:
+            log_event('WARNING', 'image.thumbnail_decode_failed', index=index, part=safe_part(self.part))
 
     def select_offset(self, offset):
         row = self.thumbnails.currentRow() + offset
         if 0 <= row < len(self.urls):
             self.thumbnails.setCurrentRow(row)
 
+    @traced('image.select', lambda self, index: {'part': safe_part(self.part), 'index': index})
     def load_image(self, index):
         if not 0 <= index < len(self.urls):
             return
@@ -216,6 +223,7 @@ class ImageGallery(QDialog):
         self.scale_label.clear()
         self.status.setText('正在加载商品原图…')
         if index in self.cache:
+            log_event('DEBUG', 'image.cache_hit', index=index)
             self.show_photo(index, self.cache[index])
         else:
             self.jobs.start('original', lambda stop, progress: self.client.image(self.urls[index], stop),
@@ -224,17 +232,21 @@ class ImageGallery(QDialog):
     def image_loaded(self, index, data):
         pixmap = QPixmap()
         if not data or not pixmap.loadFromData(data):
+            log_event('ERROR', 'image.decode_failed', index=index, part=safe_part(self.part), bytes=len(data or b''))
             self.image_failed(StoreError('商品原图加载失败，请重新选择图片重试。'))
             return
         self.cache[index] = pixmap
         self.show_photo(index, pixmap)
 
     def show_photo(self, index, pixmap):
+        log_event('DEBUG', 'image.displayed', index=index, part=safe_part(self.part),
+                  width=pixmap.width(), height=pixmap.height())
         if index == self.thumbnails.currentRow():
             self.view.set_photo(pixmap)
             self.status.setText(f'原图 {pixmap.width()} × {pixmap.height()} · 滚轮缩放 · 拖动平移 · 双击适应窗口')
 
     def image_failed(self, error):
+        record_error(error, 'image.display_failed', part=safe_part(self.part))
         self.status.setText(str(error))
 
     def closeEvent(self, event):

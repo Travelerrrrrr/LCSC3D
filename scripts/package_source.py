@@ -19,13 +19,15 @@ with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compressleve
         for source in base.rglob('*'):
             if not source.is_file():
                 continue
-            if source.suffix.lower() in {'.csv', '.log'} or source.name == 'LCSC3D-settings.json':
+            if (source.suffix.lower() in {'.csv', '.log'} or '.log.' in source.name
+                    or source.name in {'LCSC3D-settings.json', 'store-session.bin'}
+                    or source.name.startswith(('.store-session-', '.LCSC3D-settings-'))):
                 continue
             relative = source.relative_to(base)
             if any(part in {'.git', '__pycache__', '.venv', 'build', 'dist', 'runtime'} for part in relative.parts):
                 continue
             archive.write(source, str(prefix / relative))
-    for filename in ('README.md', 'LICENSE', 'CONTRIBUTING.md', '.gitignore', '.gitattributes'):
+    for filename in ('README.md', 'LICENSE', 'CONTRIBUTING.md', 'AGENTS.md', '.gitignore', '.gitattributes'):
         archive.write(workspace / filename, str(Path('LCSC3D') / filename))
 shutil.copyfile(app / 'README.md', outputs / '使用说明.md')
 for name in ['LCSC3D.exe', target.name]:

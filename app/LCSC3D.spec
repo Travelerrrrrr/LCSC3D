@@ -1,6 +1,7 @@
 # PyInstaller specification. Bundle the native AD encoder and format notices
 # alongside the browser runtime; no external converter is needed.
 from pathlib import Path
+import sys
 
 root = Path(SPECPATH)
 
@@ -53,7 +54,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    runtime_tmpdir=None,
+    runtime_tmpdir=r'%LOCALAPPDATA%\LCSC3D\runtime' if sys.platform == 'win32' else None,
     console=False,
     disable_windowed_traceback=False,
     icon=str(root / 'assets' / 'app.ico'),

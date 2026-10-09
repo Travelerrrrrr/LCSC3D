@@ -81,6 +81,13 @@ def start(window, destination):
             if phase == 'main' and window.preview_state == 'ready' and window.info_worker is None:
                 assert window.current_preview == 'C456013'
                 capture(window, 'main')
+                window.open_settings()
+                settings = window.settings_dialog
+                QApplication.processEvents()
+                assert settings.store_proxy_combo.currentData() == settings.update_proxy_combo.currentData() == 'system'
+                assert settings.log_level_combo.currentData() == 'DEBUG'
+                capture(settings, 'settings')
+                settings.reject()
                 window.set_preview_mode('symbol')
                 state['phase'] = 'symbol'
             elif phase == 'symbol' and window.preview_state == 'ready' and window.library_worker is None:

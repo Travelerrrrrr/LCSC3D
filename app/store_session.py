@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 
 from store import StoreError, check_cancelled
+from app_paths import data_directory
+from app_logging import traced, log_event, record_error
 
 MAGIC = b'LCSC3D-STORE-1\0'
 COOKIE_DOMAINS = ('jlc.com', 'szlcsc.com')
@@ -20,6 +22,7 @@ class Blob(ctypes.Structure):
     _fields_ = [('size', ctypes.c_ulong), ('data', ctypes.POINTER(ctypes.c_ubyte))]
 
 
+@traced('session.crypt', lambda data, decrypt=False: {'stage': 'decrypt' if decrypt else 'encrypt'})
 def crypt(data, *, decrypt=False):
     if os.name != 'nt':
         raise StoreError('记住登录需要 Windows 用户加密功能。')
@@ -36,6 +39,7 @@ def crypt(data, *, decrypt=False):
     function.restype = ctypes.c_int
     description = None if decrypt else 'LCSC3D storefront session'
     if not function(ctypes.byref(source), description, ctypes.byref(entropy), None, None, 1, ctypes.byref(output)):
+        log_event('ERROR', 'session.dpapi_failed', winerror=ctypes.get_last_error())
         raise StoreError('无法读取或保存本机的加密登录状态。')
     try:
         return ctypes.string_at(output.data, output.size)
@@ -47,7 +51,7 @@ def crypt(data, *, decrypt=False):
 
 class SessionVault:
     def __init__(self, path=None, *, domains=COOKIE_DOMAINS):
-        self.path = Path(path) if path is not None else Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'LCSC3D' / 'store-session.bin'
+        self.path = Path(path) if path is not None else data_directory() / 'store-session.bin'
         self.domains = domains
         self.lock = threading.RLock()
         self.generation = 0
@@ -59,6 +63,7 @@ class SessionVault:
         host = domain.lstrip('.').lower()
         return any(host == value or host.endswith('.' + value) for value in self.domains)
 
+    @traced('session.save', level='INFO')
     def save(self, client, ticket, cancelled=None):
         # Snapshot before locking the vault; network requests can own the cookie lock.
         with client.session.lock:
@@ -73,6 +78,7 @@ class SessionVault:
         with self.lock:
             check_cancelled(cancelled)
             if ticket != self.generation:
+                log_event('DEBUG', 'session.stale_save_skipped')
                 return False
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary = None
@@ -84,16 +90,19 @@ class SessionVault:
                     os.fsync(stream.fileno())
                 check_cancelled(cancelled)
                 os.replace(temporary, self.path)
-            except OSError:
+            except OSError as exc:
+                record_error(exc, 'session.write_failed')
                 raise StoreError('本次登录成功，但无法保存登录状态，请检查本机目录权限。') from None
             finally:
                 if temporary:
                     temporary.unlink(missing_ok=True)
         return True
 
+    @traced('session.load', level='INFO')
     def load_into(self, client):
         with self.lock:
             if not self.exists():
+                log_event('DEBUG', 'session.no_saved_state')
                 return False
             try:
                 if self.path.stat().st_size > 256 * 1024:
@@ -118,17 +127,22 @@ class SessionVault:
                                                   bool(record.get('secure')), expires, expires is None,
                                                   None, None, record.get('rest') or {}, False)
                     client.session.cookies.set_cookie(cookie)
-                return bool(list(client.session.cookies))
-            except (StoreError, OSError, ValueError, KeyError, TypeError, AttributeError):
+                present = bool(list(client.session.cookies))
+                log_event('INFO', 'session.load_result', usable=present)
+                return present
+            except (StoreError, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                record_error(exc, 'session.saved_state_invalid', level='WARNING')
                 self.delete()
                 return False
 
+    @traced('session.delete', level='INFO')
     def delete(self):
         with self.lock:
             self.generation += 1
             try:
                 self.path.unlink(missing_ok=True)
-            except OSError:
+            except OSError as exc:
+                record_error(exc, 'session.delete_failed')
                 raise StoreError('无法清除本机的登录状态，请检查目录权限。') from None
 
 

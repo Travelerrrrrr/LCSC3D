@@ -14,7 +14,6 @@ import sys
 import tempfile
 import threading
 import time
-import urllib.request
 from urllib.parse import quote, urljoin, urlsplit
 
 import urllib3
@@ -22,6 +21,10 @@ from urllib3.util import Retry, Timeout
 
 from backend import connection_pool
 from errors import Cancelled
+from app_settings import proxy_for_url, proxy_mode, initial_log_level
+from app_logging import (log_event, record_error, traced, current_context, log_context,
+                         configure_logging, network_target)
+from app_paths import data_directory, updates_directory, replace_file
 
 REPOSITORY = 'Travelerrrrrr/LCSC3D'
 RELEASES_URL = f'https://github.com/{REPOSITORY}/releases/latest'
@@ -102,23 +105,25 @@ def checksum_for_exe(raw: bytes) -> str:
 class UpdateClient:
     def __init__(self, cancelled: threading.Event | None = None):
         self.cancelled = cancelled or threading.Event()
-        self.proxies = urllib.request.getproxies()
 
     def check_cancelled(self):
         if self.cancelled.is_set():
             raise Cancelled()
 
+    @traced('update.http', lambda self, url: {'host': network_target(url)})
     def _open(self, url):
         for _ in range(6):
             self.check_cancelled()
             parsed = urlsplit(url)
             if parsed.scheme != 'https' or parsed.hostname not in DOWNLOAD_HOSTS or parsed.username:
                 raise UpdateError('更新服务器返回了不受支持的下载地址')
-            proxy = None if urllib.request.proxy_bypass(parsed.hostname) else self.proxies.get('https')
+            proxy = proxy_for_url(url, 'update')
+            log_event('DEBUG', 'update.request_started', proxy_mode=proxy_mode('update'), using_proxy=proxy is not None)
             response = connection_pool(proxy).request('GET', url, preload_content=False, redirect=False,
-                headers={'User-Agent': 'LCSC3D-updater/2.0.0', 'Accept': 'application/vnd.github+json',
+                headers={'User-Agent': 'LCSC3D-updater/2.1.1', 'Accept': 'application/vnd.github+json',
                          'Accept-Encoding': 'identity'}, timeout=Timeout(connect=6, read=18), pool_timeout=18,
                 retries=Retry(total=1, connect=1, read=0, status=0, redirect=0))
+            log_event('DEBUG', 'update.response_received', status=response.status)
             if response.status in (301, 302, 303, 307, 308):
                 location = response.headers.get('Location')
                 response.close()
@@ -137,6 +142,7 @@ class UpdateClient:
             return response
         raise UpdateError('更新下载重定向次数过多')
 
+    @traced('update.read', lambda self, url, *a, **kw: {'host': network_target(url)})
     def _read(self, url, maximum=1024*1024):
         response = None
         try:
@@ -161,23 +167,29 @@ class UpdateClient:
                 response.close()
                 response.release_conn()
 
+    @traced('update.check', lambda self, current_version: {'current_version': current_version}, level='INFO')
     def check(self, current_version):
         try:
             data = json.loads(self._read(LATEST_API))
         except (ValueError, UnicodeDecodeError) as exc:
             raise UpdateError('更新接口返回了无法识别的数据') from exc
-        return parse_release(data, current_version)
+        result = parse_release(data, current_version)
+        log_event('INFO', 'update.check_result', available=result is not None, target_version=result.version if result else None)
+        return result
 
+    @traced('update.download', lambda self, release, *a, **kw: {'target_version': release.version}, level='INFO')
     def download(self, release: Release, executable: Path, progress=lambda done, total: None) -> Path:
-        """Stage on the target volume. Never write to the running executable."""
+        """Stage in local app data. Never write to the running executable."""
         target = executable.resolve(strict=True)
         self.check_cancelled()
-        stage = Path(tempfile.mkdtemp(prefix=STAGE_PREFIX, dir=target.parent))
+        stage = Path(tempfile.mkdtemp(prefix=STAGE_PREFIX, dir=updates_directory()))
+        log_event('INFO', 'update.stage_created', update_id=stage.name, expected_bytes=release.size)
         response = None
         prepared = False
         try:
             expected = checksum_for_exe(self._read(release.checksum_url))
             if release.digest and expected != release.digest:
+                log_event('ERROR', 'update.checksum_metadata_mismatch')
                 raise UpdateError('发行校验文件与 GitHub 附件 SHA-256 不一致')
             response = self._open(release.exe_url)
             digest, count = hashlib.sha256(), 0
@@ -191,6 +203,7 @@ class UpdateClient:
                         break
                     count += len(block)
                     if count > release.size:
+                        log_event('ERROR', 'update.size_exceeded', received_bytes=count, expected_bytes=release.size)
                         raise UpdateError('下载文件超出了发行记录中的大小')
                     stream.write(block)
                     digest.update(block)
@@ -199,15 +212,21 @@ class UpdateClient:
                 os.fsync(stream.fileno())
             self.check_cancelled()
             if count != release.size or digest.hexdigest() != expected:
+                log_event('ERROR', 'update.integrity_failed', received_bytes=count, expected_bytes=release.size,
+                          size_matches=count == release.size, digest_matches=digest.hexdigest() == expected)
                 raise UpdateError('更新文件不完整或 SHA-256 校验失败，原程序已保留')
             with new.open('rb') as stream:
                 if stream.read(2) != b'MZ':
                     raise UpdateError('更新附件不是 Windows 可执行文件')
             plan = {'target': str(target), 'sha256': expected, 'original_sha256': file_hash(target),
+                    'target_directory': str(target.parent),
+                    'diagnostics': {key: value for key, value in current_context().items()
+                                    if key in ('operation_id', 'parent_id', 'root_id')},
                     'parent_pid': os.getpid(), 'nonce': secrets.token_hex(24), 'version': release.version}
             manifest = stage / 'plan.json'
             manifest.write_text(json.dumps(plan, ensure_ascii=False), encoding='utf-8')
             prepared = True
+            log_event('INFO', 'update.verified', update_id=stage.name, bytes=count)
             return manifest
         except (urllib3.exceptions.HTTPError, OSError) as exc:
             self.check_cancelled()
@@ -228,12 +247,18 @@ def file_hash(path):
 def _load_plan(manifest):
     manifest = Path(manifest).resolve(strict=True)
     stage = manifest.parent
-    if manifest.name != 'plan.json' or not stage.name.startswith(STAGE_PREFIX):
+    if manifest.name != 'plan.json' or not stage.name.startswith(STAGE_PREFIX) or stage.is_symlink():
         raise UpdateError('更新计划路径无效')
     plan = json.loads(manifest.read_text(encoding='utf-8'))
     target = Path(plan['target'])
-    if not target.is_absolute() or target.resolve() != target or target.parent != stage.parent or target.suffix.lower() != '.exe':
-        raise UpdateError('更新目标必须是更新目录旁的原 EXE')
+    if not target.is_absolute() or target.resolve() != target or target.suffix.lower() != '.exe':
+        raise UpdateError('更新目标必须是原 EXE 的绝对路径')
+    if 'target_directory' in plan:
+        if stage.parent != updates_directory().resolve() or target.parent != Path(plan['target_directory']):
+            raise UpdateError('更新目标或暂存目录与原计划不一致')
+    elif target.parent != stage.parent:
+        # 2.1.0's already-running helper uses its original sidecar plan.
+        raise UpdateError('旧版更新计划与原 EXE 目录不一致')
     if any((stage / name).is_symlink() for name in ('new.exe', 'previous.exe', 'ack.json', 'result.json')):
         raise UpdateError('更新目录中的文件路径无效')
     for key in ('sha256', 'original_sha256'):
@@ -241,6 +266,10 @@ def _load_plan(manifest):
             raise UpdateError('更新计划的校验值无效')
     if type(plan['parent_pid']) is not int or plan['parent_pid'] <= 0 or not re.fullmatch(r'[a-f0-9]{48}', plan['nonce']):
         raise UpdateError('更新计划的进程信息无效')
+    context = plan.get('diagnostics')
+    plan['diagnostics'] = {key: value for key, value in (context.items() if isinstance(context, dict) else [])
+                           if key in ('operation_id', 'parent_id', 'root_id') and isinstance(value, str)
+                           and re.fullmatch(r'[a-f0-9]{32}', value)}
     return manifest, stage, target, plan
 
 
@@ -252,6 +281,7 @@ def _spawn(arguments, directory):
                             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
 
 
+@traced('update.launch_helper', level='INFO')
 def launch_update(manifest, executable=None):
     if sys.platform != 'win32' or not getattr(sys, 'frozen', False):
         raise UpdateError('自更新适用于 Windows 便携 EXE；源码运行请从发布页面下载')
@@ -288,7 +318,7 @@ def _replace(source, target, seconds=30):
     deadline = time.monotonic() + seconds
     while True:
         try:
-            os.replace(source, target)
+            replace_file(source, target)
             return
         except PermissionError:
             if time.monotonic() >= deadline:
@@ -325,36 +355,65 @@ def _stop_restarted_process(process):
 def apply_update(manifest) -> int:
     """Invoked in the copied helper, before importing Qt or opening a window."""
     manifest, stage, target, plan = _load_plan(manifest)
+    configure_logging(initial_log_level(data_directory() / 'LCSC3D-settings.json'),
+                      version=plan.get('version'), role='update')
+    with log_context(plan.get('diagnostics', {}), update_id=stage.name):
+        return _apply_update(manifest, stage, target, plan)
+
+
+@traced('update.install', level='INFO')
+def _apply_update(manifest, stage, target, plan):
     backup = stage / 'previous.exe'
     moved = False
     process = None
+    phase = 'wait_for_exit'
     try:
+        log_event('INFO', 'update.install_stage', stage=phase)
         _wait_for_parent(plan['parent_pid'])
+        phase = 'verify_before_replace'
+        log_event('INFO', 'update.install_stage', stage=phase)
         if file_hash(stage / 'new.exe') != plan['sha256'] or file_hash(target) != plan['original_sha256']:
             raise UpdateError('更新文件或原程序在准备后发生了变化，更新已中止')
+        phase = 'backup'
+        log_event('INFO', 'update.install_stage', stage=phase)
         _replace(target, backup)
         moved = True
+        phase = 'replace'
+        log_event('INFO', 'update.install_stage', stage=phase)
         _replace(stage / 'new.exe', target)
+        phase = 'restart'
+        log_event('INFO', 'update.install_stage', stage=phase)
         process = _spawn([str(target), '--update-ack', str(manifest)], target.parent)
+        phase = 'confirm_startup'
+        log_event('INFO', 'update.install_stage', stage=phase)
         if not _wait_for_ack(stage, plan['nonce'], process):
             raise UpdateError('新版启动失败，正在恢复原程序')
         result = {'status': 'success', 'version': plan['version'], 'helper_pid': os.getpid(), 'new_pid': process.pid}
+        log_event('INFO', 'update.install_result', status='success')
         code = 0
     except Exception as exc:
         error = str(exc)
+        record_error(exc, 'update.install_failed', stage=phase)
+        result = {'status': 'failed', 'error_type': type(exc).__name__, 'error_id': getattr(exc, '_diagnostic_id', None),
+                  'stage': phase, 'helper_pid': os.getpid()}
         if moved:
             try:
+                log_event('WARNING', 'update.rollback_started', failed_stage=phase)
                 if process is not None:
                     _stop_restarted_process(process)
                 _replace(backup, target)
                 _spawn([str(target)], target.parent)
+                log_event('INFO', 'update.rollback_completed')
+                result['rollback'] = 'success'
             except Exception as rollback_error:
+                record_error(rollback_error, 'update.rollback_failed', level='CRITICAL')
+                result['rollback'] = 'failed'
                 error += f'；自动恢复未完成，原程序保留在 {backup}：{rollback_error}'
-        result = {'status': 'failed', 'error': error, 'helper_pid': os.getpid()}
+        result['error'] = '更新失败，详见 LCSC3D-update.log（' + phase + '）。'
         code = 1
     (stage / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     if code:
-        _show_failure(result['error'])
+        _show_failure(error)
     return code
 
 
@@ -377,6 +436,8 @@ def acknowledge_update(manifest, executable=None):
     temporary = stage / 'ack.tmp'
     temporary.write_text(json.dumps({'nonce': plan['nonce'], 'pid': os.getpid()}), encoding='ascii')
     os.replace(temporary, stage / 'ack.json')
+    with log_context(plan.get('diagnostics', {}), update_id=stage.name):
+        log_event('INFO', 'update.startup_acknowledged')
 
 
 def cleanup_updates(directory):
@@ -389,6 +450,7 @@ def cleanup_updates(directory):
             result = json.loads((stage / 'result.json').read_text(encoding='utf-8'))
             if result.get('status') == 'success':
                 shutil.rmtree(stage)
-        except (OSError, ValueError):
+                log_event('DEBUG', 'update.stage_cleaned', update_id=stage.name)
+        except (OSError, ValueError) as exc:
             # Running helpers are locked on Windows; a subsequent startup retries.
-            pass
+            record_error(exc, 'update.cleanup_deferred', level='DEBUG')

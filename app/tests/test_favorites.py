@@ -1,5 +1,6 @@
 """Native storefront behavior against a local HTTP service, never a real account."""
 import http.cookiejar
+import http.client
 import base64
 import ctypes
 import json
@@ -267,6 +268,41 @@ class StoreProtocolTests(unittest.TestCase):
         self.assertEqual(self.client.scan_status(qr['token']), 'CREATED')
         self.service.scan_state = 'SUCCESS'
         self.assertEqual(self.client.scan_status(qr['token']), 'LOGIN_SUCCESS')
+
+    def test_malformed_qr_fields_are_reported_without_an_uncaught_exception(self):
+        for data in ('unexpected response', ['unexpected'],
+                     {'token': 'offline-token', 'url': 'https://mp.weixin.qq.com/offline.png', 'expireSeconds': 'invalid'},
+                     {'token': {'invalid': True}, 'url': 'https://mp.weixin.qq.com/offline.png'}):
+            with self.subTest(data=data), \
+                    patch.object(self.client, '_json', return_value={'code': 200, 'data': data}), \
+                    self.assertRaises(StoreError):
+                self.client.start_qr()
+        self.assertFalse(self.service.requests)
+
+    def test_rejected_risk_check_never_submits_password_or_sends_sms(self):
+        original = self.client._json
+
+        def rejected(url, **kwargs):
+            if '/secure/check-' in url:
+                return {'code': 500, 'message': '登录服务暂不可用'}
+            return original(url, **kwargs)
+
+        for action in ('password', 'sms'):
+            with self.subTest(action=action), patch.object(self.client, '_json', side_effect=rejected), \
+                    self.assertRaisesRegex(StoreError, '登录服务暂不可用'):
+                if action == 'password':
+                    self.client.login_password('OFFLINE', 'fixture-password')
+                else:
+                    self.client.send_sms('13800000000')
+        self.assertEqual(self.service.sms_sends, 0)
+        self.assertFalse(self.service.auth_inputs)
+        self.assertFalse(any('/with-password' in row[1] or '/with-sms/' in row[1] for row in self.service.requests))
+
+    def test_malformed_authorization_does_not_establish_an_account(self):
+        with self.assertRaisesRegex(StoreError, '登录授权数据格式异常'):
+            self.client._finish_auth({'code': 200, 'data': 'unexpected response'})
+        self.assertIsNone(self.client.account)
+        self.assertFalse(self.service.requests)
 
     def test_scan_expiry_and_unknown_state_do_not_complete_login(self):
         self.service.scan_state = 'EXPIRED'
@@ -756,6 +792,29 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.assertFalse(login.isVisible())
         self.assertFalse(login.password_input.text())
         self.assertIn('账号：', self.window.account_button.text())
+
+    def test_login_network_failure_shows_details_and_can_be_retried(self):
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.dict('os.environ', {'LOCALAPPDATA': folder}), \
+                patch('urllib.request.OpenerDirector.open',
+                      side_effect=http.client.IncompleteRead(b'', 16)):
+            self.dialog.open_login()
+            self.wait_until(lambda: not self.dialog.has_jobs())
+            login = self.dialog.login_dialog
+            self.assertIn('网络响应异常或不完整', login.status.text())
+            self.assertFalse(login.token)
+            self.assertTrue(login.refresh_button.isEnabled())
+            login.login_tabs.setCurrentIndex(2)
+            login.phone_input.setText('13800000000')
+            login.sms_send_button.click()
+            self.wait_until(lambda: not self.dialog.has_jobs())
+            self.assertIn('网络响应异常或不完整', login.status.text())
+            self.assertTrue(login.sms_send_button.isEnabled())
+            self.assertFalse(login.sms_sent_phone)
+            self.assertEqual(self.service.sms_sends, 0)
+        login.login_tabs.setCurrentIndex(0)
+        self.wait_until(lambda: bool(login.token))
+        self.assertIn('等待扫码', login.status.text())
 
     def test_sms_tab_sends_once_during_cooldown_and_authenticates(self):
         self.window.account_button.click()

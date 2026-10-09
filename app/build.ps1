@@ -11,4 +11,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
 & $buildPython -m PyInstaller --noconfirm --clean LCSC3D.spec
 if ($LASTEXITCODE -ne 0) { throw 'EXE build failed' }
-Write-Host 'Done: see dist\LCSC3D.exe'
+$latestOutput = Join-Path (Split-Path -Parent $PSScriptRoot) 'outputs'
+New-Item -ItemType Directory -Path $latestOutput -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'dist\LCSC3D.exe') -Destination (Join-Path $latestOutput 'LCSC3D.exe') -Force
+Write-Host "Done: latest EXE is in $latestOutput\LCSC3D.exe"

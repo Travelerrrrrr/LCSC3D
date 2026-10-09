@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -12,6 +13,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import updater
 from errors import Cancelled
+from app_logging import configure_logging, close_logging
 
 NEW = b'MZ' + b'new executable payload' * 100
 OLD = b'MZoriginal executable'
@@ -42,6 +44,12 @@ class UpdateTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='更新 测试 ')
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name).resolve()
+        environment = patch.dict(os.environ, {'LOCALAPPDATA': str(self.directory / '用户数据')})
+        environment.start()
+        self.addCleanup(environment.stop)
+        configure_logging(directory=self.directory / '用户数据' / 'LCSC3D' / 'logs')
+        self.addCleanup(close_logging)
+        self.update_directory = self.directory / '用户数据' / 'LCSC3D' / 'updates'
         self.target = self.directory / '重命名的程序.exe'
         self.target.write_bytes(OLD)
         self.client = updater.UpdateClient()
@@ -116,6 +124,8 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(plan['target'], str(self.target))
         self.assertEqual(plan['sha256'], SHA)
         self.assertEqual(progress[-1], (len(NEW), len(NEW)))
+        self.assertEqual(manifest.parent.parent, self.update_directory)
+        self.assertFalse(list(self.directory.glob(updater.STAGE_PREFIX + '*')))
 
     def test_corrupt_or_truncated_download_cleans_stage_and_preserves_original(self):
         for payload in (NEW[:-1], NEW + b'extra', b'MZ' + b'x' * (len(NEW)-2)):
@@ -125,7 +135,7 @@ class UpdateTests(unittest.TestCase):
                     self.subTest(length=len(payload)), self.assertRaises(updater.UpdateError):
                 self.client.download(self.release, self.target)
             self.assertEqual(self.target.read_bytes(), OLD)
-            self.assertEqual(list(self.directory.glob(updater.STAGE_PREFIX + '*')), [])
+            self.assertEqual(list(self.update_directory.glob(updater.STAGE_PREFIX + '*')), [])
 
     def test_release_digest_disagreement_never_downloads_executable(self):
         release = updater.Release('2.1.0', '', PREFIX+'LCSC3D.exe', PREFIX+'SHA256SUMS.txt', len(NEW), digest='f'*64)
@@ -146,7 +156,7 @@ class UpdateTests(unittest.TestCase):
         with patch.object(self.client, '_open', side_effect=self.open), self.assertRaises(Cancelled):
             self.client.download(self.release, self.target, cancel)
         self.assertEqual(self.target.read_bytes(), OLD)
-        self.assertFalse(list(self.directory.glob(updater.STAGE_PREFIX + '*')))
+        self.assertFalse(list(self.update_directory.glob(updater.STAGE_PREFIX + '*')))
 
     def test_helper_replaces_and_restarts_after_startup_ack(self):
         manifest = self.stage()
@@ -203,9 +213,27 @@ class UpdateTests(unittest.TestCase):
         failed = self.stage()
         (completed.parent / 'result.json').write_text('{"status":"success"}')
         (failed.parent / 'result.json').write_text('{"status":"failed"}')
-        updater.cleanup_updates(self.directory)
+        updater.cleanup_updates(self.update_directory)
         self.assertFalse(completed.parent.exists())
         self.assertTrue(failed.parent.exists())
+
+    def test_plan_rejects_stage_outside_app_data(self):
+        manifest = self.stage()
+        external = self.directory / (updater.STAGE_PREFIX + 'external')
+        external.mkdir()
+        outside = external / 'plan.json'
+        outside.write_bytes(manifest.read_bytes())
+        with self.assertRaises(updater.UpdateError):
+            updater._load_plan(outside)
+
+    def test_legacy_update_plan_is_supported_without_creating_new_sidecars(self):
+        stage = self.directory / (updater.STAGE_PREFIX + 'legacy')
+        stage.mkdir()
+        manifest = stage / 'plan.json'
+        plan = {'target': str(self.target), 'sha256': SHA, 'original_sha256': hashlib.sha256(OLD).hexdigest(),
+                'parent_pid': 1, 'nonce': 'a' * 48, 'version': '2.1.0'}
+        manifest.write_text(json.dumps(plan), encoding='utf-8')
+        self.assertEqual(updater._load_plan(manifest)[2], self.target)
 
 
 if __name__ == '__main__':
