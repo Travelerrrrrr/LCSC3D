@@ -281,6 +281,26 @@ def native_click(button):
         button.click()
         return
     import ctypes
+    user = ctypes.windll.user32
+    context = user.SetThreadDpiAwarenessContext
+    context.argtypes, context.restype = [ctypes.c_void_p], ctypes.c_void_p
+    previous_context = context(ctypes.c_void_p(-4))
+    # An unattended EXE launch does not inherit foreground permission. Keep
+    # only this test window above other apps for the checked native click.
+    position = user.SetWindowPos
+    position.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                        ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+    hwnd = int(button.window().winId())
+    position(hwnd, ctypes.c_void_p(-1), 0, 0, 0, 0, 0x13)
+    try:
+        _native_click_windows(button)
+    finally:
+        position(hwnd, ctypes.c_void_p(-2), 0, 0, 0, 0, 0x13)
+        context(previous_context)
+
+
+def _native_click_windows(button):
+    import ctypes
     from ctypes import wintypes
 
     class MouseInput(ctypes.Structure):
@@ -448,6 +468,11 @@ def start(window, destination):
                 dialog.table.item(2, 0).setCheckState(Qt.Checked)
                 dialog.import_button.click()
                 assert window.ids == ['C2040', 'C163691']
+                assert dialog.import_notice.isVisible() and '成功' in dialog.import_notice.windowTitle()
+                assert '新增 1' in dialog.import_notice.text()
+                dialog.import_notice.grab().save(str(destination / '加入下载列表提醒.png'))
+                dialog.import_notice.accept()
+                report['import_success_notice'] = True
                 assert window.checked_rows() == [1]
                 assert window.table.item(0, RESULT_COLUMN).text() == '成功'
                 window.set_running(True)
@@ -455,6 +480,9 @@ def start(window, destination):
                 window.set_running(False)
                 dialog.import_button.click()
                 assert window.ids == ['C2040', 'C163691']
+                assert '新增 0' in dialog.import_notice.text()
+                dialog.import_notice.accept()
+                report['import_duplicate_notice'] = True
                 dialog.status.setText('本地离线验证：分页、勾选导入与去重通过。')
                 dialog.grab().save(str(destination / '原生收藏-离线验证.png'))
                 window.grab().save(str(destination / '主窗口-导入后.png'))

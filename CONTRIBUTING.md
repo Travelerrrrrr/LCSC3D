@@ -78,3 +78,5 @@ Demo.5 的商城离线验证还覆盖单价精度、库存与缺失值、最低�
 Release 上传固定文件名 `LCSC3D.exe`、`LCSC3D.zip` 和 `SHA256SUMS.txt`。EXE、ZIP 与验证输出不放入 Git。修改许可证、上游版本或打包依赖时同步更新第三方声明。
 
 也可在 Actions 中运行 `Prepare release`，填写版本标签和已成功完成的 `Windows build` 运行编号。流程核对应用源码与该构建一致，下载其 EXE，打包完整源码，生成校验和并上传到 Release 草稿；公开发布前核对附件。它不会覆盖已公开的 Release。
+
+2.1.2 增量导出验证：在 `--self-test-ad` 目标目录预放 `已有库.SchLib`、`已有库.PcbLib` 和 `测试工程.PrjPcb`，追加 `--self-test-ad-integrate`，验证保留原库、重复跳过、同时单独输出及加入工程。交付脚本 `--integration-dir` 还需要同目录的 `原始库.SchLib` / `原始库.PcbLib`，用于逐流对比原内容；`--capture-dir` 检查实际商品图片与导入弹窗截图报告。所有目标和备份均使用隔离目录。

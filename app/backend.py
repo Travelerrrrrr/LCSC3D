@@ -23,7 +23,9 @@ from app_logging import (log_event, record_error, traced, log_context, submit_lo
 from store_diagnostics import record_request_error
 from app_paths import temporary_directory, replace_file
 from model3d import document, model_reference
-from altium import export_schlib, export_pcblib, export_linked_schlib, MergedLibrary
+from altium import export_schlib, export_pcblib, export_linked_schlib, export_linked_pcblib, MergedLibrary
+from library_merge import read_library, append_library
+from altium_project import commit_user_file, add_libraries_to_project
 import certifi
 import urllib3
 from urllib3.util import Retry, Timeout
@@ -307,12 +309,20 @@ class Options:
     merge_pcblib: bool = False
     schlib_name: str = 'LCSC3D'
     pcblib_name: str = 'LCSC3D'
+    keep_schlib: bool = False
+    keep_pcblib: bool = False
+    schlib_target: str = ''
+    pcblib_target: str = ''
+    project_path: str = ''
 
     def merged_paths(self):
-        return {fmt: self.destination / library_filename(name, fmt)
-                for fmt, enabled, name in (('SCHLIB', self.merge_schlib, self.schlib_name),
-                                            ('PCBLIB', self.merge_pcblib, self.pcblib_name))
+        return {fmt: Path(target).expanduser().resolve() if target else self.destination / library_filename(name, fmt)
+                for fmt, enabled, name, target in (('SCHLIB', self.merge_schlib, self.schlib_name, self.schlib_target),
+                                                  ('PCBLIB', self.merge_pcblib, self.pcblib_name, self.pcblib_target))
                 if enabled and fmt in self.formats}
+
+    def keeps_individual(self, format):
+        return self.keep_schlib if format == 'SCHLIB' else self.keep_pcblib
 
 
 def library_filename(name, format):
@@ -339,6 +349,8 @@ class Result:
     folder: str = ''
     store_url: str = ''
     pending_formats: list[str] = field(default_factory=list)
+    completed_formats: list[str] = field(default_factory=list)
+    export_errors: list[str] = field(default_factory=list)
 
 
 @traced('component.lookup', lambda part, api: {'part': safe_part(part)})
@@ -398,6 +410,10 @@ def download_part(part: str, options: Options, api: NetworkApi,
     basename = f'{part}_{safe_filename(model.name)}' if model else part
     paths = {fmt: folder / (f'{component_name}.SchLib' if fmt == 'SCHLIB' else f'{component_name}.PcbLib' if fmt == 'PCBLIB'
                             else f'{basename}.{fmt.lower()}') for fmt in options.formats}
+    reserved = {path.resolve() for path in options.merged_paths().values()}
+    for fmt, path in paths.items():
+        if libraries and fmt in libraries and options.keeps_individual(fmt) and path.resolve() in reserved:
+            raise DownloadError('单独输出与指定合并库路径相同，请关闭“同时单独输出”或另选保存目录')
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix='model-format') as pool:
         step = submit_logged(pool, api.get_step_3d_model, model.uuid) if model and 'STEP' in options.formats else None
         obj = submit_logged(pool, api.get_raw_3d_model_obj, model.uuid) if model and 'OBJ' in options.formats else None
@@ -412,12 +428,14 @@ def download_part(part: str, options: Options, api: NetworkApi,
                     with merge_lock:
                         libraries[fmt].add(data, part, api.check_cancelled)
                     result.pending_formats.append(fmt)
-                    continue
+                    if not options.keeps_individual(fmt):
+                        continue
                 if fmt == 'SCHLIB':
                     exporter = export_linked_schlib if options.merge_pcblib and 'PCBLIB' in options.formats else export_schlib
                     payload = exporter(data, part, api.check_cancelled)
                 elif fmt == 'PCBLIB':
-                    payload = export_pcblib(data, part, api.check_cancelled)
+                    exporter = export_linked_pcblib if options.merge_pcblib else export_pcblib
+                    payload = exporter(data, part, api.check_cancelled)
                 elif not model:
                     log_event('WARNING', 'download.format_unavailable', format=fmt, reason='no_model')
                     errors.append(f'{fmt}：' + (model_error or '官方库中没有关联的 3D 模型'))
@@ -452,6 +470,8 @@ def download_part(part: str, options: Options, api: NetworkApi,
     if result.pending_formats:
         result.status = '等待合并'
         result.message = '；'.join((['已保存 ' + ' / '.join(completed)] if completed else []) + errors)
+    result.completed_formats = completed[:]
+    result.export_errors = errors[:]
     log_event('INFO' if not errors else 'WARNING', 'download.part_result', status=result.status,
               completed_formats=completed, failure_count=len(errors))
     return result
@@ -468,6 +488,13 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
     merged_paths = options.merged_paths()
     libraries = {fmt: MergedLibrary(fmt, merge_pcb='PCBLIB' in merged_paths) for fmt in merged_paths}
     merge_lock = threading.Lock()
+    originals, target_errors = {}, {}
+    for fmt, path in merged_paths.items():
+        if (options.schlib_target if fmt == 'SCHLIB' else options.pcblib_target):
+            try:
+                originals[fmt] = read_library(path, fmt)
+            except Exception as exc:
+                target_errors[fmt] = str(exc)
 
     def run(index, part):
         try:
@@ -509,16 +536,24 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
         if not members:
             continue
         error = ''
+        skipped = []
         try:
             if cancelled.is_set():
                 raise Cancelled()
+            if fmt in target_errors:
+                raise DownloadError(target_errors[fmt])
             for index, result in members:
                 if progress:
                     progress(index, '正在合并 ' + fmt, result.title)
             payload = libraries[fmt].build([result.part for _, result in members], api.check_cancelled)
+            if fmt in originals:
+                payload, skipped = append_library(originals[fmt], payload, fmt, api.check_cancelled)
             if cancelled.is_set():
                 raise Cancelled()
-            atomic_write(path, payload)
+            if fmt in originals:
+                commit_user_file(path, originals[fmt], payload, api.check_cancelled)
+            else:
+                atomic_write(path, payload)
         except Cancelled:
             error = '合并已取消，原合并库保留'
         except Exception as exc:
@@ -527,16 +562,42 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
         for _, result in members:
             if not error:
                 result.files.append(str(path))
+                if fmt not in result.completed_formats:
+                    result.completed_formats.append(fmt)
                 if not Path(result.folder).is_dir():
                     result.folder = str(options.destination)
             result.message = '；'.join(filter(None, (result.message,
                 f'{fmt}：{error}' if error else f'已合并 {fmt} → {path.name}（{len(members)} 个元件）')))
+            if error:
+                result.export_errors.append(f'{fmt}：{error}')
+            elif skipped:
+                result.message += f'；原库保留 {len(skipped)} 个同名条目，未重复追加'
+    project_error = ''
+    project_files = list(dict.fromkeys(file for result in results for file in result.files
+                                      if Path(file).suffix.lower() in ('.schlib', '.pcblib')
+                                      and (Path(file).suffix[1:].upper() not in merged_paths or
+                                           Path(file) == merged_paths[Path(file).suffix[1:].upper()])))
+    if options.project_path and project_files and not cancelled.is_set():
+        try:
+            add_libraries_to_project(options.project_path, project_files, api.check_cancelled)
+        except Exception as exc:
+            record_error(exc, 'library.project_import_failed')
+            project_error = '加入 PCB 工程失败：' + str(exc)
     for index, result in enumerate(results):
-        if result.pending_formats:
+        pending = bool(result.pending_formats)
+        if pending:
             result.pending_formats.clear()
-            result.status = ('成功' if len(result.files) == len(options.formats) else
+            result.status = ('成功' if set(result.completed_formats) == set(options.formats) and not result.export_errors else
                              '部分完成' if result.files else '已取消' if cancelled.is_set() else '失败')
             log_event('INFO', 'download.merge_result', part=safe_part(result.part), status=result.status)
+        has_libraries = any(file in project_files for file in result.files)
+        if options.project_path and has_libraries:
+            if project_error or cancelled.is_set():
+                result.status = '部分完成'
+                result.message += '；' + (project_error or '加入 PCB 工程已取消')
+            else:
+                result.message += '；库已加入 PCB 工程'
+        if pending or options.project_path and has_libraries:
             if on_result:
                 on_result(index, result)
     log_event('INFO', 'download.batch_result', count=len(results),

@@ -5,9 +5,9 @@ import requests
 import sys
 
 root = Path(__file__).resolve().parent.parent / 'app' / 'licenses'
-for name, target in [('pyinstaller', 'PyInstaller-COPYING.txt'), ('certifi', 'certifi-LICENSE.txt')]:
+for name, target in [('pyinstaller', 'PyInstaller-COPYING.txt'), ('certifi', 'certifi-LICENSE.txt'), ('olefile', 'olefile-LICENSE.txt')]:
     dist = distribution(name)
-    source = next(p for p in dist.files if '/licenses/' in str(p) and ('COPYING' in str(p) or 'LICENSE' in str(p)))
+    source = next(p for p in dist.files if ('/licenses/' in str(p) or name == 'olefile') and ('COPYING' in str(p) or 'LICENSE.txt' in str(p)))
     shutil.copyfile(dist.locate_file(source), root / target)
 shutil.copyfile(Path(sys.base_prefix) / 'LICENSE.txt', root / 'Python-LICENSE.txt')
 for name, url in [('LGPL-3.0.txt', 'https://raw.githubusercontent.com/qt/qtbase/dev/LICENSES/LGPL-3.0-only.txt'), ('GPL-3.0.txt', 'https://raw.githubusercontent.com/qt/qtbase/dev/LICENSES/GPL-3.0-only.txt')]:

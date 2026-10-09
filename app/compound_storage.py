@@ -25,6 +25,7 @@ def _api():
         'CoUninitialize': ([], None),
         'CreateILockBytesOnHGlobal': ([pointer, ct.c_int32, out], ct.c_int32),
         'StgCreateDocfileOnILockBytes': ([pointer, ct.c_uint32, ct.c_uint32, out], ct.c_int32),
+        'StgOpenStorageOnILockBytes': ([pointer, pointer, ct.c_uint32, pointer, ct.c_uint32, out], ct.c_int32),
         'GetHGlobalFromILockBytes': ([pointer, out], ct.c_int32),
     }
     for name, (arguments, result) in declarations.items():
@@ -51,7 +52,7 @@ def _release(interface):
         _method(interface, 2, ct.c_uint32)(interface)
 
 
-def compound_file(streams: dict[str, bytes], check_cancelled=lambda: None) -> bytes:
+def compound_file(streams: dict[str, bytes], check_cancelled=lambda: None, *, original=None) -> bytes:
     """Write slash-separated stream paths into an in-memory CFB v3 file."""
     ole, kernel = _api()
     initialized = ole.CoInitializeEx(None, 0)
@@ -62,7 +63,15 @@ def compound_file(streams: dict[str, bytes], check_cancelled=lambda: None) -> by
     storages = {}
     try:
         _check(ole.CreateILockBytesOnHGlobal(None, 1, ct.byref(lock_bytes)))
-        _check(ole.StgCreateDocfileOnILockBytes(lock_bytes, 0x1012, 0, ct.byref(root)))
+        if original is None:
+            _check(ole.StgCreateDocfileOnILockBytes(lock_bytes, 0x1012, 0, ct.byref(root)))
+        else:
+            written = ct.c_uint32()
+            write = _method(lock_bytes, 4, ct.c_int32, ct.c_uint64, ct.c_void_p, ct.c_uint32, ct.POINTER(ct.c_uint32))
+            _check(write(lock_bytes, 0, original, len(original), ct.byref(written)))
+            if written.value != len(original):
+                raise DownloadError('原库内存副本不完整')
+            _check(ole.StgOpenStorageOnILockBytes(lock_bytes, None, 0x12, None, 0, ct.byref(root)))
         storages[''] = root
         for path, payload in streams.items():
             check_cancelled()
@@ -74,9 +83,15 @@ def compound_file(streams: dict[str, bytes], check_cancelled=lambda: None) -> by
                 key = parent_path + '/' + part if parent_path else part
                 if key not in storages:
                     storage = ct.c_void_p()
-                    create = _method(storages[parent_path], 5, ct.c_int32,
-                                     ct.c_wchar_p, ct.c_uint32, ct.c_uint32, ct.c_uint32, ct.POINTER(ct.c_void_p))
-                    _check(create(storages[parent_path], part, 0x1012, 0, 0, ct.byref(storage)))
+                    opened = -1
+                    if original is not None:
+                        open_storage = _method(storages[parent_path], 6, ct.c_int32,
+                            ct.c_wchar_p, ct.c_void_p, ct.c_uint32, ct.c_void_p, ct.c_uint32, ct.POINTER(ct.c_void_p))
+                        opened = open_storage(storages[parent_path], part, None, 0x12, None, 0, ct.byref(storage))
+                    if opened < 0:
+                        create = _method(storages[parent_path], 5, ct.c_int32,
+                                         ct.c_wchar_p, ct.c_uint32, ct.c_uint32, ct.c_uint32, ct.POINTER(ct.c_void_p))
+                        _check(create(storages[parent_path], part, 0x1012, 0, 0, ct.byref(storage)))
                     storages[key] = storage
                 parent_path = key
             stream = ct.c_void_p()

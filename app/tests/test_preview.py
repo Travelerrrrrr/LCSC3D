@@ -124,7 +124,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.window.settings_enabled = False
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
                          {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level',
-                          'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name'})
+                          'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
+                          'keep_schlib', 'keep_pcblib', 'schlib_target', 'pcblib_target', 'project_path'})
 
     def assert_stable(self, hwnd, events, geometry, maximized=False):
         self.assertEqual(int(self.window.winId()), hwnd, 'Preview recreated the native window')
@@ -558,7 +559,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertTrue(self.window.step_box.isChecked())
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
                          {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level',
-                          'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name'})
+                          'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
+                          'keep_schlib', 'keep_pcblib', 'schlib_target', 'pcblib_target', 'project_path'})
         self.window.path_input.setText(str(Path(self.directory.name) / 'models'))
         captured = []
         def download(part, options, api, progress):

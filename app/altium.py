@@ -779,3 +779,9 @@ def export_linked_schlib(data, part, check_cancelled):
     header, streams = _schlib_component(data, part, check_cancelled, merge_pcb=True)
     streams['FileHeader'] = _parameters(header)
     return compound_file(streams, check_cancelled)
+
+
+def export_linked_pcblib(data, part, check_cancelled):
+    """Keep the standalone pair usable when also writing a combined library."""
+    _, streams = _pcblib_component(data, part, check_cancelled, merged=True)
+    return compound_file(streams, check_cancelled)

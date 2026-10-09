@@ -34,6 +34,8 @@ from app_logging import (configure_logging, log_event, set_log_level, record_err
                          new_context, current_context, log_context, contextual, submit_logged,
                          safe_part, install_exception_hooks, log_runtime)
 from settings_ui import SettingsDialog
+from export_targets import ExportTargetsDialog
+from product_preview import ProductPreview
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
 VERSION = '2.1.2'
@@ -300,6 +302,7 @@ class MainWindow(QMainWindow):
         self.settings_enabled = settings_enabled
         self.preferences = Preferences()
         self.settings_dialog = None
+        self.export_targets = {'schlib_target': '', 'pcblib_target': '', 'project_path': ''}
         self.worker = None
         self.batch_running = False
         self.batch_ids = []
@@ -460,9 +463,11 @@ class MainWindow(QMainWindow):
         self.merge_pcblib_box = QCheckBox('合并 .PcbLib')
         self.schlib_name_input = QLineEdit('LCSC3D')
         self.pcblib_name_input = QLineEdit('LCSC3D')
-        for box, name, format_box, suffix in (
-                (self.merge_schlib_box, self.schlib_name_input, self.schlib_box, '.SchLib'),
-                (self.merge_pcblib_box, self.pcblib_name_input, self.pcblib_box, '.PcbLib')):
+        self.keep_schlib_box = QCheckBox('同时单独输出')
+        self.keep_pcblib_box = QCheckBox('同时单独输出')
+        for box, name, format_box, suffix, keep in (
+                (self.merge_schlib_box, self.schlib_name_input, self.schlib_box, '.SchLib', self.keep_schlib_box),
+                (self.merge_pcblib_box, self.pcblib_name_input, self.pcblib_box, '.PcbLib', self.keep_pcblib_box)):
             row = QHBoxLayout()
             row.addWidget(box)
             name.setPlaceholderText('合并库名称')
@@ -470,10 +475,19 @@ class MainWindow(QMainWindow):
             name.setToolTip('保存在所选目录根部；可填写名称或带扩展名的文件名')
             row.addWidget(name, 1)
             row.addWidget(label(suffix, 'muted'))
+            row.addWidget(keep)
             output_layout.addLayout(row)
             box.toggled.connect(self.update_merge_controls)
             format_box.toggled.connect(self.update_merge_controls)
         self.update_merge_controls()
+        self.library_options_button = QPushButton('库与工程…')
+        self.library_options_button.setToolTip('追加到已有 AD 库，或将库加入指定 PCB 工程')
+        self.library_options_button.clicked.connect(self.configure_export_targets)
+        targets_row = QHBoxLayout()
+        self.targets_summary = label('', 'muted')
+        targets_row.addWidget(self.targets_summary, 1)
+        targets_row.addWidget(self.library_options_button)
+        output_layout.addLayout(targets_row)
         left_layout.addWidget(output_card)
 
         list_card, list_layout = card()
@@ -552,7 +566,7 @@ class MainWindow(QMainWindow):
         preview_modes = QHBoxLayout()
         self.preview_mode_group = QButtonGroup(self)
         self.preview_mode_buttons = {}
-        for mode, text in (('3d', '3D 模型'), ('symbol', '符号'), ('footprint', '封装')):
+        for mode, text in (('3d', '3D 模型'), ('symbol', '符号'), ('footprint', '封装'), ('photo', '商品图片')):
             button = QPushButton(text)
             button.setObjectName('previewMode')
             button.setCheckable(True)
@@ -572,6 +586,10 @@ class MainWindow(QMainWindow):
         self.preview_caption.setWordWrap(True)
         preview_layout.addWidget(self.preview_caption)
         self.preview_stack = QStackedWidget()
+        self.product_preview = ProductPreview(self)
+        self.product_preview.state.connect(self.product_preview_state)
+        self.product_preview.jobs.idle.connect(self.store_activity_finished)
+        self.preview_stack.addWidget(self.product_preview)
         empty = QFrame()
         empty.setStyleSheet('QFrame { background:#f3f6fa; border-radius:8px; }')
         empty_layout = QVBoxLayout(empty)
@@ -586,6 +604,7 @@ class MainWindow(QMainWindow):
         empty_layout.addWidget(hint)
         empty_layout.addStretch()
         self.preview_stack.addWidget(empty)
+        self.preview_stack.setCurrentWidget(empty)
         self.preview_empty = empty
         self.preview_hint = hint
         self.symbol_view = VectorPreviewView(SYMBOL_BACKGROUND, profile=self.web_profile)
@@ -648,6 +667,9 @@ class MainWindow(QMainWindow):
         self.pcblib_box.setChecked(bool(settings.get('pcblib')))
         self.merge_schlib_box.setChecked(settings.get('merge_schlib') is True)
         self.merge_pcblib_box.setChecked(settings.get('merge_pcblib') is True)
+        self.keep_schlib_box.setChecked(settings.get('keep_schlib') is True)
+        self.keep_pcblib_box.setChecked(settings.get('keep_pcblib') is True)
+        self.export_targets = {key: settings[key] if isinstance(settings.get(key), str) else '' for key in self.export_targets}
         for key, widget in (('schlib_name', self.schlib_name_input), ('pcblib_name', self.pcblib_name_input)):
             value = settings.get(key)
             widget.setText(value if isinstance(value, str) else 'LCSC3D')
@@ -669,6 +691,8 @@ class MainWindow(QMainWindow):
                 'pcblib': self.pcblib_box.isChecked(),
                 'merge_schlib': self.merge_schlib_box.isChecked(), 'merge_pcblib': self.merge_pcblib_box.isChecked(),
                 'schlib_name': self.schlib_name_input.text(), 'pcblib_name': self.pcblib_name_input.text(),
+                'keep_schlib': self.keep_schlib_box.isChecked(), 'keep_pcblib': self.keep_pcblib_box.isChecked(),
+                **self.export_targets,
                 **preferences.to_mapping()})
             return True
         except OSError as exc:
@@ -758,7 +782,7 @@ class MainWindow(QMainWindow):
 
     def bind_store(self, dialog):
         self.favorites_dialog = dialog
-        dialog.import_requested.connect(self.import_favorites)
+        dialog.import_requested.connect(self.import_store_selection)
         dialog.preview_requested.connect(self.preview_store_product)
         dialog.activity_finished.connect(self.store_activity_finished)
         dialog.account_changed.connect(self.refresh_store_account)
@@ -875,6 +899,17 @@ class MainWindow(QMainWindow):
         status(f'元件导入完成：新增 {added} 个，跳过 {len(items) - added} 个已有元件；下载列表共 {len(self.ids)} 个。')
         return added
 
+    def import_store_selection(self, items):
+        try:
+            self.import_favorites(items)
+            message = self.run_status.text()
+            success = message.startswith('元件导入完成：')
+        except Exception as exc:
+            record_error(exc, 'queue.import_failed')
+            success, message = False, '导入失败，请重试。错误详情已记录到日志。'
+        if self.favorites_dialog:
+            self.favorites_dialog.show_import_result(success, message)
+
     @staticmethod
     def component_tooltip(info):
         return '\n'.join(f'{label}：{info[key]}' for key, label in (('title', '型号'), ('model', '模型')) if info.get(key))
@@ -984,6 +1019,7 @@ class MainWindow(QMainWindow):
         return len(removed)
 
     def clear_preview(self):
+        self.product_preview.clear()
         self.current_preview = self.current_3d = ''
         self.web_revision += 1
         self.model_pending = self.library_pending = None
@@ -1048,6 +1084,7 @@ class MainWindow(QMainWindow):
         for widget in (self.input, self.sample_button, self.clear_button, self.path_input, self.browse_button, self.queue_button, self.start_button, self.step_box, self.obj_box, self.schlib_box, self.pcblib_box):
             widget.setEnabled(not running)
         self.stop_button.setEnabled(running)
+        self.library_options_button.setEnabled(not running)
         self.update_merge_controls()
         self.table.blockSignals(True)
         try:
@@ -1059,12 +1096,38 @@ class MainWindow(QMainWindow):
         self.download_selection_changed()
 
     def update_merge_controls(self):
-        for box, name, format_box in (
-                (self.merge_schlib_box, self.schlib_name_input, self.schlib_box),
-                (self.merge_pcblib_box, self.pcblib_name_input, self.pcblib_box)):
+        for box, name, format_box, keep, target in (
+                (self.merge_schlib_box, self.schlib_name_input, self.schlib_box, self.keep_schlib_box, 'schlib_target'),
+                (self.merge_pcblib_box, self.pcblib_name_input, self.pcblib_box, self.keep_pcblib_box, 'pcblib_target')):
             enabled = not self.batch_running and format_box.isChecked()
             box.setEnabled(enabled)
-            name.setEnabled(enabled and box.isChecked())
+            keep.setEnabled(enabled and box.isChecked())
+            name.setEnabled(enabled and box.isChecked() and not self.export_targets[target])
+            name.setToolTip('追加到：' + self.export_targets[target] if self.export_targets[target] else
+                            '保存在所选目录根部；可填写名称或带扩展名的文件名')
+        if hasattr(self, 'targets_summary'):
+            targets = [self.export_targets[key] for key, merge, format_box in
+                       (('schlib_target', self.merge_schlib_box, self.schlib_box),
+                        ('pcblib_target', self.merge_pcblib_box, self.pcblib_box))
+                       if self.export_targets[key] and merge.isChecked() and format_box.isChecked()]
+            text = [f'追加到 {len(targets)} 份已有库'] if targets else []
+            if self.export_targets['project_path']:
+                text.append('下载后加入 PCB 工程')
+            self.targets_summary.setText(' · '.join(text))
+            self.targets_summary.setToolTip('\n'.join(targets + [self.export_targets['project_path']]))
+
+    def configure_export_targets(self):
+        dialog = ExportTargetsDialog(self.export_targets, self)
+        if dialog.exec() == dialog.Accepted:
+            self.export_targets = dialog.values
+            for target, format_box, merge in (('schlib_target', self.schlib_box, self.merge_schlib_box),
+                                               ('pcblib_target', self.pcblib_box, self.merge_pcblib_box)):
+                if self.export_targets[target]:
+                    format_box.setChecked(True)
+                    merge.setChecked(True)
+            self.update_merge_controls()
+            self.save_settings()
+        dialog.deleteLater()
 
     def start_batch(self):
         if self.batch_running or self.worker and self.worker.isRunning():
@@ -1087,10 +1150,20 @@ class MainWindow(QMainWindow):
             return
         destination = Path(self.path_input.text().strip()).expanduser().resolve()
         options = Options(destination, formats, self.merge_schlib_box.isChecked(), self.merge_pcblib_box.isChecked(),
-                          self.schlib_name_input.text(), self.pcblib_name_input.text())
+                          self.schlib_name_input.text(), self.pcblib_name_input.text(),
+                          self.keep_schlib_box.isChecked(), self.keep_pcblib_box.isChecked(), **self.export_targets)
         try:
             options.merged_paths()
-        except DownloadError as exc:
+            from library_merge import read_library
+            from altium_project import read_project
+            for fmt, path in options.merged_paths().items():
+                if self.export_targets['schlib_target' if fmt == 'SCHLIB' else 'pcblib_target']:
+                    read_library(path, fmt)
+            if options.project_path:
+                if not any(fmt in formats for fmt in ('SCHLIB', 'PCBLIB')):
+                    raise DownloadError('请至少选择一种 AD 库格式以加入工程')
+                read_project(options.project_path)
+        except (DownloadError, OSError, UnicodeError) as exc:
             self.run_status.setText(str(exc))
             return
         try:
@@ -1192,7 +1265,7 @@ class MainWindow(QMainWindow):
             self.detail.setText(part + ' · ' + result.message)
             self.detail.setToolTip(result.message)
         elif part:
-            self.detail.setText(part + ' · 右侧自动预览，可切换 3D 模型、符号和封装')
+            self.detail.setText(part + ' · 右侧自动预览，可切换 3D 模型、符号、封装和商品图片')
             self.detail.setToolTip('')
 
     def _setup_preview(self):
@@ -1221,7 +1294,7 @@ class MainWindow(QMainWindow):
         if part:
             self.show_preview(part)
         else:
-            self.preview_hint.setText('选择左侧列表中的器件\n即可查看' + {'3d': '3D 模型', 'symbol': '符号', 'footprint': '封装'}[mode])
+            self.preview_hint.setText('选择左侧列表中的器件\n即可查看' + {'3d': '3D 模型', 'symbol': '符号', 'footprint': '封装', 'photo': '商品图片'}[mode])
             self.preview_stack.setCurrentWidget(self.preview_empty)
             self.on_preview_state('empty', '选择器件后加载预览')
 
@@ -1235,6 +1308,13 @@ class MainWindow(QMainWindow):
             self.web.page().diagnostic_context = self.preview_diagnostic_context
         self.reload_button.setEnabled(True)
         self.store_button.setEnabled(True)
+        if self.preview_mode == 'photo':
+            self.library_pending = self.model_pending = None
+            self.symbol_unit_box.hide()
+            self.preview_caption.setText(part + ' · 商品图片')
+            self.preview_stack.setCurrentWidget(self.product_preview)
+            self.product_preview.select(part, refresh=reload)
+            return
         if self.preview_mode != '3d':
             self.show_library_preview(part, reload)
             return
@@ -1375,13 +1455,13 @@ class MainWindow(QMainWindow):
         self.library_cache.move_to_end(part)
         while len(self.library_cache) > 32:
             self.library_cache.popitem(last=False)
-        if self.preview_mode != '3d' and part == self.current_preview:
+        if self.preview_mode in ('symbol', 'footprint') and part == self.current_preview:
             self.display_library_preview(part, preview)
 
     def library_preview_failed(self, part, message):
         if self.library_worker and self.library_worker.cancelled.is_set():
             return
-        if self.preview_mode != '3d' and part == self.current_preview:
+        if self.preview_mode in ('symbol', 'footprint') and part == self.current_preview:
             self.preview_hint.setText('预览加载失败\n可点击「重新加载」重试')
             self.on_preview_state('error', message)
 
@@ -1392,7 +1472,7 @@ class MainWindow(QMainWindow):
         pending, self.library_pending = self.library_pending, None
         if self.close_when_finished:
             self.close()
-        elif pending and self.preview_mode != '3d' and pending == self.current_preview:
+        elif pending and self.preview_mode in ('symbol', 'footprint') and pending == self.current_preview:
             if pending in self.library_cache:
                 self.display_library_preview(pending, self.library_cache[pending])
             else:
@@ -1426,7 +1506,7 @@ class MainWindow(QMainWindow):
         self.on_vector_preview_state(view, *view.load_state)
 
     def on_vector_preview_state(self, view, status, message):
-        if self.preview_mode == '3d' or self.preview_stack.currentWidget() is not view:
+        if self.preview_mode not in ('symbol', 'footprint') or self.preview_stack.currentWidget() is not view:
             return
         self.fit_button.setEnabled(status == 'ready')
         if status == 'ready':
@@ -1446,6 +1526,13 @@ class MainWindow(QMainWindow):
             self.symbol_view.fit_content()
         elif self.preview_mode == 'footprint':
             self.footprint_view.fit_content()
+        elif self.preview_mode == 'photo':
+            self.product_preview.view.fit_photo()
+
+    def product_preview_state(self, state, message):
+        if self.preview_mode == 'photo' and self.product_preview.part == self.current_preview:
+            self.fit_button.setEnabled(state == 'ready')
+            self.on_preview_state(state, message)
 
     def on_preview_state(self, status, message):
         with log_context(getattr(self, 'preview_diagnostic_context', {})):
@@ -1497,7 +1584,8 @@ class MainWindow(QMainWindow):
             'AD 库保留引脚、焊盘和孔数据，遇到不支持的图元会提示失败；PcbLib 不内嵌 3D 模型。<br>'
             '未合并的文件单独保存到“器件名_编号”目录，AD 库文件按元件型号命名；下载时覆盖已有同名文件。<br>'
             '3D 预览由 LCSC3D 在本地渲染官方模型；拖动旋转，滚轮缩放，右键拖动平移。<br><br>'
-            '右侧上方可切换「3D 模型 / 符号 / 封装」，无需先下载。<br>'
+            '右侧上方可切换「3D 模型 / 符号 / 封装 / 商品图片」，无需先下载。<br>'
+            '商品图片展示商城原图，可切换多张图片、缩放与拖动。<br>'
             '符号和封装直接加载商城使用的官方 SVG，支持滚轮缩放、拖动平移及「适应窗口」；多单元符号可选择单元。<br><br>'
             '启动后自动后台检查新版，发现新版时提醒；连接失败或已是最新版时不弹窗。'
             '也可点击「设置 → 检查更新」手动查询；便携 EXE 支持下载、SHA-256 校验并重启更新。<br>'
@@ -1563,13 +1651,14 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.cancel_startup_update()
+        self.product_preview.jobs.cancel_all()
         if self.favorites_dialog:
             self.favorites_dialog.shutdown()
             self.favorites_dialog.close()
         store_running = self.favorites_dialog and self.favorites_dialog.has_jobs()
         update_worker = self.update_dialog.worker if self.update_dialog else None
         log_worker = self.settings_dialog.worker if self.settings_dialog else None
-        if store_running or update_worker is not None or log_worker is not None or self.model_worker is not None or self.library_worker is not None or self.info_worker is not None or self.worker and self.worker.isRunning():
+        if self.product_preview.jobs.workers or store_running or update_worker is not None or log_worker is not None or self.model_worker is not None or self.library_worker is not None or self.info_worker is not None or self.worker and self.worker.isRunning():
             if update_worker is not None and not self.close_when_finished:
                 self.update_dialog.closing = True
                 update_worker.cancelled.set()
@@ -1601,6 +1690,7 @@ def main():
     parser.add_argument('--self-test-ad', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-ad-parts', default='C2765186', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-ad-merge', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-ad-integrate', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-store', '--self-test-favorites', dest='self_test_favorites', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-store-live', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-settings', metavar='FOLDER', help=argparse.SUPPRESS)
@@ -1623,6 +1713,8 @@ def main():
     ad_test_parts, ad_invalid_parts, _ = parse_part_numbers(args.self_test_ad_parts)
     if args.self_test_ad and (not ad_test_parts or ad_invalid_parts):
         parser.error('--self-test-ad-parts requires valid C numbers')
+    if args.self_test_ad_integrate and not args.self_test_ad:
+        parser.error('--self-test-ad-integrate requires --self-test-ad')
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     app = QApplication([sys.argv[0]])
     app.setApplicationName('LCSC3D')
@@ -1676,11 +1768,18 @@ def main():
         window.obj_box.setChecked(False)
         window.schlib_box.setChecked(True)
         window.pcblib_box.setChecked(True)
-        if args.self_test_ad_merge:
+        if args.self_test_ad_merge or args.self_test_ad_integrate:
             window.merge_schlib_box.setChecked(True)
             window.merge_pcblib_box.setChecked(True)
             window.schlib_name_input.setText('项目符号.SchLib')
             window.pcblib_name_input.setText('项目封装')
+        if args.self_test_ad_integrate:
+            window.keep_schlib_box.setChecked(True)
+            window.keep_pcblib_box.setChecked(True)
+            window.export_targets = {'schlib_target': str(destination/'已有库.SchLib'),
+                                     'pcblib_target': str(destination/'已有库.PcbLib'),
+                                     'project_path': str(destination/'测试工程.PrjPcb')}
+            window.update_merge_controls()
         window.set_preview_mode('symbol')
         window.input.setPlainText('\n'.join(ad_test_parts))
         window.load_queue()
@@ -1700,6 +1799,8 @@ def main():
                 'version': VERSION, 'frozen': bool(getattr(sys, 'frozen', False)), 'success': ok,
                 'parts': ad_test_parts,
                 'merged': args.self_test_ad_merge,
+                'integrated': args.self_test_ad_integrate,
+                'export_targets': window.export_targets,
                 'formats': {'step': window.step_box.isChecked(), 'obj': window.obj_box.isChecked(),
                             'schlib': window.schlib_box.isChecked(), 'pcblib': window.pcblib_box.isChecked()},
                 'results': [vars(result) for result in results], 'preview': window.preview_state,

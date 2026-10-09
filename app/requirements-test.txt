@@ -1,3 +1,2 @@
 -r requirements.txt
-# Independent CFB reader used only by the native AD library regression tests.
-olefile==0.47
+# Runtime dependencies include the read-only CFB reader for existing AD libraries.

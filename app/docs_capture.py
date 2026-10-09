@@ -65,7 +65,7 @@ def start(window, destination):
         QTimer.singleShot(50, exit_when_idle)
 
     def exit_when_idle():
-        if any(worker is not None and worker.isRunning() for worker in
+        if window.product_preview.jobs.workers or any(worker is not None and worker.isRunning() for worker in
                (window.info_worker, window.model_worker, window.library_worker)) or window.favorites_dialog and window.favorites_dialog.has_jobs():
             QTimer.singleShot(50, exit_when_idle)
         else:
@@ -100,6 +100,12 @@ def start(window, destination):
                 if not vector_frame_ready(phase):
                     return
                 capture(window, 'footprint')
+                window.set_preview_mode('photo')
+                state['phase'] = 'photo'
+            elif phase == 'photo' and window.preview_state == 'ready' and not window.product_preview.jobs.workers:
+                assert window.product_preview.view.photo is not None
+                capture(window, 'product-photo')
+                report['product_photo_preview'] = True
                 window.open_favorites('search')
                 dialog = window.favorites_dialog
                 assert not dialog.vault.exists() and not dialog.client.account
@@ -116,6 +122,12 @@ def start(window, destination):
                 assert dialog.current_product and dialog.current_product['part'] == 'C499531'
                 assert dialog.search_table.cellWidget(0, 5).currentData() == 1
                 capture(dialog, 'store-details')
+                dialog.search_table.item(0, 0).setCheckState(Qt.Checked)
+                dialog.import_button.click()
+                assert dialog.import_notice.isVisible() and '成功' in dialog.import_notice.windowTitle()
+                capture(dialog.import_notice, 'import-result')
+                report['store_import_notice'] = True
+                dialog.import_notice.accept()
                 dialog.detail_scroll.verticalScrollBar().setValue(dialog.detail_scroll.verticalScrollBar().maximum())
                 state['phase'] = 'store-parameters'
             elif phase == 'store-parameters':

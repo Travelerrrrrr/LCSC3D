@@ -105,6 +105,10 @@ def start(window, destination):
             assert dialog.grab().save(str(destination / '设置.png'))
             assert window.grab().save(str(destination / '主窗口.png'))
             report['default_system_proxies'] = report['default_debug'] = True
+            window.schlib_box.setChecked(True)
+            window.merge_schlib_box.setChecked(True)
+            window.keep_schlib_box.setChecked(True)
+            window.export_targets = {'schlib_target': 'D:/库/原库.SchLib', 'pcblib_target': '', 'project_path': 'D:/工程/测试.PrjPcb'}
             dialog.store_proxy_combo.setCurrentIndex(1)
             dialog.log_level_combo.setCurrentIndex(dialog.log_level_combo.findData('ERROR'))
             dialog.save_button.click()
@@ -119,6 +123,10 @@ def start(window, destination):
             set_log_level('DEBUG')
             window._restore_settings()
             assert get_preferences() == expected
+            assert window.keep_schlib_box.isChecked()
+            assert window.export_targets['schlib_target'] == 'D:/库/原库.SchLib'
+            assert window.export_targets['project_path'] == 'D:/工程/测试.PrjPcb'
+            report['library_options_restored'] = True
             report['restored_from_disk'] = True
             assert not log_event('DEBUG', 'settings.self_test_debug')
             assert log_event('ERROR', 'settings.self_test_error')

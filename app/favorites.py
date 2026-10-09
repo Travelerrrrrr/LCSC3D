@@ -8,7 +8,7 @@ from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QSizePolicy, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QSizePolicy, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget, QMessageBox,
 )
 
 from errors import Cancelled
@@ -1136,6 +1136,18 @@ class FavoritesDialog(QDialog):
     def import_selected(self):
         if self.import_button.isEnabled():
             self.import_requested.emit(normalize_items(self.selected_items()))
+
+    def show_import_result(self, success, message):
+        previous = getattr(self, 'import_notice', None)
+        if previous is not None:
+            previous.close()
+            previous.deleteLater()
+        self.import_notice = QMessageBox(QMessageBox.Information if success else QMessageBox.Warning,
+                                        '加入下载列表成功' if success else '加入下载列表失败',
+                                        message, QMessageBox.Ok, self)
+        self.import_notice.setTextFormat(Qt.PlainText)
+        self.import_notice.setWindowModality(Qt.WindowModal)
+        self.import_notice.open()
 
     def selected_product(self):
         row = self.table.currentRow()

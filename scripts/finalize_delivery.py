@@ -13,6 +13,8 @@ parser.add_argument('--store-dir',type=Path)
 parser.add_argument('--store-offline-dir',type=Path)
 parser.add_argument('--settings-dir',type=Path)
 parser.add_argument('--merge-dir',type=Path)
+parser.add_argument('--integration-dir',type=Path)
+parser.add_argument('--capture-dir',type=Path)
 parser.add_argument('--local-update-report',type=Path)
 parser.add_argument('--startup-silent-reports',nargs='+',type=Path)
 parser.add_argument('--verification-date',default=date.today().isoformat())
@@ -58,6 +60,41 @@ if args.store_offline_dir:
  store_text+=('- 原生商城离线 EXE 验证通过：扫码、密码、短信与图片验证、加密保存和恢复、退出清除、分页、收藏及商品资料。登录和短信仅使用受控本地服务，不访问用户真实账号。\n')
 settings_text=''
 merge_text=''
+integration_text=''
+if args.integration_dir:
+ integration=json.loads((args.integration_dir/'verification.json').read_text(encoding='utf-8'))
+ assert integration['success'] and integration['frozen'] and integration['integrated'] and integration['version']==version
+ sys.path.insert(0,str(root/'app/tests'))
+ from altium_inspect import schematic,pcb,merged_pcb_section
+ import olefile
+ for row in integration['results']:
+  assert row['status']=='成功' and len(row['files'])==4
+  singles=[Path(name) for name in row['files'] if Path(name).parent!=args.integration_dir.resolve()]
+  sch=next(file for file in singles if file.suffix=='.SchLib')
+  board=next(file for file in singles if file.suffix=='.PcbLib')
+  _,records,_=schematic(sch.read_bytes())
+  name,_,_=pcb(board.read_bytes())
+  assert next(record['MODELNAME'] for record in records if record.get('RECORD')=='45')==name
+ for key,ext in (('schlib_target','SchLib'),('pcblib_target','PcbLib')):
+  with olefile.OleFileIO(str(args.integration_dir/('原始库.'+ext))) as old, olefile.OleFileIO(integration['export_targets'][key]) as new:
+   assert new.root.clsid==old.root.clsid
+   for path in old.listdir():
+    if path not in (['FileHeader'],['SectionKeys'],['Library','Data']):
+     assert old.openstream(path).read()==new.openstream(path).read(),path
+ project=Path(integration['export_targets']['project_path']).read_text(encoding='utf-8')
+ assert 'Custom=preserved' in project and 'DocumentPath=existing.PcbDoc' in project
+ assert project.count('DocumentPath=')==3 and '已有库.SchLib' in project and '已有库.PcbLib' in project
+ integration_text+='- 冻结 EXE 增量导出通过：追加到两份已有库并跳过同名项，同时生成逐器件配套库；原库条目与附加流逐字节保留。PCB 工程保留原文件引用及配置，新增两份合并库引用。\n'
+ native_path=args.integration_dir/'native-verification.json'
+ if native_path.is_file():
+  native=json.loads(native_path.read_text(encoding='utf-8'))
+  assert native['success'] and all(len(item['components'])==3 and not item['errors'] and not item['warnings'] for item in native['libraries'])
+  integration_text+='- 追加后的 SchLib/PcbLib 由 AltiumSharp 1.0.2 独立读取并渲染全部条目，无错误或警告；AD 中重新加载工程与放置器件尚未实机验收。\n'
+if args.capture_dir:
+ capture=json.loads((args.capture_dir/'capture-verification.json').read_text(encoding='utf-8'))
+ assert capture['success'] and capture['frozen'] and capture['version']==version
+ assert capture['product_photo_preview'] and capture['store_import_notice'] and capture['public_products_only']
+ integration_text+='- 冻结 EXE 实网界面验证通过：主页显示公开商品原图，商城加入下载列表后显示成功数量弹窗；不读取保存会话。\n'
 if args.merge_dir:
  merge=json.loads((args.merge_dir/'verification.json').read_text(encoding='utf-8'))
  assert merge['success'] and merge['frozen'] and merge['version']==version and merge['merged']
@@ -110,6 +147,8 @@ if args.settings_dir:
  if settings.get('app_data_settings') and settings.get('app_data_runtime'):
   settings_text+='- EXE 配置、日志和运行时解压验证位于 LOCALAPPDATA/LCSC3D，旧配置迁移与删除、默认导出和临时下载路径由本地回归核对。\n'
  settings_text+='- 冻结 EXE 日志工具验证通过：ZIP 内容与诊断字段、AppData 保存路径、清除前确认、清除后继续记录、运行状态标记及已打包 ZIP 保留。\n'
+ if settings.get('library_options_restored'):
+  settings_text+='- 冻结 EXE 保存与恢复“同时单独输出”、已有库路径和 PCB 工程路径通过，使用隔离配置。\n'
 for source,name in [('软件界面.png','软件界面'),('符号_C2040.png','符号预览'),('封装_C2040.png','封装预览'),('型号查询.png','型号查询')]:shutil.copyfile(tested/source,outputs/f'{name}.png')
 shutil.copyfile(tested/'符号_C2040.png',root/'docs/images/app.png')
 shutil.copyfile(tested/'封装_C2040.png',root/'docs/images/footprint.png')
@@ -118,7 +157,7 @@ text=f"""# LCSC3D {version} 成品验证
 验证日期：{args.verification_date}。Windows x64、Python 3.12.10、PySide6 6.11.1。
 
 - {args.test_count} 项本地回归通过，包含商城专项、下载列表删除、官方 STEP/OBJ、原生 AD 库、27 个官方 AD 样本、预览和自更新。
-{settings_text}{store_text}{local_update_text}{merge_text}- 独立中文目录运行真实 EXE，清除 Python/Qt 环境变量，仅保留系统 PATH，退出码 0。
+{settings_text}{store_text}{local_update_text}{merge_text}{integration_text}- 独立中文目录运行真实 EXE，清除 Python/Qt 环境变量，仅保留系统 PATH，退出码 0。
 - C2040 与 C20197 各保存官方 STEP/OBJ；无效编号失败，未勾选 C163691 不下载，模型目录没有其他导出文件。
 - 两次本地 3D 预览 ready，符号/封装分别识别 57/57 和 8/8 个引脚/焊盘，窗口句柄稳定。
 - 冻结 EXE 自更新通过：原程序退出、独立进程替换、重启 Qt 窗口并确认、设置保留，耗时 {update['seconds']} 秒。使用隔离账号目录，未访问用户真实保存会话。
@@ -147,7 +186,7 @@ def normalize(code):
  return code.replace(co_filename='',co_consts=tuple(normalize(v) if isinstance(v,types.CodeType) else v for v in code.co_consts))
 executable_archive=CArchiveReader(str(outputs/'LCSC3D.exe'))
 frozen=executable_archive.open_embedded_archive('PYZ.pyz')
-for name in ('main','favorites','favorites_selftest','store','store_crypto','store_session','store_images','store_diagnostics','app_paths','app_settings','app_logging','log_support','settings_ui','settings_selftest','docs_capture','updater','update_ui','update_selftest','backend','altium','resources','model3d','library_preview'):
+for name in ('main','favorites','favorites_selftest','store','store_crypto','store_session','store_images','store_diagnostics','app_paths','app_settings','app_logging','log_support','settings_ui','settings_selftest','docs_capture','updater','update_ui','update_selftest','backend','altium','compound_storage','library_merge','altium_project','export_targets','product_preview','resources','model3d','library_preview'):
  code=compile((root/'app'/f'{name}.py').read_text(encoding='utf-8'),'','exec',dont_inherit=True)
  assert normalize(frozen.extract(name))==normalize(code),name
 for name in ('viewer.html','vector_viewer.html'):
