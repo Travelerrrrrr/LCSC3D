@@ -67,7 +67,7 @@ class DownloadPerformanceTests(unittest.TestCase):
             return backend.Result(part, '成功')
 
         with patch('backend.download_part', side_effect=download):
-            results = backend.download_batch(['C1', 'C2', 'C3'], None, api=FakeApi(),
+            results = backend.download_batch(['C1', 'C2', 'C3'], backend.Options(Path('unused')), api=FakeApi(),
                                               on_result=lambda row, result: callbacks.append((row, result.part)))
         self.assertEqual([result.part for result in results], ['C1', 'C2', 'C3'])
         self.assertEqual([result.status for result in results], ['成功', '成功', '失败'])
@@ -81,7 +81,7 @@ class DownloadPerformanceTests(unittest.TestCase):
             return backend.Result(part, '成功')
 
         with patch('backend.download_part', side_effect=first) as fetch:
-            results = backend.download_batch(['C1', 'C2', 'C3'], None, cancelled, api=FakeApi(), workers=1)
+            results = backend.download_batch(['C1', 'C2', 'C3'], backend.Options(Path('unused')), cancelled, api=FakeApi(), workers=1)
         self.assertEqual(fetch.call_count, 1)
         self.assertEqual([result.status for result in results], ['成功', '已取消', '已取消'])
 

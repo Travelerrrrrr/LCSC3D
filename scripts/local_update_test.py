@@ -150,7 +150,7 @@ def main():
                 command += ['--self-test-startup-update']
             print('LOCAL_SOURCE', server.origin, flush=True)
             print(f'版本比较模拟为 {current} → {version}，EXE 内的实际版本不修改。', flush=True)
-            print('启动后发现新版会自动提醒，也可点击“检查更新”→“下载并重启”。手动测试完成后按 Ctrl+C 结束。', flush=True)
+            print('启动后发现新版会自动提醒，也可点击“设置 → 检查更新”→“下载并重启”。手动测试完成后按 Ctrl+C 结束。', flush=True)
             process = subprocess.Popen(command, cwd=executable.parent, env=environment,
                                        creationflags=subprocess.CREATE_NO_WINDOW)
             deadline = time.monotonic() + 160

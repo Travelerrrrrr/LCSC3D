@@ -15,7 +15,7 @@ python -m venv .venv
 
 窗口和 WebGL 回归测试需要 Windows；其他平台会跳过原生窗口测试。测试使用本地数据和受控网络服务，不需要真实商城请求。正式成品的在线验证另行执行。
 
-AD 导出回归也需要 Windows，以 `olefile` 独立读取 CFB 并核对引脚、焊盘、槽孔、偏移、来源和关联记录，并用官方 AD 样本核对符号折线坐标、比例与引脚接合。构建仅依赖生产模块，测试读取器不进入 EXE。`LCSC3D.exe --self-test-ad <目录>` 验证冻结程序的实际 AD 导出与界面选项；可追加 `--self-test-ad-parts C20197,C2765186` 指定多个器件。仅检查数量或成功解析不能证明几何正确，需检查实际坐标和渲染。
+AD 导出回归也需要 Windows，以 `olefile` 独立读取 CFB 并核对引脚、焊盘、槽孔、偏移、来源和关联记录，并用官方 AD 样本核对符号折线坐标、比例与引脚接合。构建仅依赖生产模块，测试读取器不进入 EXE。`LCSC3D.exe --self-test-ad <目录>` 验证冻结程序的实际 AD 导出与界面选项；可追加 `--self-test-ad-parts C20197,C2765186` 指定多个器件。追加 `--self-test-ad-merge` 验证两个合并开关和自定义名称；交付时用 `finalize_delivery.py --merge-dir <该验证目录>` 独立读取合并库并核对条目和引用。仅检查数量或成功解析不能证明几何正确，需检查实际坐标和渲染。
 
 代码变更应保留取消请求、旧响应过滤、有界缓存和原子文件写入。下载列的勾选与用于预览的当前行互相独立。新增测试应验证用户可见行为，避免访问真实远程服务。
 
@@ -39,7 +39,7 @@ python scripts/finalize_delivery.py --test-count 322
 
 `verify_app_data.py --output-dir <成品目录> --verify-dir <验证目录>` 使用真实 EXE 和独立 Windows 用户数据目录，普通启动后只关闭本次复制的程序窗口，验证旧配置迁移、新用户默认配置、AppData 日志和运行时解压，以及 EXE 目录没有新增文件。原有用户文件必须保留。
 
-不发布 GitHub 也可以测试完整更新窗口：运行 `python scripts/local_update_test.py`，在自动打开的隔离副本中点击“检查更新”→“下载并重启”。追加 `--auto` 自动点击并核对结果；`--scenario bad-checksum` 和 `--scenario no-update` 分别测试校验失败与没有新版。仅启动本机服务，不读取真实会话，不覆盖原始 EXE。完整入口、文件位置和自选候选包见 [本地更新测试](docs/本地更新测试.md)。该脚本只依赖标准库；测试服务仅绑定数字回环地址，不能扩大到局域网或外部更新源。
+不发布 GitHub 也可以测试完整更新窗口：运行 `python scripts/local_update_test.py`，在自动打开的隔离副本中点击“设置 → 检查更新”→“下载并重启”。追加 `--auto` 自动点击并核对结果；`--scenario bad-checksum` 和 `--scenario no-update` 分别测试校验失败与没有新版。仅启动本机服务，不读取真实会话，不覆盖原始 EXE。完整入口、文件位置和自选候选包见 [本地更新测试](docs/本地更新测试.md)。该脚本只依赖标准库；测试服务仅绑定数字回环地址，不能扩大到局域网或外部更新源。
 
 完整源码包为 `outputs/LCSC3D.zip`，包含应用、构建脚本、文档和许可证。`finalize_delivery.py` 核对成品、更新记录后重新打包源码，逐文件核对 ZIP，比较 EXE 内模块与工作区并生成 SHA-256。上例的测试数量需与实际测试结果一致。可用 `--output-dir`、`--portable-dir`、`--update-report` 和 `--store-dir` 指向独立发行准备目录；本地设置和离线商城记录可分别通过 `--settings-dir` 和 `--store-offline-dir` 提供，`--verification-date` 指定验证日期。即使使用版本子目录，也必须在任务结束前将验证后的最新 EXE、源码 ZIP、使用说明和校验和同步到 `outputs/` 根目录。每次有改动的任务完成后本地提交 Git，详见 [AGENTS.md](AGENTS.md)。
 

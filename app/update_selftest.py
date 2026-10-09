@@ -81,7 +81,11 @@ def start(window, destination, *, startup=False):
 
     def begin():
         if not startup:
-            window.update_button.click()
+            window.settings_button.click()
+            assert window.settings_dialog.isVisible()
+            window.settings_dialog.update_button.click()
+            assert window.update_dialog.parent() is window.settings_dialog
+            report['settings_entry'] = True
             report['check_clicked'] = True
         timer.timeout.connect(poll)
         timer.start()

@@ -49,9 +49,15 @@ def _section(ole):
     return next(path[0] for path in ole.listdir() if len(path) == 2 and path[1] == 'Data' and path[0] != 'Library')
 
 
-def schematic(data):
+def merged_pcb_section(data, part):
+    with olefile.OleFileIO(io.BytesIO(data)) as ole:
+        return next(path[0] for path in ole.listdir() if len(path) == 2 and path[1] == 'Data'
+                    and path[0].endswith('_' + part))
+
+
+def schematic(data, section=None):
     with olefile.OleFileIO(io.BytesIO(data), raise_defects=olefile.DEFECT_INCORRECT) as ole:
-        section = _section(ole)
+        section = section or _section(ole)
         reader = Reader(ole.openstream([section, 'Data']).read())
         records, pins, fractions = [], [], {}
         while reader.offset < len(reader.data):
@@ -98,9 +104,9 @@ def schematic(data):
         return header, records, pins
 
 
-def pcb(data):
+def pcb(data, section=None):
     with olefile.OleFileIO(io.BytesIO(data), raise_defects=olefile.DEFECT_INCORRECT) as ole:
-        section = _section(ole)
+        section = section or _section(ole)
         reader = Reader(ole.openstream([section, 'Data']).read())
         name = Reader(reader.block()[1]).string()
         pads, other = [], []

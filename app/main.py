@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from backend import Cancelled, NetworkApi, Options, Result, download_batch, get_component_metadata, parse_part_numbers
+from backend import Cancelled, DownloadError, NetworkApi, Options, Result, download_batch, get_component_metadata, parse_part_numbers
 from model3d import model_reference, read_obj
 from library_preview import build_library_preview, VectorPreviewView, SYMBOL_BACKGROUND, FOOTPRINT_BACKGROUND
 from update_ui import UpdateDialog, StartupUpdateCheck
@@ -36,7 +36,7 @@ from app_logging import (configure_logging, log_event, set_log_level, record_err
 from settings_ui import SettingsDialog
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
-VERSION = '2.1.1'
+VERSION = '2.1.2'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
@@ -370,9 +370,6 @@ class MainWindow(QMainWindow):
         self.account_button.setToolTip('登录立创商城账号，支持记住登录')
         self.account_button.clicked.connect(self.open_account)
         heading.addWidget(self.account_button)
-        self.update_button = QPushButton('检查更新')
-        self.update_button.clicked.connect(self.check_updates)
-        heading.addWidget(self.update_button)
         self.settings_button = QPushButton('设置')
         self.settings_button.clicked.connect(self.open_settings)
         heading.addWidget(self.settings_button)
@@ -459,6 +456,24 @@ class MainWindow(QMainWindow):
         self.start_button.setObjectName('primary')
         self.start_button.clicked.connect(self.start_batch)
         output_layout.addLayout(option_row)
+        self.merge_schlib_box = QCheckBox('合并 .SchLib')
+        self.merge_pcblib_box = QCheckBox('合并 .PcbLib')
+        self.schlib_name_input = QLineEdit('LCSC3D')
+        self.pcblib_name_input = QLineEdit('LCSC3D')
+        for box, name, format_box, suffix in (
+                (self.merge_schlib_box, self.schlib_name_input, self.schlib_box, '.SchLib'),
+                (self.merge_pcblib_box, self.pcblib_name_input, self.pcblib_box, '.PcbLib')):
+            row = QHBoxLayout()
+            row.addWidget(box)
+            name.setPlaceholderText('合并库名称')
+            name.setAccessibleName('合并 ' + suffix + ' 名称')
+            name.setToolTip('保存在所选目录根部；可填写名称或带扩展名的文件名')
+            row.addWidget(name, 1)
+            row.addWidget(label(suffix, 'muted'))
+            output_layout.addLayout(row)
+            box.toggled.connect(self.update_merge_controls)
+            format_box.toggled.connect(self.update_merge_controls)
+        self.update_merge_controls()
         left_layout.addWidget(output_card)
 
         list_card, list_layout = card()
@@ -631,6 +646,12 @@ class MainWindow(QMainWindow):
         self.obj_box.setChecked(bool(settings.get('obj')))
         self.schlib_box.setChecked(bool(settings.get('schlib')))
         self.pcblib_box.setChecked(bool(settings.get('pcblib')))
+        self.merge_schlib_box.setChecked(settings.get('merge_schlib') is True)
+        self.merge_pcblib_box.setChecked(settings.get('merge_pcblib') is True)
+        for key, widget in (('schlib_name', self.schlib_name_input), ('pcblib_name', self.pcblib_name_input)):
+            value = settings.get(key)
+            widget.setText(value if isinstance(value, str) else 'LCSC3D')
+        self.update_merge_controls()
         # Migrate removed library/WRL-only selections to the default model format.
         if not any(box.isChecked() for box in (self.step_box, self.obj_box, self.schlib_box, self.pcblib_box)):
             self.step_box.setChecked(True)
@@ -645,7 +666,10 @@ class MainWindow(QMainWindow):
         try:
             write_settings(SETTINGS_PATH, {'destination': self.path_input.text(), 'step': self.step_box.isChecked(),
                 'obj': self.obj_box.isChecked(), 'schlib': self.schlib_box.isChecked(),
-                'pcblib': self.pcblib_box.isChecked(), **preferences.to_mapping()})
+                'pcblib': self.pcblib_box.isChecked(),
+                'merge_schlib': self.merge_schlib_box.isChecked(), 'merge_pcblib': self.merge_pcblib_box.isChecked(),
+                'schlib_name': self.schlib_name_input.text(), 'pcblib_name': self.pcblib_name_input.text(),
+                **preferences.to_mapping()})
             return True
         except OSError as exc:
             record_error(exc, 'settings.save_failed', level='WARNING')
@@ -668,6 +692,8 @@ class MainWindow(QMainWindow):
             self.settings_dialog.activateWindow()
             return
         if self.settings_dialog is not None:
+            if self.update_dialog is not None and self.update_dialog.parent() is self.settings_dialog:
+                self.update_dialog = None
             self.settings_dialog.deleteLater()
         self.settings_dialog = SettingsDialog(self.preferences, self.apply_preferences, self)
         self.settings_dialog.show()
@@ -1022,6 +1048,7 @@ class MainWindow(QMainWindow):
         for widget in (self.input, self.sample_button, self.clear_button, self.path_input, self.browse_button, self.queue_button, self.start_button, self.step_box, self.obj_box, self.schlib_box, self.pcblib_box):
             widget.setEnabled(not running)
         self.stop_button.setEnabled(running)
+        self.update_merge_controls()
         self.table.blockSignals(True)
         try:
             for row in range(len(self.ids)):
@@ -1030,6 +1057,14 @@ class MainWindow(QMainWindow):
         finally:
             self.table.blockSignals(False)
         self.download_selection_changed()
+
+    def update_merge_controls(self):
+        for box, name, format_box in (
+                (self.merge_schlib_box, self.schlib_name_input, self.schlib_box),
+                (self.merge_pcblib_box, self.pcblib_name_input, self.pcblib_box)):
+            enabled = not self.batch_running and format_box.isChecked()
+            box.setEnabled(enabled)
+            name.setEnabled(enabled and box.isChecked())
 
     def start_batch(self):
         if self.batch_running or self.worker and self.worker.isRunning():
@@ -1051,6 +1086,13 @@ class MainWindow(QMainWindow):
             self.run_status.setText('请至少勾选一个要下载的器件')
             return
         destination = Path(self.path_input.text().strip()).expanduser().resolve()
+        options = Options(destination, formats, self.merge_schlib_box.isChecked(), self.merge_pcblib_box.isChecked(),
+                          self.schlib_name_input.text(), self.pcblib_name_input.text())
+        try:
+            options.merged_paths()
+        except DownloadError as exc:
+            self.run_status.setText(str(exc))
+            return
         try:
             destination.mkdir(parents=True, exist_ok=True)
             if not os.access(destination, os.W_OK):
@@ -1073,7 +1115,7 @@ class MainWindow(QMainWindow):
         self.save_settings()
         self.set_running(True)
         self.run_status.setText(f'开始下载，共勾选 {len(rows)} 个器件…')
-        worker = BatchWorker(self.batch_ids[:], Options(destination, formats), self, rows=rows)
+        worker = BatchWorker(self.batch_ids[:], options, self, rows=rows)
         self.worker = worker
         worker.phase.connect(self.update_phase)
         worker.result.connect(self.update_result)
@@ -1082,13 +1124,14 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def update_phase(self, row, status, title):
-        if self.ids[row] in self.results:
+        result = self.results.get(self.ids[row])
+        if result is not None and result.status != '等待合并':
             return
         self.table.item(row, RESULT_COLUMN).setText(status)
         if title:
             self.table.item(row, MODEL_COLUMN).setText(title)
         batch_ids = self.batch_ids or self.ids
-        completed = sum(part in self.results for part in batch_ids)
+        completed = sum(part in self.results and self.results[part].status != '等待合并' for part in batch_ids)
         self.run_status.setText(f'已完成 {completed} / {len(batch_ids)} · {self.ids[row]} · {status}')
 
     def update_result(self, row, result):
@@ -1106,7 +1149,8 @@ class MainWindow(QMainWindow):
             self.component_info[result.part] = {'title': title, 'model': model}
             model_item.setText(title or model)
             model_item.setToolTip(self.component_tooltip({'title': title, 'model': model}))
-        self.progress_bar.setValue(sum(part in self.results for part in (self.batch_ids or self.ids)))
+        self.progress_bar.setValue(sum(part in self.results and self.results[part].status != '等待合并'
+                                       for part in (self.batch_ids or self.ids)))
         self.selection_changed()
 
     def complete_batch(self, results):
@@ -1449,13 +1493,14 @@ class MainWindow(QMainWindow):
             '默认记住登录，重启后自动恢复；取消勾选时只保留本次登录。「退出登录」可清除已保存会话。<br><br>'
             '顶部「设置」可分别选择商城与检查更新是否使用系统代理，并调整日志等级；默认 Debug。「打开日志」可打开日志目录。<br><br>'
             '可保存官方 STEP、OBJ，并导出原生 AD SchLib 符号库、PcbLib 封装库；不导出 JSON 或 SVG。<br>'
+            'SchLib / PcbLib 可分别勾选合并并自定义库名，合并文件保存在所选目录根部；默认逐器件导出。<br>'
             'AD 库保留引脚、焊盘和孔数据，遇到不支持的图元会提示失败；PcbLib 不内嵌 3D 模型。<br>'
-            '每个器件单独保存到“器件名_编号”目录，AD 库文件按元件型号命名；下载时覆盖已有同名文件。<br>'
+            '未合并的文件单独保存到“器件名_编号”目录，AD 库文件按元件型号命名；下载时覆盖已有同名文件。<br>'
             '3D 预览由 LCSC3D 在本地渲染官方模型；拖动旋转，滚轮缩放，右键拖动平移。<br><br>'
             '右侧上方可切换「3D 模型 / 符号 / 封装」，无需先下载。<br>'
             '符号和封装直接加载商城使用的官方 SVG，支持滚轮缩放、拖动平移及「适应窗口」；多单元符号可选择单元。<br><br>'
             '启动后自动后台检查新版，发现新版时提醒；连接失败或已是最新版时不弹窗。'
-            '也可点击顶部「检查更新」手动查询；便携 EXE 支持下载、SHA-256 校验并重启更新。<br>'
+            '也可点击「设置 → 检查更新」手动查询；便携 EXE 支持下载、SHA-256 校验并重启更新。<br>'
             '模型来源：<a href="https://lceda.cn/">JLCEDA</a> / <a href="https://easyeda.com/">EasyEDA 官方库</a>。<br>'
             '资源下载与本地 3D 预览由本项目实现，软件采用 AGPL-3.0-or-later。<br>'
             '对应源码、构建脚本与第三方说明随交付提供。')
@@ -1495,7 +1540,8 @@ class MainWindow(QMainWindow):
             return
         if self.update_dialog is not None and self.update_dialog.isVisible():
             return
-        self.update_dialog = UpdateDialog(VERSION, self, source=self.update_source, release=result['release'])
+        owner = self.settings_dialog if self.settings_dialog is not None and self.settings_dialog.isVisible() else self
+        self.update_dialog = UpdateDialog(VERSION, owner, source=self.update_source, release=result['release'], controller=self)
         self.update_dialog.show()
         log_event('INFO', 'update.startup_notification_shown', target_version=result['release'].version)
 
@@ -1505,7 +1551,8 @@ class MainWindow(QMainWindow):
             self.update_dialog.raise_()
             self.update_dialog.activateWindow()
             return
-        self.update_dialog = UpdateDialog(VERSION, self, source=self.update_source)
+        owner = self.settings_dialog if self.settings_dialog is not None and self.settings_dialog.isVisible() else self
+        self.update_dialog = UpdateDialog(VERSION, owner, source=self.update_source, controller=self)
         self.update_dialog.show()
 
     def begin_update(self, manifest):
@@ -1553,6 +1600,7 @@ def main():
     parser.add_argument('--self-test', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-ad', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-ad-parts', default='C2765186', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-ad-merge', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-store', '--self-test-favorites', dest='self_test_favorites', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-store-live', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-settings', metavar='FOLDER', help=argparse.SUPPRESS)
@@ -1628,6 +1676,11 @@ def main():
         window.obj_box.setChecked(False)
         window.schlib_box.setChecked(True)
         window.pcblib_box.setChecked(True)
+        if args.self_test_ad_merge:
+            window.merge_schlib_box.setChecked(True)
+            window.merge_pcblib_box.setChecked(True)
+            window.schlib_name_input.setText('项目符号.SchLib')
+            window.pcblib_name_input.setText('项目封装')
         window.set_preview_mode('symbol')
         window.input.setPlainText('\n'.join(ad_test_parts))
         window.load_queue()
@@ -1646,6 +1699,7 @@ def main():
             (destination / 'verification.json').write_text(json.dumps({
                 'version': VERSION, 'frozen': bool(getattr(sys, 'frozen', False)), 'success': ok,
                 'parts': ad_test_parts,
+                'merged': args.self_test_ad_merge,
                 'formats': {'step': window.step_box.isChecked(), 'obj': window.obj_box.isChecked(),
                             'schlib': window.schlib_box.isChecked(), 'pcblib': window.pcblib_box.isChecked()},
                 'results': [vars(result) for result in results], 'preview': window.preview_state,

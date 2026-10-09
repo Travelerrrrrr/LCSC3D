@@ -39,6 +39,19 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(18)
 
+        update_group = QGroupBox('软件更新')
+        update_layout = QHBoxLayout(update_group)
+        update_layout.setContentsMargins(16, 22, 16, 16)
+        from PySide6.QtWidgets import QApplication
+        update_layout.addWidget(QLabel('当前版本：' + QApplication.applicationVersion()))
+        update_layout.addStretch()
+        self.update_button = QPushButton('检查更新')
+        self.update_button.setAutoDefault(False)
+        self.update_button.setToolTip('使用已保存的更新代理设置检查新版本')
+        self.update_button.clicked.connect(parent.check_updates)
+        update_layout.addWidget(self.update_button)
+        layout.addWidget(update_group)
+
         proxy_group = QGroupBox('代理设置')
         proxy_form = QFormLayout(proxy_group)
         proxy_form.setContentsMargins(16, 22, 16, 16)

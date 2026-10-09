@@ -771,10 +771,10 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.assertTrue(self.dialog.isVisible())
         self.assertEqual(foreground(), int(self.window.winId()))
 
-    def test_header_account_entry_is_before_update_and_uses_shared_login_state(self):
+    def test_header_account_entry_is_before_settings_and_uses_shared_login_state(self):
         self.window.show()
         self.app.processEvents()
-        self.assertLess(self.window.account_button.geometry().right(), self.window.update_button.geometry().left())
+        self.assertLess(self.window.account_button.geometry().right(), self.window.settings_button.geometry().left())
         self.assertFalse(hasattr(self.dialog, 'login_button'))
         self.window.account_button.click()
         self.wait_until(lambda: self.dialog.login_dialog and self.dialog.login_dialog.token)

@@ -12,6 +12,7 @@ parser.add_argument('--update-report',type=Path,default=root/'work/self-update-v
 parser.add_argument('--store-dir',type=Path)
 parser.add_argument('--store-offline-dir',type=Path)
 parser.add_argument('--settings-dir',type=Path)
+parser.add_argument('--merge-dir',type=Path)
 parser.add_argument('--local-update-report',type=Path)
 parser.add_argument('--startup-silent-reports',nargs='+',type=Path)
 parser.add_argument('--verification-date',default=date.today().isoformat())
@@ -56,6 +57,34 @@ if args.store_offline_dir:
  for key in ('qr_native','native_password_login','native_sms_login','native_image_captcha','restore_without_qr','logout_clears_account','independent_price_tiers','queue_delete_preserves_files'):assert offline[key]
  store_text+=('- 原生商城离线 EXE 验证通过：扫码、密码、短信与图片验证、加密保存和恢复、退出清除、分页、收藏及商品资料。登录和短信仅使用受控本地服务，不访问用户真实账号。\n')
 settings_text=''
+merge_text=''
+if args.merge_dir:
+ merge=json.loads((args.merge_dir/'verification.json').read_text(encoding='utf-8'))
+ assert merge['success'] and merge['frozen'] and merge['version']==version and merge['merged']
+ assert len(merge['parts'])>1
+ sys.path.insert(0,str(root/'app/tests'))
+ from altium_inspect import schematic,pcb,merged_pcb_section
+ rows=merge['results']
+ assert {row['part'] for row in rows}==set(merge['parts'])
+ assert len({name for row in rows for name in row['files']})==2
+ for row in rows:
+  assert row['status']=='成功'
+  sch=next(Path(name) for name in row['files'] if name.endswith('.SchLib'))
+  board=next(Path(name) for name in row['files'] if name.endswith('.PcbLib'))
+  assert sch.name=='项目符号.SchLib' and board.name=='项目封装.PcbLib'
+  header,records,pins=schematic(sch.read_bytes(),row['part']+'_Symbol')
+  payload=board.read_bytes()
+  name,pads,_=pcb(payload,merged_pcb_section(payload,row['part']))
+  assert int(header['COMPCOUNT'])==len(rows) and pins and pads
+  assert next(record['MODELNAME'] for record in records if record.get('RECORD')=='45')==name
+ merge_text=('- 冻结 EXE 合并验证通过：'+str(len(rows))+' 个公开器件经真实界面导出为自定义中文名称的两份库；独立读取器逐个核对条目、引脚/焊盘与符号到封装的引用。\n'
+             '- 合并回归覆盖两个独立开关、重名及长名称、字体和几何保留、部分失败、取消保留原库、写入失败、仅替换本次条目及名称验证；合并库尚未经过 Altium Designer 实机打开验收。\n')
+ native_path=args.merge_dir/'native-verification.json'
+ if native_path.is_file():
+  native=json.loads(native_path.read_text(encoding='utf-8'))
+  assert native['success'] and {item['format'] for item in native['libraries']}=={'SchLib','PcbLib'}
+  assert all(len(item['components'])==len(rows) and not item['errors'] and not item['warnings'] for item in native['libraries'])
+  merge_text+='- 第二套独立读取器 AltiumSharp 1.0.2 成功读取并渲染两份合并库的全部条目，无警告或错误；未随应用打包。\n'
 local_update_text=''
 if args.local_update_report:
  local=json.loads(args.local_update_report.read_text(encoding='utf-8'))
@@ -89,7 +118,7 @@ text=f"""# LCSC3D {version} 成品验证
 验证日期：{args.verification_date}。Windows x64、Python 3.12.10、PySide6 6.11.1。
 
 - {args.test_count} 项本地回归通过，包含商城专项、下载列表删除、官方 STEP/OBJ、原生 AD 库、27 个官方 AD 样本、预览和自更新。
-{settings_text}{store_text}{local_update_text}- 独立中文目录运行真实 EXE，清除 Python/Qt 环境变量，仅保留系统 PATH，退出码 0。
+{settings_text}{store_text}{local_update_text}{merge_text}- 独立中文目录运行真实 EXE，清除 Python/Qt 环境变量，仅保留系统 PATH，退出码 0。
 - C2040 与 C20197 各保存官方 STEP/OBJ；无效编号失败，未勾选 C163691 不下载，模型目录没有其他导出文件。
 - 两次本地 3D 预览 ready，符号/封装分别识别 57/57 和 8/8 个引脚/焊盘，窗口句柄稳定。
 - 冻结 EXE 自更新通过：原程序退出、独立进程替换、重启 Qt 窗口并确认、设置保留，耗时 {update['seconds']} 秒。使用隔离账号目录，未访问用户真实保存会话。

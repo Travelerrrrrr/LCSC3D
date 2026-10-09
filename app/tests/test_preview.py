@@ -123,7 +123,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.window.save_settings()
         self.window.settings_enabled = False
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
-                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level'})
+                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level',
+                          'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name'})
 
     def assert_stable(self, hwnd, events, geometry, maximized=False):
         self.assertEqual(int(self.window.winId()), hwnd, 'Preview recreated the native window')
@@ -472,18 +473,31 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
     def test_check_update_button_displays_latest_version_and_reuses_open_dialog(self):
         self.window.show()
         with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)):
-            self.window.update_button.click()
+            self.window.settings_button.click()
+            self.window.settings_dialog.update_button.click()
             dialog = self.window.update_dialog
+            self.assertIs(dialog.parent(), self.window.settings_dialog)
+            self.assertIs(dialog.controller, self.window)
             self.window.check_updates()
             self.assertIs(self.window.update_dialog, dialog)
             self.wait_for_update_check()
         self.assertIn('最新版本', dialog.status.text())
         dialog.close()
+        self.assertTrue(self.window.settings_dialog.isVisible())
+        self.window.settings_dialog.cancel_button.click()
+        self.window.settings_button.click()
+        self.app.sendPostedEvents(None, QEvent.DeferredDelete)
+        with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)):
+            self.window.settings_dialog.update_button.click()
+            self.wait_for_update_check()
+        self.assertIs(self.window.update_dialog.parent(), self.window.settings_dialog)
+        self.window.update_dialog.close()
 
     def test_check_update_failure_can_retry_and_source_run_offers_release_page(self):
         self.window.show()
         with patch('update_ui.UpdateClient', side_effect=RuntimeError('offline')):
-            self.window.update_button.click()
+            self.window.settings_button.click()
+            self.window.settings_dialog.update_button.click()
             self.wait_for_update_check()
         dialog = self.window.update_dialog
         self.assertIn('offline', dialog.status.text())
@@ -503,7 +517,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.window.update_source = source
         self.window.show()
         with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)) as client:
-            self.window.update_button.click()
+            self.window.settings_button.click()
+            self.window.settings_dialog.update_button.click()
             self.wait_for_update_check()
         dialog = self.window.update_dialog
         self.assertIs(client.call_args.kwargs['source'], source)
@@ -522,7 +537,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                 raise main.Cancelled()
         self.window.show()
         with patch('update_ui.UpdateClient', side_effect=Client):
-            self.window.update_button.click()
+            self.window.settings_button.click()
+            self.window.settings_dialog.update_button.click()
             self.assertTrue(started.wait(1))
             self.window.update_dialog.close()
             self.wait_for_update_check()
@@ -541,7 +557,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.window.settings_enabled = False
         self.assertTrue(self.window.step_box.isChecked())
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
-                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level'})
+                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level',
+                          'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name'})
         self.window.path_input.setText(str(Path(self.directory.name) / 'models'))
         captured = []
         def download(part, options, api, progress):

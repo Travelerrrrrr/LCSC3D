@@ -170,6 +170,12 @@ def _source_parameters(head):
 
 @traced('export.schlib', lambda data, part, *a, **kw: {'part': safe_part(part), 'format': 'SCHLIB'}, level='INFO')
 def export_schlib(data, part, check_cancelled=lambda: None):
+    header, streams = _schlib_component(data, part, check_cancelled)
+    streams['FileHeader'] = _parameters(header)
+    return compound_file(streams, check_cancelled)
+
+
+def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=False, fonts=None):
     doc = document(data.get('dataStr'))
     head = document(doc.get('head'))
     params = document(head.get('c_para'))
@@ -178,10 +184,15 @@ def export_schlib(data, part, check_cancelled=lambda: None):
         raise DownloadError('符号单元数据格式无效或过多')
     name = _library_name(data.get('title') or params.get('name'), part)
     _, _, footprint = _pcb_documents(data, part)
+    if merged:
+        name = merged_name(name, part)
+    if merge_pcb:
+        footprint = merged_name(footprint, part)
     ox, oy = _decimal(head.get('x', 0)), _decimal(head.get('y', 0))
     def x(value): return _decimal(value) - ox
     def y(value): return oy - _decimal(value)
-    fonts = [('Times New Roman', 8)]
+    if fonts is None:
+        fonts = [('Times New Roman', 8)]
     def font(family='', size=''):
         size = number(str(size).removesuffix('pt'), 8)
         pair = (family or 'Times New Roman', size)
@@ -370,10 +381,10 @@ def export_schlib(data, part, check_cancelled=lambda: None):
               'CompCount': 1, 'LibRef0': name, 'CompDescr0': data.get('description') or '', 'PartCount0': len(units) + 1}
     for i, (family, size) in enumerate(fonts, 1):
         header[f'FontName{i}'], header[f'Size{i}'] = family, round(size)
-    section = _section(name)
+    section = _section(part + '_Symbol') if merged else _section(name)
     streams = {'FileHeader': _parameters(header), 'SectionKeys': _parameters({'KeyCount': 1, 'LibRef0': name, 'SectionKey0': section}),
                section + '/Data': b''.join(records), 'Storage': _parameters({'HEADER': 'Icon storage'})}
-    return compound_file(streams, check_cancelled)
+    return header, streams
 
 
 def _pad_record(layer, center, size, designator, shape, rotation=0, drill=0, plated=True,
@@ -480,7 +491,14 @@ The legacy reader requires numeric fields even when their value is zero.
 
 @traced('export.pcblib', lambda data, part, *a, **kw: {'part': safe_part(part), 'format': 'PCBLIB'}, level='INFO')
 def export_pcblib(data, part, check_cancelled=lambda: None):
+    _, streams = _pcblib_component(data, part, check_cancelled)
+    return compound_file(streams, check_cancelled)
+
+
+def _pcblib_component(data, part, check_cancelled, *, merged=False):
     doc, head, name = _pcb_documents(data, part)
+    if merged:
+        name = merged_name(name, part)
     shapes = _shapes(doc, '封装')
     ox, oy = _decimal(head.get('x', 0)), _decimal(head.get('y', 0))
     def point(px, py): return _raw(_decimal(px) - ox), _raw(oy - _decimal(py))
@@ -681,4 +699,83 @@ def export_pcblib(data, part, check_cancelled=lambda: None):
     }
     for folder in ('Models', 'ModelsNoEmbed', 'Textures'):
         streams[f'Library/{folder}/Header'], streams[f'Library/{folder}/Data'] = struct.pack('<I', 0), b''
+    return name, streams
+
+
+def merged_name(name, part):
+    """Keep same-named parts distinct, including long and non-ANSI names."""
+    # Keep the C-number inside the 31-character storage limit. Older native
+    # PCB readers look up this storage directly instead of using SectionKeys.
+    return _library_name(_section(name)[:max(0, 30 - len(part))] + '_' + part, part)
+
+
+class MergedLibrary:
+    """Compile components into one native library. Caller serializes add/build."""
+    def __init__(self, format, *, merge_pcb=False):
+        self.format = format
+        self.merge_pcb = merge_pcb
+        self.fonts = [('Times New Roman', 8)]
+        self.entries = {}
+
+    @traced('export.merge_component', lambda self, data, part, *a: {'part': safe_part(part), 'format': self.format})
+    def add(self, data, part, check_cancelled):
+        if self.format == 'SCHLIB':
+            entry = _schlib_component(data, part, check_cancelled, merged=True,
+                                      merge_pcb=self.merge_pcb, fonts=self.fonts)
+        else:
+            entry = _pcblib_component(data, part, check_cancelled, merged=True)
+        check_cancelled()
+        self.entries[part] = entry
+
+    @traced('export.merge', lambda self, parts, *a: {'format': self.format, 'count': len(parts)}, level='INFO')
+    def build(self, parts, check_cancelled):
+        entries = [self.entries[part] for part in parts]
+        if not entries:
+            raise DownloadError('没有可合并的元件')
+        streams = {}
+        if self.format == 'SCHLIB':
+            header = dict(entries[0][0])
+            header.update(CompCount=len(entries), Weight=sum(entry[0]['Weight'] for entry in entries),
+                          FontIDCount=len(self.fonts))
+            keys = {'KeyCount': len(entries)}
+            for index, (metadata, component) in enumerate(entries):
+                check_cancelled()
+                name = metadata['LibRef0']
+                section = next(path.split('/')[0] for path in component if path.endswith('/Data'))
+                header.update({f'LibRef{index}': name, f'CompDescr{index}': metadata['CompDescr0'],
+                               f'PartCount{index}': metadata['PartCount0']})
+                keys.update({f'LibRef{index}': name, f'SectionKey{index}': section})
+                if section + '/Data' in streams:
+                    raise DownloadError('合并符号的内部名称冲突')
+                streams[section + '/Data'] = component[section + '/Data']
+            for index, (family, size) in enumerate(self.fonts, 1):
+                header[f'FontName{index}'], header[f'Size{index}'] = family, round(size)
+            streams.update(FileHeader=_parameters(header), SectionKeys=_parameters(keys),
+                           Storage=_parameters({'HEADER': 'Icon storage'}))
+        else:
+            streams = {path: value for path, value in entries[0][1].items()
+                       if '/' not in path or path.startswith('Library/')}
+            keys = struct.pack('<I', len(entries))
+            names = b''
+            for name, component in entries:
+                check_cancelled()
+                section = next(path.split('/')[0] for path in component
+                               if path.endswith('/Data') and not path.startswith('Library/'))
+                if section + '/Data' in streams:
+                    raise DownloadError('合并封装的内部名称冲突')
+                keys += _string_block(name) + _string_block(section)
+                names += _string_block(name)
+                streams.update({path: value for path, value in component.items() if path.startswith(section + '/')})
+            streams['SectionKeys'] = keys
+            # This is the single Board record count, not the footprint count.
+            # Footprints are enumerated separately after that record in Data.
+            streams['Library/Header'] = struct.pack('<I', 1)
+            streams['Library/Data'] = _parameters(_pcb_header()) + struct.pack('<I', len(entries)) + names
+        return compound_file(streams, check_cancelled)
+
+
+def export_linked_schlib(data, part, check_cancelled):
+    """An individual symbol may still reference a merged footprint library."""
+    header, streams = _schlib_component(data, part, check_cancelled, merge_pcb=True)
+    streams['FileHeader'] = _parameters(header)
     return compound_file(streams, check_cancelled)

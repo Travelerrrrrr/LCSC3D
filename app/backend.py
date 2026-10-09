@@ -23,7 +23,7 @@ from app_logging import (log_event, record_error, traced, log_context, submit_lo
 from store_diagnostics import record_request_error
 from app_paths import temporary_directory, replace_file
 from model3d import document, model_reference
-from altium import export_schlib, export_pcblib
+from altium import export_schlib, export_pcblib, export_linked_schlib, MergedLibrary
 import certifi
 import urllib3
 from urllib3.util import Retry, Timeout
@@ -138,7 +138,7 @@ class NetworkApi:
     """Official component/model APIs with bounded requests and cancellation."""
     def __init__(self, cancelled: threading.Event | None = None, use_cache=True):
         self.cancelled = cancelled or threading.Event()
-        self.headers = {'User-Agent': 'LCSC3D/2.1.1', 'Accept-Encoding': 'gzip',
+        self.headers = {'User-Agent': 'LCSC3D/2.1.2', 'Accept-Encoding': 'gzip',
                         'Accept': '*/*'}
         self.use_cache = use_cache
 
@@ -303,6 +303,29 @@ class NetworkApi:
 class Options:
     destination: Path
     formats: tuple[str, ...] = ('STEP',)
+    merge_schlib: bool = False
+    merge_pcblib: bool = False
+    schlib_name: str = 'LCSC3D'
+    pcblib_name: str = 'LCSC3D'
+
+    def merged_paths(self):
+        return {fmt: self.destination / library_filename(name, fmt)
+                for fmt, enabled, name in (('SCHLIB', self.merge_schlib, self.schlib_name),
+                                            ('PCBLIB', self.merge_pcblib, self.pcblib_name))
+                if enabled and fmt in self.formats}
+
+
+def library_filename(name, format):
+    """Accept a filename, never a path; avoid silent rename or device writes."""
+    suffix = {'SCHLIB': '.SchLib', 'PCBLIB': '.PcbLib'}[format]
+    name = str(name).strip()
+    if name.lower().endswith(suffix.lower()):
+        name = name[:-len(suffix)]
+    if (not name or name.endswith((' ', '.')) or len(name.encode('utf-16le')) > 230
+            or re.search(r'[<>:"/\\|?*\x00-\x1f]', name)
+            or re.fullmatch(r'(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³])', name.split('.')[0], re.I)):
+        raise DownloadError(f'请填写有效的合并 {suffix} 文件名（不含路径或 Windows 禁用字符）')
+    return name + suffix
 
 
 @dataclass
@@ -315,6 +338,7 @@ class Result:
     files: list[str] = field(default_factory=list)
     folder: str = ''
     store_url: str = ''
+    pending_formats: list[str] = field(default_factory=list)
 
 
 @traced('component.lookup', lambda part, api: {'part': safe_part(part)})
@@ -338,7 +362,12 @@ def get_component_metadata(part: str, api: NetworkApi) -> dict[str, str]:
 
 @traced('download.part', lambda part, options, *a, **kw: {'part': safe_part(part), 'formats': options.formats}, level='INFO')
 def download_part(part: str, options: Options, api: NetworkApi,
-                  progress: Callable[[str, str], None] | None = None) -> Result:
+                  progress: Callable[[str, str], None] | None = None, *, libraries=None, merge_lock=None) -> Result:
+    # A direct one-part request uses the same merge/commit semantics as a batch.
+    if libraries is None and options.merged_paths():
+        return download_batch([part], options, getattr(api, 'cancelled', None),
+                              (lambda index, phase, title: progress(phase, title)) if progress else None,
+                              api=api, workers=1)[0]
     if not options.formats or any(fmt not in ('STEP', 'OBJ', 'SCHLIB', 'PCBLIB') for fmt in options.formats):
         raise DownloadError('请选择 STEP、OBJ、AD 符号库或 AD 封装库')
     notify = progress or (lambda phase, title: None)
@@ -379,8 +408,14 @@ def download_part(part: str, options: Options, api: NetworkApi,
             stage = 'convert' if fmt in ('SCHLIB', 'PCBLIB') else 'download'
             log_event('INFO', 'download.format_started', format=fmt, stage=stage)
             try:
+                if libraries and fmt in libraries:
+                    with merge_lock:
+                        libraries[fmt].add(data, part, api.check_cancelled)
+                    result.pending_formats.append(fmt)
+                    continue
                 if fmt == 'SCHLIB':
-                    payload = export_schlib(data, part, api.check_cancelled)
+                    exporter = export_linked_schlib if options.merge_pcblib and 'PCBLIB' in options.formats else export_schlib
+                    payload = exporter(data, part, api.check_cancelled)
                 elif fmt == 'PCBLIB':
                     payload = export_pcblib(data, part, api.check_cancelled)
                 elif not model:
@@ -414,6 +449,9 @@ def download_part(part: str, options: Options, api: NetworkApi,
         result.message = '；'.join(['已保存 ' + ' / '.join(completed)] + errors)
     else:
         result.message = '；'.join(errors) or '没有可保存的文件'
+    if result.pending_formats:
+        result.status = '等待合并'
+        result.message = '；'.join((['已保存 ' + ' / '.join(completed)] if completed else []) + errors)
     log_event('INFO' if not errors else 'WARNING', 'download.part_result', status=result.status,
               completed_formats=completed, failure_count=len(errors))
     return result
@@ -427,13 +465,17 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
     cancelled = cancelled or threading.Event()
     api = api or NetworkApi(cancelled, use_cache=False)
     results = [None] * len(parts)
+    merged_paths = options.merged_paths()
+    libraries = {fmt: MergedLibrary(fmt, merge_pcb='PCBLIB' in merged_paths) for fmt in merged_paths}
+    merge_lock = threading.Lock()
 
     def run(index, part):
         try:
             if cancelled.is_set():
                 raise Cancelled()
             return download_part(part, options, api,
-                (lambda status, title: progress(index, status, title)) if progress else None)
+                (lambda status, title: progress(index, status, title)) if progress else None,
+                **({'libraries': libraries, 'merge_lock': merge_lock} if libraries else {}))
         except Cancelled:
             log_event('INFO', 'download.part_cancelled', part=safe_part(part))
             return Result(part, '已取消', message='任务已取消；已保存的完整文件保留')
@@ -462,6 +504,41 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                 if on_result:
                     on_result(index, result)
             fill_workers()
+    for fmt, path in merged_paths.items():
+        members = [(index, result) for index, result in enumerate(results) if fmt in result.pending_formats]
+        if not members:
+            continue
+        error = ''
+        try:
+            if cancelled.is_set():
+                raise Cancelled()
+            for index, result in members:
+                if progress:
+                    progress(index, '正在合并 ' + fmt, result.title)
+            payload = libraries[fmt].build([result.part for _, result in members], api.check_cancelled)
+            if cancelled.is_set():
+                raise Cancelled()
+            atomic_write(path, payload)
+        except Cancelled:
+            error = '合并已取消，原合并库保留'
+        except Exception as exc:
+            record_error(exc, 'download.merge_failed', format=fmt)
+            error = '合并失败：' + str(exc)
+        for _, result in members:
+            if not error:
+                result.files.append(str(path))
+                if not Path(result.folder).is_dir():
+                    result.folder = str(options.destination)
+            result.message = '；'.join(filter(None, (result.message,
+                f'{fmt}：{error}' if error else f'已合并 {fmt} → {path.name}（{len(members)} 个元件）')))
+    for index, result in enumerate(results):
+        if result.pending_formats:
+            result.pending_formats.clear()
+            result.status = ('成功' if len(result.files) == len(options.formats) else
+                             '部分完成' if result.files else '已取消' if cancelled.is_set() else '失败')
+            log_event('INFO', 'download.merge_result', part=safe_part(result.part), status=result.status)
+            if on_result:
+                on_result(index, result)
     log_event('INFO', 'download.batch_result', count=len(results),
               succeeded=sum(r.status == '成功' for r in results),
               partial=sum(r.status == '部分完成' for r in results),

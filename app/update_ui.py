@@ -102,8 +102,9 @@ class UpdateWorker(QThread):
 
 
 class UpdateDialog(QDialog):
-    def __init__(self, version, parent, *, source=None, release=None):
+    def __init__(self, version, parent, *, source=None, release=None, controller=None):
         super().__init__(parent)
+        self.controller = controller if controller is not None else parent
         self.setWindowTitle('检查更新（本地测试）' if source is not None else '检查更新')
         self.setWindowModality(Qt.WindowModal)
         self.resize(540, 360)
@@ -187,7 +188,7 @@ class UpdateDialog(QDialog):
             self.status.setText(self.check_message)
             self.start_worker()
             return
-        if self.parent().batch_running:
+        if self.controller.batch_running:
             self.status.setText('请等待当前模型下载完成，再下载并安装更新。')
             return
         self.status.setText('正在下载新版，完成校验后将关闭程序并重新启动…')
@@ -219,7 +220,7 @@ class UpdateDialog(QDialog):
             return
         if self.manifest is not None:
             try:
-                self.parent().begin_update(self.manifest)
+                self.controller.begin_update(self.manifest)
                 self.accept()
                 return
             except Exception as exc:

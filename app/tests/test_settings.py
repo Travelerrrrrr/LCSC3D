@@ -351,6 +351,35 @@ class SettingsWindowTests(PreferencesTestCase):
         self.assertEqual(app_logging.LOGGER.level, logging.DEBUG)
         self.assertFalse(self.settings_path.exists())
 
+    def test_merge_preferences_persist_independently_and_lock_while_downloading(self):
+        window = self.window
+        self.assertFalse(window.merge_schlib_box.isChecked())
+        self.assertFalse(window.merge_pcblib_box.isChecked())
+        self.assertFalse(window.schlib_name_input.isEnabled())
+        window.schlib_box.setChecked(True)
+        window.merge_schlib_box.setChecked(True)
+        window.schlib_name_input.setText('我的符号')
+        window.pcblib_name_input.setText('我的封装.PcbLib')
+        window.save_settings()
+        window.merge_schlib_box.setChecked(False)
+        window.schlib_name_input.clear()
+        window._restore_settings()
+        self.assertTrue(window.merge_schlib_box.isChecked())
+        self.assertFalse(window.merge_pcblib_box.isChecked())
+        self.assertEqual(window.schlib_name_input.text(), '我的符号')
+        self.assertEqual(window.pcblib_name_input.text(), '我的封装.PcbLib')
+        self.assertTrue(window.schlib_name_input.isEnabled())
+        self.assertFalse(window.pcblib_name_input.isEnabled())
+        window.set_running(True)
+        self.assertFalse(window.merge_schlib_box.isEnabled())
+        self.assertFalse(window.schlib_name_input.isEnabled())
+        window.set_running(False)
+        self.assertTrue(window.merge_schlib_box.isEnabled())
+        self.assertTrue(window.schlib_name_input.isEnabled())
+        window.schlib_box.setChecked(False)
+        self.assertFalse(window.merge_schlib_box.isEnabled())
+        self.assertFalse(window.schlib_name_input.isEnabled())
+
     def test_save_error_leaves_the_dialog_open_and_runtime_preferences_unchanged(self):
         self.window.settings_button.click()
         dialog = self.window.settings_dialog
