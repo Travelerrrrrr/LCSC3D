@@ -9,9 +9,9 @@
 
 LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。它把商城选型、账号收藏、模型下载、Altium Designer 元件库导出和三类预览放在一起。下载 `LCSC3D.exe` 即可运行，无须安装 Python；导出 AD 库也无须在电脑上安装 Altium Designer。
 
-**当前开发版本：2.1.1** · **[下载已发布的 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [已发布源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.1.1.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**当前版本：2.1.1** · **[下载 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.1.1.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
-2.1.1 增加设置窗口，可独立控制商城与检查更新是否使用系统代理，调整日志等级、打包或清除日志；同时完善登录失败提示和诊断。商城搜索、独立价格梯度、库存与完整资料、账号收藏、三种原生登录、模型下载和 AD 库导出继续支持。下方截图由实际程序生成，使用公开商品资料和空白登录表单。
+2.1.1 增加设置窗口，可独立控制商城与检查更新是否使用系统代理，调整日志等级、打包或清除日志；启动时后台检查更新，发现新版才提醒，并完善登录失败提示和诊断。商城搜索、独立价格梯度、库存与完整资料、账号收藏、三种原生登录、模型下载和 AD 库导出继续支持。下方截图由实际程序生成，使用公开商品资料和空白登录表单。
 
 ![LCSC3D 2.1.1 主窗口：设置入口、Type-C 连接器预览与四种下载格式](docs/images/2.1.1/main.png)
 
