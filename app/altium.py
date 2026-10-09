@@ -123,6 +123,11 @@ def _color(value):
     return rgb[0] | rgb[1] << 8 | rgb[2] << 16
 
 
+def _unfilled(value):
+    """Official symbols use both 'none' and 'NONE' for an absent fill."""
+    return isinstance(value, str) and value.strip().casefold() == 'none'
+
+
 def _coord_parameter(record, key, value):
     raw = _raw(value)
     whole = int(Decimal(raw) / 100000)
@@ -175,7 +180,7 @@ def export_schlib(data, part, check_cancelled=lambda: None):
     return compound_file(streams, check_cancelled)
 
 
-def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=False, fonts=None):
+def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=False, fonts=None, footprint_name=None):
     doc = document(data.get('dataStr'))
     head = document(doc.get('head'))
     params = document(head.get('c_para'))
@@ -184,10 +189,10 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
         raise DownloadError('符号单元数据格式无效或过多')
     name = _library_name(data.get('title') or params.get('name'), part)
     _, _, footprint = _pcb_documents(data, part)
-    if merged:
-        name = merged_name(name, part)
     if merge_pcb:
         footprint = merged_name(footprint, part)
+    if footprint_name is not None:
+        footprint = footprint_name
     ox, oy = _decimal(head.get('x', 0)), _decimal(head.get('y', 0))
     def x(value): return _decimal(value) - ox
     def y(value): return oy - _decimal(value)
@@ -213,10 +218,10 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
     def polyline(vertices, color, width, style='0', fill='none', closed=False):
         if len(vertices) < 2:
             raise DownloadError('符号线段缺少顶点')
-        record = common(7 if closed and fill != 'none' else 6)
+        record = common(7 if closed and not _unfilled(fill) else 6)
         record.update({'LineWidth': min(3, max(0, round(number(width, 1)))), 'Color': _color(color),
                        'LineStyle': int(number(style, 0)), 'LocationCount': len(vertices)})
-        if fill != 'none':
+        if not _unfilled(fill):
             record.update({'IsSolid': 'T', 'AreaColor': _color(fill)})
         for i, (px, py) in enumerate(vertices, 1):
             # SchLib parameter vertices use the same 10-mil DXP units as
@@ -298,8 +303,8 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
                     _coord_parameter(record, 'CornerXRadius', rx)
                     _coord_parameter(record, 'CornerYRadius', ry)
                 record.update({'Color': _color(fields[7]), 'LineWidth': min(3, max(0, round(number(fields[8], 1)))),
-                               'LineStyle': int(number(fields[9], 0)), 'Transparent': 'T' if fields[10] == 'none' else 'F'})
-                if fields[10] != 'none':
+                               'LineStyle': int(number(fields[9], 0)), 'Transparent': 'T' if _unfilled(fields[10]) else 'F'})
+                if not _unfilled(fields[10]):
                     record.update({'IsSolid': 'T', 'AreaColor': _color(fields[10])})
                 records.append(_parameters(record))
             elif kind in ('PL', 'PG'):
@@ -329,7 +334,7 @@ def _schlib_component(data, part, check_cancelled, *, merged=False, merge_pcb=Fa
                 _coord_parameter(record, 'Radius', fields[3])
                 _coord_parameter(record, 'SecondaryRadius', fields[3] if is_circle else fields[4])
                 record.update({'Color': _color(fields[color_index]), 'LineWidth': min(3, max(0, round(number(fields[color_index + 1], 1))))})
-                if fields[color_index + 3] != 'none':
+                if not _unfilled(fields[color_index + 3]):
                     record.update({'AreaColor': _color(fields[color_index + 3]), 'IsSolid': 'T'})
                 records.append(_parameters(record))
             elif kind in ('A', 'PT'):
@@ -495,10 +500,12 @@ def export_pcblib(data, part, check_cancelled=lambda: None):
     return compound_file(streams, check_cancelled)
 
 
-def _pcblib_component(data, part, check_cancelled, *, merged=False):
+def _pcblib_component(data, part, check_cancelled, *, merged=False, footprint_name=None):
     doc, head, name = _pcb_documents(data, part)
     if merged:
         name = merged_name(name, part)
+    if footprint_name is not None:
+        name = footprint_name
     shapes = _shapes(doc, '封装')
     ox, oy = _decimal(head.get('x', 0)), _decimal(head.get('y', 0))
     def point(px, py): return _raw(_decimal(px) - ox), _raw(oy - _decimal(py))
@@ -662,7 +669,7 @@ def _pcblib_component(data, part, check_cancelled, *, merged=False):
                 # area (stroke width at 8, fill style at 9). Older records
                 # without those fields describe solid rectangles.
                 width = _raw(f[8] or '0') if len(f) > 8 else 0
-                filled = len(f) <= 9 or f[9] != 'none'
+                filled = len(f) <= 9 or not _unfilled(f[9])
                 if width < 0 or not filled and width == 0:
                     raise DownloadError('AD 矩形轮廓线宽无效')
                 if filled:
@@ -703,10 +710,8 @@ def _pcblib_component(data, part, check_cancelled, *, merged=False):
 
 
 def merged_name(name, part):
-    """Keep same-named parts distinct, including long and non-ANSI names."""
-    # Keep the C-number inside the 31-character storage limit. Older native
-    # PCB readers look up this storage directly instead of using SectionKeys.
-    return _library_name(_section(name)[:max(0, 30 - len(part))] + '_' + part, part)
+    """Use the footprint name, without a supplier number, within storage limits."""
+    return _section(_library_name(name, part))
 
 
 class MergedLibrary:
@@ -716,6 +721,8 @@ class MergedLibrary:
         self.merge_pcb = merge_pcb
         self.fonts = [('Times New Roman', 8)]
         self.entries = {}
+        self.footprint_names = {}
+        self.reused_count = 0
 
     @traced('export.merge_component', lambda self, data, part, *a: {'part': safe_part(part), 'format': self.format})
     def add(self, data, part, check_cancelled):
@@ -727,32 +734,40 @@ class MergedLibrary:
         check_cancelled()
         self.entries[part] = entry
 
-    @traced('export.merge', lambda self, parts, *a: {'format': self.format, 'count': len(parts)}, level='INFO')
-    def build(self, parts, check_cancelled):
+    @traced('export.merge', lambda self, parts, *a, **kw: {'format': self.format, 'count': len(parts)}, level='INFO')
+    def build(self, parts, check_cancelled, *, original=None, footprint_names=None):
         entries = [self.entries[part] for part in parts]
         if not entries:
             raise DownloadError('没有可合并的元件')
         streams = {}
         if self.format == 'SCHLIB':
+            from library_merge import rewrite_symbol_records, unique_name
             header = dict(entries[0][0])
             header.update(CompCount=len(entries), Weight=sum(entry[0]['Weight'] for entry in entries),
                           FontIDCount=len(self.fonts))
             keys = {'KeyCount': len(entries)}
-            for index, (metadata, component) in enumerate(entries):
+            used_names = set()
+            for index, ((metadata, component), part) in enumerate(zip(entries, parts)):
                 check_cancelled()
-                name = metadata['LibRef0']
+                name = unique_name(metadata['LibRef0'], used_names, limit=255)
+                used_names.add(name.casefold())
                 section = next(path.split('/')[0] for path in component if path.endswith('/Data'))
                 header.update({f'LibRef{index}': name, f'CompDescr{index}': metadata['CompDescr0'],
                                f'PartCount{index}': metadata['PartCount0']})
                 keys.update({f'LibRef{index}': name, f'SectionKey{index}': section})
                 if section + '/Data' in streams:
                     raise DownloadError('合并符号的内部名称冲突')
-                streams[section + '/Data'] = component[section + '/Data']
+                streams[section + '/Data'] = rewrite_symbol_records(component[section + '/Data'],
+                    name=name, footprint=(footprint_names or {}).get(part))
             for index, (family, size) in enumerate(self.fonts, 1):
                 header[f'FontName{index}'], header[f'Size{index}'] = family, round(size)
             streams.update(FileHeader=_parameters(header), SectionKeys=_parameters(keys),
                            Storage=_parameters({'HEADER': 'Icon storage'}))
         else:
+            from library_merge import plan_footprints
+            planned, self.footprint_names, self.reused_count = plan_footprints(
+                [(part, *entry) for part, entry in zip(parts, entries)], original, check_cancelled)
+            entries = [(name, component) for _, name, component in planned]
             streams = {path: value for path, value in entries[0][1].items()
                        if '/' not in path or path.startswith('Library/')}
             keys = struct.pack('<I', len(entries))
@@ -774,14 +789,14 @@ class MergedLibrary:
         return compound_file(streams, check_cancelled)
 
 
-def export_linked_schlib(data, part, check_cancelled):
+def export_linked_schlib(data, part, check_cancelled, *, footprint_name=None):
     """An individual symbol may still reference a merged footprint library."""
-    header, streams = _schlib_component(data, part, check_cancelled, merge_pcb=True)
+    header, streams = _schlib_component(data, part, check_cancelled, merge_pcb=True, footprint_name=footprint_name)
     streams['FileHeader'] = _parameters(header)
     return compound_file(streams, check_cancelled)
 
 
-def export_linked_pcblib(data, part, check_cancelled):
+def export_linked_pcblib(data, part, check_cancelled, *, footprint_name=None):
     """Keep the standalone pair usable when also writing a combined library."""
-    _, streams = _pcblib_component(data, part, check_cancelled, merged=True)
+    _, streams = _pcblib_component(data, part, check_cancelled, merged=True, footprint_name=footprint_name)
     return compound_file(streams, check_cancelled)

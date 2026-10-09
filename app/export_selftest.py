@@ -19,7 +19,7 @@ def start(window, folder):
     destination = Path(folder).resolve()
     destination.mkdir(parents=True, exist_ok=True)
     data = {part: json.loads((destination / 'fixtures' / (part + '.json')).read_text(encoding='utf-8'))
-            for part in ('C2040', 'C20197', 'C2765186')}
+            for part in ('C2040', 'C20197', 'C2765186', 'C23922', 'C8734')}
     originals = {}
     for fmt in ('SCHLIB', 'PCBLIB'):
         library = MergedLibrary(fmt, merge_pcb=True)
@@ -52,7 +52,11 @@ def start(window, folder):
              ('append-footprint', 'append', ('PCBLIB',), True),
              ('project-grouped', 'project', ('SCHLIB', 'PCBLIB'), False),
              ('project-individual', 'project', ('SCHLIB', 'PCBLIB'), True),
-             ('empty-import', 'empty', ('SCHLIB', 'PCBLIB'), False)]
+             ('empty-import', 'empty', ('SCHLIB', 'PCBLIB'), False),
+             ('shared-merge-grouped', 'merge', ('SCHLIB', 'PCBLIB'), False),
+             ('shared-merge-individual', 'merge', ('SCHLIB', 'PCBLIB'), True),
+             ('shared-append-grouped', 'append', ('SCHLIB', 'PCBLIB'), False),
+             ('shared-append-individual', 'append', ('SCHLIB', 'PCBLIB'), True)]
     state = {'case': -1, 'phase': 'next', 'done': False, 'deadline': time.monotonic() + 120}
     timer = QTimer(window)
 
@@ -104,6 +108,13 @@ def start(window, folder):
         root = destination / name
         root.mkdir(exist_ok=True)
         state.update(name=name, mode=mode, formats=formats, keep=keep, root=root, targets={}, phase='prepare')
+        state['shared'] = name.startswith('shared-')
+        state['originals'] = originals.copy()
+        if state['shared']:
+            for fmt in formats:
+                library = MergedLibrary(fmt, merge_pcb=True)
+                library.add(data['C23922'], 'C23922', lambda: None)
+                state['originals'][fmt] = library.build(['C23922'], lambda: None)
         window.lib_append_box.setChecked(False)
         window.lib_merge_box.setChecked(False)
         window.path_input.setText(str(root / 'downloads'))
@@ -116,7 +127,7 @@ def start(window, folder):
             window.remove_checked_downloads()
             assert not window.ids and not window.input.toPlainText().strip()
         else:
-            window.input.setPlainText('C2040\nC20197')
+            window.input.setPlainText('C23922\nC8734' if state['shared'] else 'C2040\nC20197')
             window.load_queue()
         if mode == 'merge':
             window.lib_merge_box.click()
@@ -133,7 +144,7 @@ def start(window, folder):
             if mode != 'project':
                 for fmt in formats:
                     path = root / ('已有符号.SchLib' if fmt == 'SCHLIB' else '已有封装.PcbLib')
-                    path.write_bytes(originals[fmt])
+                    path.write_bytes(state['originals'][fmt])
                     state['targets'][fmt.lower() + '_target'] = str(path)
             project = root / '验证工程.PrjPcb'
             project.write_bytes(b'[Design]\r\nCustom=preserved\r\n')
@@ -167,7 +178,9 @@ def start(window, folder):
             for fmt, path in merged.items():
                 index = LibraryIndex(path.read_bytes(), fmt)
                 try:
-                    assert len(index.names) == (3 if mode == 'append' else 2)
+                    expected = (1 if fmt == 'PCBLIB' else 2) if state['shared'] else 3 if mode == 'append' else 2
+                    assert len(index.names) == expected
+                    assert not any(part in name for name in index.names for part in ('C23922', 'C8734'))
                 finally:
                     index.ole.close()
             for row in rows:
@@ -175,15 +188,21 @@ def start(window, folder):
                 assert len(files) == 2 + len(merged) * (2 if keep else 1)
                 model_folder = options.model_folder(options.output_root() / (safe_filename(row.title) + '_' + row.part))
                 assert all(file.parent == model_folder for file in files if file.suffix in ('.step', '.obj'))
+                if not keep:
+                    assert model_folder.name.endswith('_3D')
                 assert all(file.is_file() for file in files)
             if mode != 'merge':
                 assert not (root / 'downloads').exists()
                 assert not window.path_input.isEnabled()
                 assert Path(options.project_path).read_text(encoding='utf-8').count('DocumentPath=') == len(merged)
+            if state['shared'] and mode == 'append':
+                assert merged['PCBLIB'].read_bytes() == state['originals']['PCBLIB']
             report['cases'].append({'name': state['name'], 'success': True,
                 'project': options.project_path, 'results': [vars(row) for row in rows]})
             if state['case'] == 2:
                 capture(window, '追加完成')
+            if state['shared'] and not keep:
+                capture(window, '共享封装-' + mode)
         state['phase'] = 'next'
 
     def tick():

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import io
+import hashlib
+import json
 import re
 import struct
 from pathlib import Path
@@ -11,6 +13,7 @@ import olefile
 from altium import _block, _parameters, _section, _string_block
 from compound_storage import compound_file
 from errors import DownloadError
+from app_logging import log_event
 
 
 class Reader:
@@ -139,15 +142,189 @@ def remap_fonts(data, offset):
     return b''.join(records)
 
 
-def append_library(original, generated, format, check_cancelled=lambda: None):
+def unique_name(name, reserved, limit=31):
+    """Resolve a genuine name collision without adding a supplier number."""
+    candidate = name[:limit]
+    index = 2
+    while candidate.casefold() in reserved:
+        suffix = '_' + str(index)
+        candidate = name[:limit - len(suffix)] + suffix
+        index += 1
+    return candidate
+
+
+def rewrite_symbol_records(data, *, name=None, footprint=None):
+    reader, records = Reader(data), []
+    while reader.offset < len(data):
+        flag, payload = reader.block()
+        updates = {}
+        if not flag:
+            values = parameters(payload)
+            if name is not None and values.get('RECORD') == '1':
+                updates['LibReference'] = name
+            if footprint is not None:
+                if values.get('RECORD') == '45' and values.get('MODELTYPE', '').upper() == 'PCBLIB':
+                    updates['ModelName'] = footprint
+                elif values.get('RECORD') == '41' and values.get('NAME', '').casefold() == 'footprint':
+                    updates['Text'] = footprint
+        records.append(patch_parameters(payload, updates) if updates else _block(payload, flag))
+    return b''.join(records)
+
+
+def component_section(streams):
+    return next(path.split('/')[0] for path in streams if path.endswith('/Data') and not path.startswith('Library/'))
+
+
+def footprint_signature(streams):
+    """Compare native footprint data, excluding names, supplier metadata and pad GUIDs.
+
+    Geometry, pad numbers/stacks/masks, layers, text, height and unknown side streams
+    remain significant. Unknown record layouts are never assumed to be equivalent.
+    """
+    ignored = {'PATTERN', 'DESCRIPTION', 'SUPPLIERPART', 'ITEMGUID', 'REVISIONGUID',
+               'SOURCE', 'JLCEDA', 'EASYEDA', 'LIBRARYLICENCE'}
+    digest = hashlib.sha256()
+    try:
+        section = component_section(streams)
+        for path in sorted(streams):
+            if not path.startswith(section + '/'):
+                continue
+            key, payload = path[len(section) + 1:], streams[path]
+            if key == 'Data':
+                reader = Reader(payload)
+                reader.string()  # The footprint name is not physical geometry.
+                records = []
+                while reader.offset < len(reader.data):
+                    kind = reader.take(1)[0]
+                    if kind not in (1, 2, 4, 5, 11):
+                        return None
+                    blocks = [reader.block() for _ in range(6 if kind == 2 else 2 if kind == 5 else 1)]
+                    if kind == 2:
+                        flag, body = blocks[4]
+                        if flag or len(body) != 202:
+                            return None
+                        # Our native pad layout has two randomly assigned GUIDs.
+                        blocks[4] = flag, body[:126] + bytes(32) + body[158:]
+                    records.append(bytes([kind]) + b''.join(_block(body, flag) for flag, body in blocks))
+                payload = b''.join(records)
+            elif key in ('Parameters', 'WideStrings'):
+                reader = Reader(payload)
+                flag, body = reader.block()
+                if flag or reader.offset != len(payload):
+                    return None
+                values = parameters(body)
+                if key == 'Parameters':
+                    values = {key: value for key, value in values.items() if key not in ignored}
+                payload = json.dumps(values, sort_keys=True, ensure_ascii=True).encode('ascii')
+            encoded = key.encode('utf-8')
+            digest.update(struct.pack('<I', len(encoded)) + encoded + struct.pack('<I', len(payload)) + payload)
+    except (DownloadError, ValueError, KeyError, IndexError, StopIteration, struct.error):
+        return None
+    return digest.digest()
+
+
+def rename_footprint(streams, name):
+    source = component_section(streams)
+    section = _section(name)
+    result = {}
+    for path, payload in streams.items():
+        if path.startswith(source + '/'):
+            relative = path[len(source) + 1:]
+            if relative == 'Data':
+                reader = Reader(payload)
+                reader.string()
+                payload = _string_block(name) + payload[reader.offset:]
+            elif relative == 'Parameters':
+                flag, body = Reader(payload).block()
+                if flag:
+                    raise DownloadError('封装参数格式不受支持，无法安全重命名')
+                payload = patch_parameters(body, {'PATTERN': name})
+            path = section + '/' + relative
+        result[path] = payload
+    return result
+
+
+def indexed_component(index, name):
+    section = index.sections[name.casefold()]
+    return {'/'.join(path): index.read(path) for path in index.ole.listdir()
+            if path[0].casefold() == section.casefold()}
+
+
+def plan_footprints(entries, original=None, check_cancelled=lambda: None):
+    """Prefer an equivalent existing footprint; emit a shared new footprint once."""
+    known, reserved = {}, {'library', 'fileheader', 'sectionkeys', 'storage'}
+    if original is not None:
+        old = LibraryIndex(original, 'PCBLIB')
+        try:
+            reserved.update(old.roots)
+            reserved.update(name.casefold() for name in old.names)
+            for name in old.names:
+                check_cancelled()
+                signature = footprint_signature(indexed_component(old, name))
+                if signature is not None:
+                    known.setdefault(signature, name)
+        finally:
+            old.ole.close()
+    planned, names, emitted, reused, conflicts = [], {}, set(), 0, 0
+    for identity, name, streams in entries:
+        check_cancelled()
+        signature = footprint_signature(streams)
+        target = known.get(signature) if signature is not None else None
+        if target is not None:
+            reused += 1
+        else:
+            conflicts += name[:31].casefold() in reserved
+            target = unique_name(name, reserved)
+            reserved.add(target.casefold())
+            if signature is not None:
+                known[signature] = target
+        names[identity] = target
+        if target.casefold() not in emitted:
+            planned.append((identity, target, rename_footprint(streams, target)))
+            emitted.add(target.casefold())
+    log_event('INFO', 'library.footprint_reuse', count=len(entries), unique=len(planned), reused=reused,
+              name_conflicts=conflicts, existing_library=original is not None)
+    return planned, names, reused
+
+
+def deduplicate_pcblib(content, original=None, check_cancelled=lambda: None):
+    index = LibraryIndex(content, 'PCBLIB')
+    try:
+        entries = [(name, name, indexed_component(index, name)) for name in index.names]
+        planned, names, reused = plan_footprints(entries, original, check_cancelled)
+        if len(planned) == len(entries) and all(names[name] == name for name in index.names):
+            return content, names, []
+        sections = {section.casefold() for section in index.sections.values()}
+        streams = {'/'.join(path): index.read(path) for path in index.ole.listdir() if path[0].casefold() not in sections}
+        for _, _, component in planned:
+            streams.update(component)
+        streams['Library/Data'] = _block(index.header) + struct.pack('<I', len(planned)) + b''.join(
+            _string_block(name) for _, name, _ in planned)
+        streams['SectionKeys'] = struct.pack('<I', len(planned)) + b''.join(
+            _string_block(name) + _string_block(component_section(component)) for _, name, component in planned)
+        # A generated TOC is rebuilt by append_library from the accepted entries.
+        streams.pop('Library/ComponentParamsTOC/Header', None)
+        streams.pop('Library/ComponentParamsTOC/Data', None)
+        skipped = [name for name in index.names if name not in {identity for identity, _, _ in planned}]
+        return compound_file(streams, check_cancelled), names, skipped
+    finally:
+        index.ole.close()
+
+
+def append_library(original, generated, format, check_cancelled=lambda: None, *, footprint_names=None):
     """Return bytes and skipped names; never alter an existing component."""
     old = new = None
     try:
+        duplicates = []
+        if format == 'PCBLIB':
+            generated, resolved, duplicates = deduplicate_pcblib(generated, original, check_cancelled)
+            if footprint_names is not None:
+                footprint_names.update(resolved)
         old = LibraryIndex(original, format)
         new = LibraryIndex(generated, format)
         known = {name.casefold() for name in old.names}
         added = [name for name in new.names if name.casefold() not in known]
-        skipped = [name for name in new.names if name.casefold() in known]
+        skipped = duplicates + [name for name in new.names if name.casefold() in known]
         if not added:
             return original, skipped
         streams, roots = {}, set(old.roots)

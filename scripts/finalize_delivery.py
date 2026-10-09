@@ -15,6 +15,7 @@ parser.add_argument('--settings-dir',type=Path)
 parser.add_argument('--merge-dir',type=Path)
 parser.add_argument('--integration-dir',type=Path)
 parser.add_argument('--export-dir',type=Path)
+parser.add_argument('--compatibility-dir',type=Path)
 parser.add_argument('--capture-dir',type=Path)
 parser.add_argument('--local-update-report',type=Path)
 parser.add_argument('--startup-silent-reports',nargs='+',type=Path)
@@ -62,15 +63,32 @@ if args.store_offline_dir:
 settings_text=''
 merge_text=''
 integration_text=''
+if args.compatibility_dir:
+ compatibility=json.loads((args.compatibility_dir/'verification.json').read_text(encoding='utf-8'))
+ assert compatibility['success'] and compatibility['frozen'] and compatibility['version']==version
+ assert compatibility['parts']==['C23922'] and len(compatibility['results'])==1
+ sys.path.insert(0,str(root/'app/tests'))
+ from altium_inspect import schematic,pcb
+ row=compatibility['results'][0]
+ assert row['status']=='成功'
+ sch=next(Path(name) for name in row['files'] if name.endswith('.SchLib'))
+ board=next(Path(name) for name in row['files'] if name.endswith('.PcbLib'))
+ assert sch.name=='STM32F030C8T6.SchLib' and board.name=='STM32F030C8T6.PcbLib'
+ header,records,pins=schematic(sch.read_bytes())
+ assert len(pins)==48 and {pin['part'] for pin in pins}=={1,2}
+ name,pads,_=pcb(board.read_bytes())
+ assert len(pads)==48 and next(record['MODELNAME'] for record in records if record.get('RECORD')=='45')==name
+ integration_text+='- 冻结 EXE 实网单独导出 C23922 成功：48 个引脚、两个符号单元和 48 个焊盘，Lib 文件按 STM32F030C8T6 命名，不附加器件编号。\n'
 if args.export_dir:
  export=json.loads((args.export_dir/'export-verification.json').read_text(encoding='utf-8'))
  assert export['success'] and export['frozen'] and export['version']==version
  expected={'merge-grouped','merge-individual','append-grouped','append-individual',
-           'append-symbol','append-footprint','project-grouped','project-individual','empty-import'}
+           'append-symbol','append-footprint','project-grouped','project-individual','empty-import',
+           'shared-merge-grouped','shared-merge-individual','shared-append-grouped','shared-append-individual'}
  assert {case['name'] for case in export['cases']}==expected
  assert all(case['success'] for case in export['cases'])
  sys.path.insert(0,str(root/'app/tests'))
- from altium_inspect import schematic,pcb,merged_pcb_section
+ from altium_inspect import schematic,pcb,merged_pcb_section,named_pcb_section
  for case in export['cases']:
   for row in case.get('results',[]):
    assert row['status']=='成功'
@@ -78,7 +96,7 @@ if args.export_dir:
    assert all(path.is_file() for path in files)
    for path in files:
     single=path.parent.name.endswith('_'+row['part'])
-    expected_count={'C2040':57,'C20197':8}[row['part']]
+    expected_count={'C2040':57,'C20197':8,'C23922':48,'C8734':48}[row['part']]
     if path.suffix=='.SchLib':
      header,records,pins=schematic(path.read_bytes(),None if single else row['part']+'_Symbol')
      assert len(pins)==expected_count
@@ -86,21 +104,32 @@ if args.export_dir:
                        other.parent.name.endswith('_'+row['part'])==single),None)
      if counterpart:
       board=counterpart.read_bytes()
-      name,_,_=pcb(board,None if single else merged_pcb_section(board,row['part']))
+      model=next(record['MODELNAME'] for record in records if record.get('RECORD')=='45')
+      name,_,_=pcb(board,None if single else named_pcb_section(board,model))
       assert next(record['MODELNAME'] for record in records if record.get('RECORD')=='45')==name
     elif path.suffix=='.PcbLib':
      board=path.read_bytes()
-     name,pads,primitives=pcb(board,None if single else merged_pcb_section(board,row['part']))
+     symbol=next((other for other in files if other.suffix=='.SchLib' and
+                  other.parent.name.endswith('_'+row['part'])==single),None)
+     if symbol:
+      _,records,_=schematic(symbol.read_bytes(),None if single else row['part']+'_Symbol')
+      model=next(record['MODELNAME'] for record in records if record.get('RECORD')=='45')
+      section=named_pcb_section(board,model)
+     else:
+      section=None if single else merged_pcb_section(board,row['part'])
+     name,pads,primitives=pcb(board,section)
      assert len(pads)==expected_count
  integration_text+='- Lib 模式专项通过：136 组合覆盖合并/追加、单库/双库、STEP/OBJ、独立导出、工程联动开关及项目重复追加；另测空列表导入、模式恢复、不同库目录、取消、无效库、写入失败与文件竞争。\n'
- integration_text+='- 冻结 EXE 离线执行 9 个完整窗口流程，确认互斥/按需显示、追加路径禁用、集中 3D 目录、配套独立库和空列表直接导入；生成的 AD 文件再由独立测试读取器验证。\n'
+ integration_text+='- 冻结 EXE 离线执行 13 个完整窗口流程，确认互斥/按需显示、追加路径禁用、库名_3D 目录、配套独立库和空列表直接导入；共享封装用例核对 C23922/C8734 的两个符号均引用同一个 footprint。\n'
+ integration_text+='- C23922 原始 NONE 填充数据导出通过，保留 48 引脚和两个单元；7 类符号填充图元的 4 种大小写/空白写法、PCB 矩形轮廓和非法颜色拒绝均回归通过。\n'
+ integration_text+='- 封装去重另测 16 组合：普通合并/追加、SchLib 合并开关与独立导出开关；排除随机焊盘 GUID 和供应商标识后比较物理数据，同名异构加序号，已有条目与旧重复项保留。\n'
  integration_text+='- 新增导出规划、目录规则、库提交和空列表工程导入日志；隔离配置验证日志打包/清除后继续写入，不读取真实登录会话。\n'
  integration_text+='- 工程引用、原文件保留及库内引脚/焊盘/配套引用已自动核验；本次未在 Altium Designer 界面中重新加载工程或实际放置器件。\n'
 if args.integration_dir:
  integration=json.loads((args.integration_dir/'verification.json').read_text(encoding='utf-8'))
  assert integration['success'] and integration['frozen'] and integration['integrated'] and integration['version']==version
  sys.path.insert(0,str(root/'app/tests'))
- from altium_inspect import schematic,pcb,merged_pcb_section
+ from altium_inspect import schematic,pcb,merged_pcb_section,named_pcb_section
  import olefile
  for row in integration['results']:
   assert row['status']=='成功' and len(row['files'])==4
@@ -135,7 +164,7 @@ if args.merge_dir:
  assert merge['success'] and merge['frozen'] and merge['version']==version and merge['merged']
  assert len(merge['parts'])>1
  sys.path.insert(0,str(root/'app/tests'))
- from altium_inspect import schematic,pcb,merged_pcb_section
+ from altium_inspect import schematic,pcb,merged_pcb_section,named_pcb_section
  rows=merge['results']
  assert {row['part'] for row in rows}==set(merge['parts'])
  assert len({name for row in rows for name in row['files']})==2
@@ -146,7 +175,8 @@ if args.merge_dir:
   assert sch.name=='项目符号.SchLib' and board.name=='项目封装.PcbLib'
   header,records,pins=schematic(sch.read_bytes(),row['part']+'_Symbol')
   payload=board.read_bytes()
-  name,pads,_=pcb(payload,merged_pcb_section(payload,row['part']))
+  reference=next(record['MODELNAME'] for record in records if record.get('RECORD')=='45')
+  name,pads,_=pcb(payload,named_pcb_section(payload,reference))
   assert int(header['COMPCOUNT'])==len(rows) and pins and pads
   assert next(record['MODELNAME'] for record in records if record.get('RECORD')=='45')==name
  merge_text=('- 冻结 EXE 合并验证通过：'+str(len(rows))+' 个公开器件经真实界面导出为自定义中文名称的两份库；独立读取器逐个核对条目、引脚/焊盘与符号到封装的引用。\n'

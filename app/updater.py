@@ -161,7 +161,7 @@ class UpdateClient:
                       source_kind='local_test' if self.source is not None else 'github',
                       proxy_mode='direct' if self.source is not None else proxy_mode('update'), using_proxy=proxy is not None)
             response = connection_pool(proxy).request('GET', url, preload_content=False, redirect=False,
-                headers={'User-Agent': 'LCSC3D-updater/2.1.3', 'Accept': 'application/vnd.github+json',
+                headers={'User-Agent': 'LCSC3D-updater/2.2.0', 'Accept': 'application/vnd.github+json',
                          'Accept-Encoding': 'identity'}, timeout=Timeout(connect=6, read=18), pool_timeout=18,
                 retries=Retry(total=1, connect=1, read=0, status=0, redirect=0))
             log_event('DEBUG', 'update.response_received', status=response.status)

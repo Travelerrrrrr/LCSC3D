@@ -39,7 +39,7 @@ from export_targets import ExportTargetsDialog
 from product_preview import ProductPreview
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
-VERSION = '2.1.3'
+VERSION = '2.2.0'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
@@ -521,7 +521,7 @@ class MainWindow(QMainWindow):
             merge_layout.addLayout(row)
             box.toggled.connect(self.update_merge_controls)
             format_box.toggled.connect(self.update_merge_controls)
-        model_hint = label('未勾选独立导出器件时，3D 文件集中到 SchLib 同名文件夹；仅合并 PcbLib 时跟随其名称。', 'muted')
+        model_hint = label('未勾选独立导出器件时，3D 文件集中到“SchLib 名称_3D”文件夹；仅合并 PcbLib 时跟随其名称。', 'muted')
         model_hint.setWordWrap(True)
         merge_layout.addWidget(model_hint)
         output_layout.addWidget(self.merge_options)
@@ -1735,8 +1735,9 @@ class MainWindow(QMainWindow):
             '顶部「设置」可分别选择商城与检查更新是否使用系统代理，并调整日志等级；默认 Debug。「打开日志」可打开日志目录。<br><br>'
             '可保存官方 STEP、OBJ，并导出原生 AD SchLib 符号库、PcbLib 封装库；不导出 JSON 或 SVG。<br>'
             'SchLib / PcbLib 可分别勾选合并并自定义库名，合并文件保存在所选目录根部；默认逐器件导出。<br>'
-            'Lib「合并」「追加」互斥，勾选后显示配置。未勾选「独立导出器件」时，3D 文件集中到 SchLib 旁的同名文件夹；仅有 PcbLib 时跟随其名称。<br>'
+            'Lib「合并」「追加」互斥，勾选后显示配置。未勾选「独立导出器件」时，3D 文件集中到 SchLib 旁的“库名_3D”文件夹；仅有 PcbLib 时跟随其名称。<br>'
             '「追加」支持只选一种已有库，保存目录由库或工程决定；可同时将所选库加入 PCB 工程。下载列表为空时点击「导入已有库」直接加入工程。<br>'
+            '相同 footprint 自动复用并同步符号引用；同名不同内容加序号区分。Lib 文件和库内名称不自动追加器件编号。<br>'
             'AD 库保留引脚、焊盘和孔数据，遇到不支持的图元会提示失败；PcbLib 不内嵌 3D 模型。<br>'
             '未合并的文件单独保存到“器件名_编号”目录，AD 库文件按元件型号命名；下载时覆盖已有同名文件。<br>'
             '3D 预览由 LCSC3D 在本地渲染官方模型；拖动旋转，滚轮缩放，右键拖动平移。<br><br>'

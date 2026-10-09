@@ -136,6 +136,22 @@ class DiagnosticTests(unittest.TestCase):
             self.assertTrue(output)
             self.assertEqual(self.entries(event + '.finished')[0]['part'], 'C2765186')
 
+    def test_shared_footprint_reuse_and_deferred_outputs_keep_batch_diagnostics(self):
+        data = {part: fixture(part) for part in ('C23922', 'C8734')}
+        api = backend.NetworkApi()
+        api.get_cad_data_of_component = lambda part: data[part]
+        options = backend.Options(self.directory / 'exports', ('SCHLIB', 'PCBLIB'), True, True,
+                                  keep_schlib=True, keep_pcblib=True)
+        rows = backend.download_batch(['C23922', 'C8734'], options, api=api)
+        self.assertEqual([row.status for row in rows], ['成功', '成功'])
+        reuse = self.entries('library.footprint_reuse')
+        self.assertTrue(any(row['count'] == 2 and row['unique'] == 1 and row['reused'] == 1 for row in reuse))
+        completed = self.entries('download.individual_library_completed')
+        self.assertEqual({(row['part'], row['format']) for row in completed},
+                         {(part, fmt) for part in ('C23922', 'C8734') for fmt in ('SCHLIB', 'PCBLIB')})
+        self.assertEqual(len({row['root_id'] for row in reuse + completed}), 1)
+        self.assertFalse(self.entries('download.format_failed'))
+
     def test_cancel_is_reported_without_a_false_error(self):
         stop = threading.Event()
         stop.set()

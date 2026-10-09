@@ -9,11 +9,11 @@
 
 LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。它把商城选型、账号收藏、模型下载、Altium Designer 元件库导出和三类预览放在一起。下载 `LCSC3D.exe` 即可运行，无须安装 Python；导出 AD 库也无须在电脑上安装 Altium Designer。
 
-**当前本地版本：2.1.3** · **[下载公开发行版](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [公开版源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.1.3.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**当前本地版本：2.2.0** · **[下载公开发行版](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [公开版源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.2.0.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
-2.1.3 将 **Lib → 合并 / 追加** 分为互斥模式，勾选后显示配置，统一使用 **独立导出器件** 选项。3D 文件可集中到 SchLib 同名文件夹；追加支持单选一种库、联动 PCB 工程和空下载列表直接导入已有库。本地成品固定为 `outputs/LCSC3D.exe`，本次未发布 GitHub Release。
+2.2.0 修复 C23922 等符号的 `NONE` 无填充导出错误，集中模型目录改为 **库名_3D**，合并和追加时复用相同 footprint 并保持符号引用一致。新导出的 Lib 文件和库内名称不再自动加器件编号；沿用 **Lib → 合并 / 追加**、独立导出及空列表工程导入。本地成品固定为 `outputs/LCSC3D.exe`，本次未发布 GitHub Release。
 
-![LCSC3D 2.1.3：Lib 合并配置](docs/images/2.1.3/merge.png)
+![LCSC3D 2.2.0：共享封装合并与符号预览](docs/images/2.2.0/merge.png)
 
 ## 功能一览
 
@@ -138,7 +138,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 ## 追加已有库和加入 PCB 工程
 
-勾选 **Lib → 追加**，选择已有 SchLib/PcbLib，可只选一种库；同名条目保留并跳过。“保存到”路径变灰，导出位置跟随库或工程。**独立导出器件** 控制是否另存逐器件库与模型；关闭时模型集中到 SchLib（仅有 PcbLib 时为 PcbLib）旁的同名文件夹。
+勾选 **Lib → 追加**，选择已有 SchLib/PcbLib，可只选一种库；相同 footprint 复用已有条目，同名但内容不同的 footprint 使用序号分别保存。“保存到”路径变灰，导出位置跟随库或工程。**独立导出器件** 控制是否另存逐器件库与模型；关闭时模型集中到 SchLib（仅有 PcbLib 时为 PcbLib）旁的 **库名_3D** 文件夹。
 
 同时指定已有库和 `.PrjPcb` 后，可勾选 **将已选已有库导入PCB工程**，下载完成后将成功追加的库加入工程；下载列表为空时，主页 **导入已有库** 可直接加入所选库。只指定工程时，在工程旁按工程名称创建或追加配套库。写入前自动备份到 AppData，保留原有内容。详见 [使用说明](app/README.md#追加已有库与-pcb-工程)。
 
@@ -154,7 +154,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 - **停止与重试**：停止任务会保留已完成文件；重新下载需要更新的器件即可。
 - **设置记忆**：保存目录和格式选项自动记忆，器件目录与商城页面可从软件中直接打开。
 
-普通导出的文件保存在独立的 **“元件型号_C编号”** 文件夹中。合并或追加时未启用独立导出，STEP/OBJ 集中到优先库的同名文件夹。独立 AD 库文件使用元件型号命名；STEP/OBJ 文件保留编号与模型名称。文件名中的 Windows 禁用字符会替换为下划线。
+普通导出的文件保存在独立的 **“元件型号_C编号”** 文件夹中。合并或追加时未启用独立导出，STEP/OBJ 集中到优先库的 **库名_3D** 文件夹。独立 AD 库文件使用元件型号命名，库内名称不自动追加 C 编号；STEP/OBJ 文件保留编号与模型名称。文件名中的 Windows 禁用字符会替换为下划线。
 
 ```text
 所选保存目录/

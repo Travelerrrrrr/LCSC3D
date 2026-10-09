@@ -23,7 +23,7 @@ AD 导出回归也需要 Windows，以 `olefile` 独立读取 CFB 并核对引�
 
 ## 构建与验证
 
-Lib 模式专项回归为 `test_export_modes.py`，包含 136 组导出组合与界面、故障保护检查。冻结程序使用 `LCSC3D.exe --self-test-export <隔离目录>`：预先将 `app/tests/fixtures/` 中的 C2040、C20197、C2765186 JSON 复制到该目录的 `fixtures/`，并设置隔离 `LOCALAPPDATA`。此入口使用固定离线资源验证实际按钮、合并、追加、工程导出和空列表导入，输出 `export-verification.json` 和截图；公开网络模型及预览另用便携验证覆盖。
+Lib 模式专项回归为 `test_export_modes.py`，包含 136 组导出组合与界面、故障保护检查。`test_export_integrity.py` 另覆盖 16 组共享封装合并/追加组合、原始 NONE 填充、同名异构、配套引用和无器件编号的 Lib 名称。冻结程序使用 `LCSC3D.exe --self-test-export <隔离目录>`：预先将 `app/tests/fixtures/` 中的 C2040、C20197、C2765186、C23922、C8734 JSON 复制到该目录的 `fixtures/`，并设置隔离 `LOCALAPPDATA`。此入口用固定离线资源执行 13 个实际按钮、合并、追加、工程和空列表流程，输出 `export-verification.json` 和截图；公开网络模型及预览另用便携验证覆盖。
 
 运行 `app/build.ps1`，结果为 `app/dist/LCSC3D.exe`。本地交付准备如下：
 

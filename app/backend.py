@@ -140,7 +140,7 @@ class NetworkApi:
     """Official component/model APIs with bounded requests and cancellation."""
     def __init__(self, cancelled: threading.Event | None = None, use_cache=True):
         self.cancelled = cancelled or threading.Event()
-        self.headers = {'User-Agent': 'LCSC3D/2.1.3', 'Accept-Encoding': 'gzip',
+        self.headers = {'User-Agent': 'LCSC3D/2.2.0', 'Accept-Encoding': 'gzip',
                         'Accept': '*/*'}
         self.use_cache = use_cache
 
@@ -364,7 +364,7 @@ class Options:
         paths = self.merged_paths()
         if paths and not any(self.keeps_individual(fmt) for fmt in paths):
             library = paths.get('SCHLIB') or paths['PCBLIB']
-            return library.with_suffix('')
+            return library.with_name(library.stem + '_3D')
         return component_folder
 
     def imports_project(self):
@@ -440,7 +440,8 @@ def get_component_metadata(part: str, api: NetworkApi) -> dict[str, str]:
 
 @traced('download.part', lambda part, options, *a, **kw: {'part': safe_part(part), 'formats': options.formats}, level='INFO')
 def download_part(part: str, options: Options, api: NetworkApi,
-                  progress: Callable[[str, str], None] | None = None, *, libraries=None, merge_lock=None) -> Result:
+                  progress: Callable[[str, str], None] | None = None, *, libraries=None, merge_lock=None,
+                  deferred_outputs=None) -> Result:
     # A direct one-part request uses the same merge/commit semantics as a batch.
     if libraries is None and options.merged_paths():
         return download_batch([part], options, getattr(api, 'cancelled', None),
@@ -502,6 +503,14 @@ def download_part(part: str, options: Options, api: NetworkApi,
                     result.pending_formats.append(fmt)
                     if not options.keeps_individual(fmt):
                         continue
+                if fmt in ('SCHLIB', 'PCBLIB') and deferred_outputs is not None:
+                    # Resolve shared/existing footprint names before writing either
+                    # member of an independent pair (or a non-merged symbol).
+                    with merge_lock:
+                        deferred_outputs.setdefault(part, {})[fmt] = (path, data)
+                    if fmt not in result.pending_formats:
+                        result.pending_formats.append(fmt)
+                    continue
                 if fmt == 'SCHLIB':
                     exporter = export_linked_schlib if options.merge_pcblib and 'PCBLIB' in options.formats else export_schlib
                     payload = exporter(data, part, api.check_cancelled)
@@ -568,6 +577,7 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
               individual_formats=[fmt for fmt in merged_paths if options.keeps_individual(fmt)])
     libraries = {fmt: MergedLibrary(fmt, merge_pcb='PCBLIB' in merged_paths) for fmt in merged_paths}
     merge_lock = threading.Lock()
+    deferred_outputs = {} if 'PCBLIB' in merged_paths else None
     originals, target_errors = {}, {}
     for fmt, path in merged_paths.items():
         if options.appends_to(fmt, path):
@@ -583,7 +593,7 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                 raise Cancelled()
             return download_part(part, options, api,
                 (lambda status, title: progress(index, status, title)) if progress else None,
-                **({'libraries': libraries, 'merge_lock': merge_lock} if libraries else {}))
+                **({'libraries': libraries, 'merge_lock': merge_lock, 'deferred_outputs': deferred_outputs} if libraries else {}))
         except Cancelled:
             log_event('INFO', 'download.part_cancelled', part=safe_part(part))
             return Result(part, '已取消', message='任务已取消；已保存的完整文件保留')
@@ -612,7 +622,10 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                 if on_result:
                     on_result(index, result)
             fill_workers()
-    for fmt, path in merged_paths.items():
+    footprint_names = {}
+    # Symbols must reference the final deduplicated footprint names.
+    for fmt in sorted(merged_paths, key=lambda fmt: fmt != 'PCBLIB'):
+        path = merged_paths[fmt]
         action = '追加' if options.appends_to(fmt, path) else '合并'
         members = [(index, result) for index, result in enumerate(results) if fmt in result.pending_formats]
         if not members:
@@ -629,7 +642,10 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                 if progress:
                     progress(index, '正在' + action + ' ' + fmt, result.title)
             stage = 'build'
-            payload = libraries[fmt].build([result.part for _, result in members], api.check_cancelled)
+            payload = libraries[fmt].build([result.part for _, result in members], api.check_cancelled,
+                                          original=originals.get(fmt), footprint_names=footprint_names)
+            if fmt == 'PCBLIB':
+                footprint_names = dict(libraries[fmt].footprint_names)
             if fmt in originals:
                 stage = 'append'
                 payload, skipped = append_library(originals[fmt], payload, fmt, api.check_cancelled)
@@ -664,6 +680,38 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                 result.export_errors.append(f'{fmt}：{error}')
             elif skipped:
                 result.message += f'；原库保留 {len(skipped)} 个同名条目，未重复追加'
+            if not error and fmt == 'PCBLIB' and libraries[fmt].reused_count:
+                result.message += f'；已复用 {libraries[fmt].reused_count} 个相同 footprint'
+    for result in results:
+        for fmt, (path, data) in (deferred_outputs or {}).get(result.part, {}).items():
+            if fmt not in result.pending_formats:
+                continue
+            stage = 'convert'
+            try:
+                if cancelled.is_set():
+                    raise Cancelled()
+                exporter = export_linked_schlib if fmt == 'SCHLIB' else export_linked_pcblib
+                payload = exporter(data, result.part, api.check_cancelled,
+                                   footprint_name=footprint_names.get(result.part))
+                api.check_cancelled()
+                stage = 'write'
+                with log_context(part=safe_part(result.part), format=fmt):
+                    atomic_write(path, payload)
+                result.files.append(str(path))
+                result.folder = str(path.parent)
+                if fmt not in result.completed_formats:
+                    result.completed_formats.append(fmt)
+                result.message = '；'.join(filter(None, (result.message, '已独立导出 ' + fmt)))
+                log_event('INFO', 'download.individual_library_completed', part=safe_part(result.part),
+                          format=fmt, bytes=len(payload))
+            except Cancelled:
+                result.export_errors.append(fmt + '：独立导出已取消')
+                result.message += '；' + result.export_errors[-1]
+                log_event('INFO', 'download.individual_library_cancelled', part=safe_part(result.part), format=fmt, stage=stage)
+            except Exception as exc:
+                record_error(exc, 'download.format_failed', part=safe_part(result.part), format=fmt, stage=stage)
+                result.export_errors.append(f'{fmt}：{exc}')
+                result.message += '；' + result.export_errors[-1]
     project_error = ''
     project_files = list(dict.fromkeys(file for result in results for file in result.files
                                       if Path(file).suffix.lower() in ('.schlib', '.pcblib')
@@ -678,6 +726,8 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
             record_error(exc, 'library.project_import_failed')
             project_error = '加入 PCB 工程失败：' + str(exc)
     for index, result in enumerate(results):
+        result.files.sort(key=lambda file: (Path(file) in merged_paths.values(),
+                                            options.formats.index(Path(file).suffix[1:].upper())))
         pending = bool(result.pending_formats)
         if pending:
             result.pending_formats.clear()

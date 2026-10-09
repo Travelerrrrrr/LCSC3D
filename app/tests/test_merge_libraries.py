@@ -102,7 +102,7 @@ class MergeTests(unittest.TestCase):
                     self.assertEqual(sch_path.parent == self.options.destination, sch_merge)
                     self.assertEqual(pcb_path.parent == self.options.destination, pcb_merge)
 
-    def test_same_titles_long_names_and_shared_footprints_never_overwrite_entries(self):
+    def test_same_titles_keep_symbols_distinct_and_share_a_single_footprint(self):
         for part in self.parts:
             self.data[part] = fixture('C20197')
             self.data[part]['title'] = 'Duplicate' * 20
@@ -112,11 +112,16 @@ class MergeTests(unittest.TestCase):
         names = []
         for part in self.parts:
             _, records, pins = schematic(sch, part + '_Symbol')
-            name, pads, _ = pcb(board, merged_pcb_section(board, part))
+            name, pads, _ = pcb(board)
             self.assertEqual((len(pins), len(pads)), (8, 8))
             self.assertEqual(next(r['MODELNAME'] for r in records if r.get('RECORD') == '45'), name)
             names.append(records[0]['LIBREFERENCE'])
         self.assertEqual(len(set(names)), 3)
+        self.assertTrue(all(not any(part in name for part in self.parts) for name in names))
+        with olefile.OleFileIO(io.BytesIO(board)) as ole:
+            data = Reader(ole.openstream('Library/Data').read())
+            data.block()
+            self.assertEqual(data.unpack('<I')[0], 1)
 
     def test_multiunit_symbol_keeps_each_pin_in_its_original_unit(self):
         with gzip.open(Path(__file__).parent / 'fixtures/official_ad_cases.json.gz', 'rt', encoding='utf-8') as stream:
@@ -141,7 +146,8 @@ class MergeTests(unittest.TestCase):
             data = Reader(ole.openstream('Library/Data').read())
             data.block()
             self.assertEqual(data.unpack('<I')[0], 2)
-            self.assertFalse(any(path[0].endswith('_C20197') for path in ole.listdir()))
+            self.assertFalse(any(b'SupplierPart=C20197' in ole.openstream(path).read()
+                                 for path in ole.listdir() if path[-1] == 'Parameters'))
         self.assertIn('PCBLIB', results[1].message)
 
     def test_cancel_before_commit_keeps_old_libraries_and_reports_no_success(self):
@@ -177,8 +183,10 @@ class MergeTests(unittest.TestCase):
         header, _, _ = schematic(Path(result.files[0]).read_bytes())
         self.assertEqual(header['COMPCOUNT'], '1')
         with olefile.OleFileIO(result.files[1]) as ole:
-            self.assertFalse(any(path[0].endswith('_C2040') for path in ole.listdir()))
-            self.assertTrue(any(path[0].endswith('_C20197') for path in ole.listdir()))
+            self.assertFalse(any(b'SupplierPart=C2040' in ole.openstream(path).read()
+                                 for path in ole.listdir() if path[-1] == 'Parameters'))
+            self.assertTrue(any(b'SupplierPart=C20197' in ole.openstream(path).read()
+                                for path in ole.listdir() if path[-1] == 'Parameters'))
 
     def test_invalid_names_fail_before_fetch_and_unselected_merge_is_ignored(self):
         for name in ('', ' ', '../escape', 'x/y', 'x\\y', 'CON.txt', 'NUL', 'COM1', 'LPT¹', '.', 'x.', 'x' * 116):

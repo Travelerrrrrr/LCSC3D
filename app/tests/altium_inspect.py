@@ -51,8 +51,24 @@ def _section(ole):
 
 def merged_pcb_section(data, part):
     with olefile.OleFileIO(io.BytesIO(data)) as ole:
-        return next(path[0] for path in ole.listdir() if len(path) == 2 and path[1] == 'Data'
-                    and path[0].endswith('_' + part))
+        for path in ole.listdir():
+            if len(path) == 2 and path[1] == 'Parameters':
+                values = parameters(Reader(ole.openstream(path).read()).block()[1])
+                if values.get('SUPPLIERPART') == part:
+                    return path[0]
+        raise ValueError('No independently indexed footprint for ' + part)
+
+
+def named_pcb_section(data, name):
+    with olefile.OleFileIO(io.BytesIO(data)) as ole:
+        reader = Reader(ole.openstream('SectionKeys').read())
+        count, = reader.unpack('<I')
+        for _ in range(count):
+            entry = Reader(reader.block()[1]).string()
+            section = Reader(reader.block()[1]).string()
+            if entry.casefold() == name.casefold():
+                return section
+        raise ValueError('Missing footprint reference: ' + name)
 
 
 def schematic(data, section=None):

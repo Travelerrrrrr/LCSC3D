@@ -90,7 +90,7 @@ class ExportFixture(unittest.TestCase):
             singles = [file for file in files if file.suffix.lower() in ('.schlib', '.pcblib') and file not in paths.values()]
             self.assertEqual(len(singles), len(paths) if keep else 0)
             model_files = [file for file in files if file.suffix.lower() in ('.step', '.obj')]
-            folder = options.output_root() / (backend.safe_filename(row.title) + '_' + row.part) if keep else primary.with_suffix('')
+            folder = options.output_root() / (backend.safe_filename(row.title) + '_' + row.part) if keep else primary.with_name(primary.stem + '_3D')
             self.assertTrue(all(file.parent == folder for file in model_files))
             for file in model_files:
                 self.assertEqual(file.read_bytes(), STEP if file.suffix == '.step' else OBJ.encode('utf-8'))
@@ -166,7 +166,8 @@ class ExportMatrixTests(ExportFixture):
                 merged = options.merged_paths()
                 grouped = bool(merged) and not (sch_merge and sch_keep or pcb_merge and pcb_keep)
                 model = next(Path(file) for file in row.files if file.endswith('.step'))
-                self.assertEqual(model.parent, (merged.get('SCHLIB') or merged['PCBLIB']).with_suffix('') if grouped
+                primary = merged.get('SCHLIB') or merged.get('PCBLIB')
+                self.assertEqual(model.parent, primary.with_name(primary.stem + '_3D') if grouped
                                  else root / 'RP2040_C2040')
                 self.assertEqual(len(row.files), 3 + int(sch_merge and sch_keep) + int(pcb_merge and pcb_keep))
 
@@ -177,7 +178,7 @@ class ExportMatrixTests(ExportFixture):
         rows = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
         self.assert_outputs(options, rows, ('STEP',), False)
         self.assertEqual({Path(file).parent for row in rows for file in row.files if file.endswith('.step')},
-                         {self.root / 'symbols/符号库'})
+                         {self.root / 'symbols/符号库_3D'})
 
     def test_open_folder_follows_current_output_despite_previous_individual_directories(self):
         root = self.root / 'exports'
@@ -188,7 +189,7 @@ class ExportMatrixTests(ExportFixture):
             options = backend.Options(root, formats, merge_schlib=True, schlib_name='current')
             row = backend.download_batch(['C2040'], options, api=self.api)[0]
             self.assertEqual(row.status, '成功')
-            self.assertEqual(Path(row.folder), root / 'current' if 'STEP' in formats else root)
+            self.assertEqual(Path(row.folder), root / 'current_3D' if 'STEP' in formats else root)
             self.assertEqual((legacy / 'older.step').read_bytes(), b'keep this older export')
 
     def test_empty_queue_imports_unchanged_libraries_and_skips_duplicate_references(self):
