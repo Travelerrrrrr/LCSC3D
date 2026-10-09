@@ -536,6 +536,16 @@ class StoreProtocolTests(unittest.TestCase):
         exchange = next(r for r in self.service.requests if r[1] == '/cas/login')
         self.assertEqual(exchange[2]['code'], ['offline-auth'])
 
+    def test_offline_transport_key_keeps_leading_zero_bytes_in_wire_format(self):
+        from gmalg import SM2
+        self.service.transport_secret, self.service.transport_public = SM2(rnd_fn=lambda bits: 1).generate_keypair()
+        self.service.encrypt_auth_response = True
+        self.assertLess(len(self.service.transport_secret), 32)
+        self.assertEqual(self.client.login_password('OFFLINE', 'fixture-password')['code'], 'OFFLINE')
+        self.assertEqual(self.client._auth_keys['privateHexKey'], '00' * 31 + '01')
+        exchange = next(r for r in self.service.requests if r[1] == '/cas/login')
+        self.assertEqual(exchange[2]['code'], ['offline-auth'])
+
     def test_bad_credentials_and_invalid_fields_never_promote_a_session(self):
         for username, password in (('', 'x'), ('user', '')):
             with self.assertRaises(StoreError):

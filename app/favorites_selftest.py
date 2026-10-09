@@ -131,7 +131,9 @@ class OfflineStore:
                 if parsed.path == '/api/cas/config/get-public-key':
                     value = {'code': 200, 'data': owner.login_public.hex()}
                 elif parsed.path == '/api/cas/secret/update':
-                    value = {'code': 200, 'data': {'keyId':'offline-crypto', 'privateHexKey':owner.transport_secret.hex(),
+                    # The SDK returns a minimal-width integer; the CAS wire
+                    # format requires all 32 bytes, including leading zeros.
+                    value = {'code': 200, 'data': {'keyId':'offline-crypto', 'privateHexKey':owner.transport_secret.rjust(32, b'\0').hex(),
                                                   'publicHexKey':owner.transport_public.hex()}}
                 elif parsed.path in ('/api/cas/secure/check-login-risk','/api/cas/secure/check-sms-risk'):
                     value = {'code':102280 if owner.risk_required else 200, 'data':None}

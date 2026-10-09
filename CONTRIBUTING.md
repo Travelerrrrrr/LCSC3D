@@ -30,7 +30,7 @@ New-Item -ItemType Directory -Path outputs -Force
 Copy-Item -LiteralPath app/dist/LCSC3D.exe -Destination outputs/LCSC3D.exe
 python scripts/verify_portable.py
 python scripts/verify_self_update.py
-python scripts/finalize_delivery.py --test-count 321
+python scripts/finalize_delivery.py --test-count 322
 ```
 
 `verify_portable.py` 从独立中文目录运行 EXE，清理 Python/Qt 环境变量并限制 PATH，验证下载前型号、勾选过滤、STEP/OBJ、符号/封装及本地 3D 预览与窗口稳定性，并确认下载目录没有 JSON/SVG 或其他非模型文件。它只重建 `work/便携验证/验证结果/` 中的生成数据，保留正式 EXE；验证结束会删除临时 EXE 副本。
