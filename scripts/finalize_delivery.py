@@ -17,11 +17,18 @@ parser.add_argument('--integration-dir',type=Path)
 parser.add_argument('--export-dir',type=Path)
 parser.add_argument('--compatibility-dir',type=Path)
 parser.add_argument('--capture-dir',type=Path)
+parser.add_argument('--user-ad-evidence-dir',type=Path,
+                    help='User-supplied screenshots of AD libraries and project references')
 parser.add_argument('--local-update-report',type=Path)
 parser.add_argument('--startup-silent-reports',nargs='+',type=Path)
 parser.add_argument('--verification-date',default=date.today().isoformat())
 args=parser.parse_args()
 assert args.test_count>0
+ad_evidence_text=''
+if args.user_ad_evidence_dir:
+ for name in ('ad-symbol-user.png','ad-footprint-user.png','ad-project-user.png'):
+  assert (args.user_ad_evidence_dir/name).read_bytes().startswith(b'\x89PNG\r\n\x1a\n'),name
+ ad_evidence_text='- 用户提供的 AD 实测截图展示 SchLib 符号、PcbLib 封装及 PCB 工程中的两类库引用，已收录首页；截图是用户验证证据，不代表本自动验证执行了器件放置或整板设计检查。\n'
 outputs,tested=args.output_dir.resolve(),args.portable_dir.resolve()
 outputs.mkdir(parents=True,exist_ok=True)
 version=re.search(r"VERSION = '([^']+)'",(root/'app/main.py').read_text(encoding='utf-8')).group(1)
@@ -124,7 +131,7 @@ if args.export_dir:
  integration_text+='- C23922 原始 NONE 填充数据导出通过，保留 48 引脚和两个单元；7 类符号填充图元的 4 种大小写/空白写法、PCB 矩形轮廓和非法颜色拒绝均回归通过。\n'
  integration_text+='- 封装去重另测 16 组合：普通合并/追加、SchLib 合并开关与独立导出开关；排除随机焊盘 GUID 和供应商标识后比较物理数据，同名异构加序号，已有条目与旧重复项保留。\n'
  integration_text+='- 新增导出规划、目录规则、库提交和空列表工程导入日志；隔离配置验证日志打包/清除后继续写入，不读取真实登录会话。\n'
- integration_text+='- 工程引用、原文件保留及库内引脚/焊盘/配套引用已自动核验；本次未在 Altium Designer 界面中重新加载工程或实际放置器件。\n'
+ integration_text+='- 工程引用、原文件保留及库内引脚/焊盘/配套引用已自动核验；自动验证未操作 Altium Designer 的工程重载或器件放置。\n'
 if args.integration_dir:
  integration=json.loads((args.integration_dir/'verification.json').read_text(encoding='utf-8'))
  assert integration['success'] and integration['frozen'] and integration['integrated'] and integration['version']==version
@@ -180,7 +187,7 @@ if args.merge_dir:
   assert int(header['COMPCOUNT'])==len(rows) and pins and pads
   assert next(record['MODELNAME'] for record in records if record.get('RECORD')=='45')==name
  merge_text=('- 冻结 EXE 合并验证通过：'+str(len(rows))+' 个公开器件经真实界面导出为自定义中文名称的两份库；独立读取器逐个核对条目、引脚/焊盘与符号到封装的引用。\n'
-             '- 合并回归覆盖两个独立开关、重名及长名称、字体和几何保留、部分失败、取消保留原库、写入失败、仅替换本次条目及名称验证；合并库尚未经过 Altium Designer 实机打开验收。\n')
+             '- 合并回归覆盖两个独立开关、重名及长名称、字体和几何保留、部分失败、取消保留原库、写入失败、仅替换本次条目及名称验证；自动检查与 AD 实机证据分别记录。\n')
  native_path=args.merge_dir/'native-verification.json'
  if native_path.is_file():
   native=json.loads(native_path.read_text(encoding='utf-8'))
@@ -222,14 +229,14 @@ text=f"""# LCSC3D {version} 成品验证
 验证日期：{args.verification_date}。Windows x64、Python 3.12.10、PySide6 6.11.1。
 
 - {args.test_count} 项本地回归通过，包含商城专项、下载列表删除、官方 STEP/OBJ、原生 AD 库、27 个官方 AD 样本、预览和自更新。
-{settings_text}{store_text}{local_update_text}{merge_text}{integration_text}- 独立中文目录运行真实 EXE，清除 Python/Qt 环境变量，仅保留系统 PATH，退出码 0。
+{settings_text}{store_text}{local_update_text}{merge_text}{integration_text}{ad_evidence_text}- 独立中文目录运行真实 EXE，清除 Python/Qt 环境变量，仅保留系统 PATH，退出码 0。
 - C2040 与 C20197 各保存官方 STEP/OBJ；无效编号失败，未勾选 C163691 不下载，模型目录没有其他导出文件。
 - 两次本地 3D 预览 ready，符号/封装分别识别 57/57 和 8/8 个引脚/焊盘，窗口句柄稳定。
 - 冻结 EXE 自更新通过：原程序退出、独立进程替换、重启 Qt 窗口并确认、设置保留，耗时 {update['seconds']} 秒。使用隔离账号目录，未访问用户真实保存会话。
 - 配置和更新暂存位于 AppData，EXE 目录清洁与跨盘更新：{update.get('exe_directory_clean', False)} / {update.get('cross_volume', False)}。
 - 功能日志覆盖与故障定位：原因链、系统/服务错误码、文件/函数/行号、元件/格式/阶段、线程和更新助手关联经过故障注入回归；更新助手实际 EXE 日志关联：{update.get('diagnostic_correlation', False)}。
 - GitHub 后台 runner 无可交互输入桌面时跳过实际鼠标前台切换；窗口归属仍检查，本地 Windows 桌面及成品验证覆盖实际前台句柄。
-- README 截图由正式 EXE 读取公开元件并渲染，登录截图为空白表单，未访问用户保存会话或展示账号身份。
+- README 软件截图由正式 EXE 读取公开元件并渲染，登录截图为空白表单，未访问用户保存会话或展示账号身份；AD 截图由用户提供。
 - EXE 内 Python 模块与当前源码逐个比较，源码 ZIP 全部文件与工作区一致，包含许可证和第三方声明。
 
 成品：LCSC3D.exe。源码：LCSC3D.zip。校验和：SHA256SUMS.txt。

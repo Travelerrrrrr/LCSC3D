@@ -7,11 +7,27 @@
 
 **从立创商城搜索、账号收藏或 C 编号选择元件，查看价格、库存和资料，批量下载 STEP / OBJ、导出 AD 元件库并预览。**
 
-LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。它把商城选型、账号收藏、模型下载、Altium Designer 元件库导出和三类预览放在一起。下载 `LCSC3D.exe` 即可运行，无须安装 Python；导出 AD 库也无须在电脑上安装 Altium Designer。
+LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。它把商城选型、账号收藏、模型下载、Altium Designer 元件库导出和四类预览放在一起。下载 `LCSC3D.exe` 即可运行，无须安装 Python；导出 AD 库也无须在电脑上安装 Altium Designer。
 
-**当前本地版本：2.2.0** · **[下载公开发行版](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [公开版源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.2.0.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**当前版本：2.2.0** · **[下载 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.2.0.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
-2.2.0 修复 C23922 等符号的 `NONE` 无填充导出错误，集中模型目录改为 **库名_3D**，合并和追加时复用相同 footprint 并保持符号引用一致。新导出的 Lib 文件和库内名称不再自动加器件编号；沿用 **Lib → 合并 / 追加**、独立导出及空列表工程导入。本地成品固定为 `outputs/LCSC3D.exe`，本次未发布 GitHub Release。
+**2.2.0 将 AD 元件库的批量合并、追加和 PCB 工程联动集中到 Lib 区域，并加入相同 footprint 复用、独立导出和更清晰的文件组织。** 主页也可直接预览商品图片，商城加入下载列表后会显示导入结果。
+
+![LCSC3D 2.2.0 主窗口：官方 3D 模型、四类预览与 Lib 模式](docs/images/2.2.0/main.png)
+
+## 2.2.0 更新重点
+
+| 更新 | 使用方式与效果 |
+| --- | --- |
+| **Lib 合并 / 追加** | 两个模式互斥，勾选后展开配置；SchLib / PcbLib 可独立选择，合并库可自定义名称。 |
+| **独立导出器件** | 合并或追加的同时，可额外保留各器件的配套库和模型。 |
+| **已有库与 PCB 工程** | 支持只选 SchLib 或 PcbLib，追加成功后可将库加入指定 `.PrjPcb`；空下载列表也能直接导入已有库。 |
+| **相同 footprint 复用** | 相同封装不重复新增，符号引用同步指向实际保留的封装；同名不同内容用序号区分，原库条目保留。 |
+| **库名_3D 与简洁命名** | 未独立导出时，模型集中到 `库名_3D`；Lib 文件及新库内名称不自动附加器件编号。 |
+| **导出兼容修复** | 修复 C23922 等器件的 `NONE` 无填充错误，保留多单元符号和完整引脚。 |
+| **预览与操作反馈** | 新增主页商品图片预览、商城导入结果弹窗；手动检查更新集中到“设置”。 |
+
+下面是本次实际运行 2.2.0 的合并界面：C23922、C8734、C20197 导出 **3 个符号、2 个 footprint**，前两个 STM32 器件复用同一份 LQFP-48 封装。
 
 ![LCSC3D 2.2.0：共享封装合并与符号预览](docs/images/2.2.0/merge.png)
 
@@ -38,13 +54,13 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 主窗口顶部点击 **设置 → 检查更新** 可手动检查新版，启动后台检查继续保留。点击 **设置**，可分别为 **立创商城** 和 **检查更新** 选择 **使用系统代理 / 不使用系统代理**，默认均使用系统代理。商城选项覆盖登录、搜索、收藏、图片及元件资源，更新选项覆盖新版检查和更新包下载。保存后对新请求立即生效，当前登录保留，重启后恢复设置。
 
-**日志** 支持 Debug、Info、Warning、Error、Critical，默认 Debug。点击 **打开日志** 打开日志目录。商城、登录、下载、AD 导出、三类预览及自更新均记录关键步骤、结果和错误，包含操作关联编号、元件/格式、系统码、原因链及代码位置；不保存登录凭据，并自动轮转限制大小。详见 [日志排查](docs/日志排查.md)。
+**日志** 支持 Debug、Info、Warning、Error、Critical，默认 Debug。点击 **打开日志** 打开日志目录。商城、登录、下载、AD 导出、预览及自更新均记录关键步骤、结果和错误，包含操作关联编号、元件/格式、系统码、原因链及代码位置；不保存登录凭据，并自动轮转限制大小。详见 [日志排查](docs/日志排查.md)。
 
 **打包日志** 将主程序、更新助手、轮转和崩溃日志，以及软件/系统版本、当前代理模式和日志等级打成 ZIP，保存到 `%LOCALAPPDATA%/LCSC3D/diagnostics/`，完成后打开所在目录。反馈时发送 ZIP，并附发生时间、操作步骤与截图。**清除日志** 经确认后清除日志，随后继续记录；已打包的 ZIP 保留。
 
 配置、日志、会话、缓存、临时文件及更新数据统一存放在 `%LOCALAPPDATA%/LCSC3D/`，不在 EXE 旁生成配置文件。旧配置自动迁移，默认导出目录为其中的 `downloads/`，可主动选择其他目录。
 
-![LCSC3D 2.1.2 设置：软件更新、独立代理选项与日志等级](docs/images/2.1.2/settings.png)
+![LCSC3D 2.2.0 设置：软件更新、独立代理选项与日志等级](docs/images/2.2.0/settings.png)
 
 ## 商城搜索、价格与商品详情
 
@@ -109,12 +125,13 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 | 3D 模型 | 原样保存官方 STEP、OBJ。STEP 适合 SolidWorks、FreeCAD 等 CAD 软件；OBJ 可用于其他支持该格式的 3D 工具。 | 左键拖动旋转，滚轮缩放，右键拖动平移。 |
 | 原理图符号 | 查看官方符号图形、引脚名称和编号；多单元元件可选择单元。 | 滚轮缩放，左键拖动平移。 |
 | PCB 封装 | 查看焊盘、孔位、轮廓、编号和官方图层配色。 | 滚轮缩放，左键拖动平移。 |
+| 商品图片 | 查看商城商品原图，多图可切换。 | 滚轮缩放，拖动平移，上一张/下一张。 |
 
 载入列表后自动预览首个元件，单击其他行即可切换。四类预览都支持“适应窗口”和双击恢复视野，加载失败时可以“重新加载”，也可以直接打开商城页面。
 
 选择 **商品图片** 可在主页查看商城原图，多张图片用上一张/下一张切换，支持缩放、拖动和重新加载。
 
-![主页商品图片预览](docs/images/2.1.2/product-photo.png)
+![LCSC3D 2.2.0 主页商品图片预览](docs/images/2.2.0/product-photo.png)
 
 3D 初始视角保持元件顶部朝上。切换器件和下载进度更新时，预览仍可操作；资源可以先查看，再决定需要保存哪些格式。
 
@@ -122,13 +139,13 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 同一 Type-C 连接器的符号预览，可查看 A1～A12、B1～B12 等实际引脚编号。
 
-![LCSC3D 2.1.1 中 Type-C 连接器的原理图符号预览](docs/images/2.1.1/symbol.png)
+![LCSC3D 2.2.0 中 Type-C 连接器的原理图符号预览](docs/images/2.2.0/symbol.png)
 
 ### PCB 封装预览
 
 同一元件的封装预览，可查看焊盘编号、固定孔、轮廓和图层颜色。
 
-![LCSC3D 2.1.1 中 Type-C 连接器的 PCB 封装预览](docs/images/2.1.1/footprint.png)
+![LCSC3D 2.2.0 中 Type-C 连接器的 PCB 封装预览](docs/images/2.2.0/footprint.png)
 
 ### 与立创商城官方页面对照
 
@@ -141,6 +158,17 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 勾选 **Lib → 追加**，选择已有 SchLib/PcbLib，可只选一种库；相同 footprint 复用已有条目，同名但内容不同的 footprint 使用序号分别保存。“保存到”路径变灰，导出位置跟随库或工程。**独立导出器件** 控制是否另存逐器件库与模型；关闭时模型集中到 SchLib（仅有 PcbLib 时为 PcbLib）旁的 **库名_3D** 文件夹。
 
 同时指定已有库和 `.PrjPcb` 后，可勾选 **将已选已有库导入PCB工程**，下载完成后将成功追加的库加入工程；下载列表为空时，主页 **导入已有库** 可直接加入所选库。只指定工程时，在工程旁按工程名称创建或追加配套库。写入前自动备份到 AppData，保留原有内容。详见 [使用说明](app/README.md#追加已有库与-pcb-工程)。
+
+![追加配置：独立导出器件、已有库选择和 PCB 工程联动](docs/images/2.2.0/append.png)
+
+<details>
+<summary>查看空列表直接导入已有库，以及商城导入结果提示</summary>
+
+![空下载列表直接将已选库加入 PCB 工程](docs/images/2.2.0/empty-import.png)
+
+![商城加入下载列表后的导入结果提示](docs/images/2.2.0/import-result.png)
+
+</details>
 
 ## 批量下载与文件管理
 
@@ -175,7 +203,18 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 ## 在 Altium Designer 中查看
 
-以下是提供的 AD 实机截图，展示多单元符号、BGA 封装、焊盘和连接器。三维截图展示的是在 AD 中**另外添加 STEP 模型后**的效果；软件导出的 PcbLib 本身不自动包含这些模型。
+以下三张由用户提供，展示测试库在 **Altium Designer 中实际打开**的符号、PCB 封装，以及 `.PrjPcb` 工程中的两类库引用。截图采用用户测试库中的名称；程序追加时保留已有条目的原名称。
+
+| AD 中的原理图库 | AD 中的 PCB 封装库 |
+| --- | --- |
+| <a href="docs/images/2.2.0/ad-symbol-user.png"><img src="docs/images/2.2.0/ad-symbol-user.png" alt="用户实测：AD 中打开 SchLib 并显示 MOS 管符号与引脚" width="440"></a> | <a href="docs/images/2.2.0/ad-footprint-user.png"><img src="docs/images/2.2.0/ad-footprint-user.png" alt="用户实测：AD 中打开 PcbLib 并显示 20 焊盘封装" width="440"></a> |
+
+<a href="docs/images/2.2.0/ad-project-user.png"><img src="docs/images/2.2.0/ad-project-user.png" alt="用户实测：PCB 工程中已包含 PcbLib 和 SchLib 库引用" width="340"></a>
+
+<details>
+<summary>更多既有 AD 实机示例：多单元符号、BGA、连接器和手动添加 STEP 后的三维效果</summary>
+
+以下三维截图展示在 AD 中**另外添加 STEP 模型后**的效果；软件导出的 PcbLib 本身不自动包含这些模型。
 
 **符号、封装与添加 STEP 后的三维效果 ↓↓↓**
 
@@ -199,10 +238,11 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 | --- | --- |
 | <a href="docs/images/screenshots/12.png"><img src="docs/images/screenshots/12.png" alt="AD 中添加 STEP 后的 Type-C 连接器" width="440"></a> | <a href="docs/images/screenshots/13.png"><img src="docs/images/screenshots/13.png" alt="AD 中添加 STEP 后的 Type-C 连接器底部" width="440"></a> |
 
+</details>
 
 ## 便携运行与自更新
 
-程序以单个 `LCSC3D.exe` 交付，运行环境随 EXE 提供。设置保存在程序同目录的 `LCSC3D-settings.json` 中，便于保留下载目录和格式选择。
+程序以单个 `LCSC3D.exe` 交付，运行环境随 EXE 提供。设置保存在 `%LOCALAPPDATA%/LCSC3D/LCSC3D-settings.json`，保留下载目录和格式选择；日志、缓存及更新暂存也统一放在应用数据目录。
 
 软件启动后自动在后台检查一次本仓库的最新正式版本，发现新版时弹出更新窗口；已是最新版、连接失败或接口异常时保持静默，失败信息记录到日志。也可点击“设置 → 检查更新”手动查询并查看结果。便携 EXE 支持后台下载、SHA-256 校验和“下载并重启”：校验通过后替换程序并启动新版，保留设置及已下载资源；替换或启动失败时恢复原程序。程序目录需要可写，下载模型时可检查版本，安装更新需等下载任务结束。
 
@@ -220,7 +260,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 部分元件没有关联的 3D 模型，仍可能有可用的符号与封装；某些模型格式也可能不可获取。导出结果以实际官方资源和软件提示为准。预览用于选型和检查，生产设计前仍需根据器件数据手册核对引脚、尺寸和封装。
 
-当前版本通过 **322 项本地回归测试**，其中商城专项 87 项、下载列表删除 7 项；AD 导出回归包含 **27 个官方样本**，用独立读取器核对实际库记录。正式 EXE 验证覆盖商城、保存登录恢复、模型下载、原生 AD 库、三类预览和自更新。GitHub 的后台 Windows runner 不提供可交互输入桌面，实际鼠标前台切换在本地 Windows 桌面验证，其余回归由 CI 运行。详细范围见 [验证记录](docs/验证记录.md)。
+当前版本通过 **387 项本地回归测试**，专项覆盖 **136 组导出模式组合、16 组共享封装组合**，AD 导出包含 **27 个官方对照样本**。实际 EXE 已执行 13 个导出窗口流程、C23922 实网兼容验证、共享封装合并、联网模型下载与预览、设置日志操作及自更新；生成的库由独立读取器检查引脚、焊盘和引用。用户另提供了上方 AD 打开库与工程引用的实测截图。GitHub 后台 Windows runner 的交互限制与完整验证范围见 [验证记录](docs/验证记录.md)。
 
 ## 源码运行与构建
 
