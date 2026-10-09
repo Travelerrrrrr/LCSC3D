@@ -225,6 +225,8 @@ python -m venv .venv
 
 运行 `app/build.ps1` 进行测试并构建，最新 EXE 自动同步到 `outputs/LCSC3D.exe`。构建与发行验证流程见 [贡献指南](CONTRIBUTING.md)。
 
+不发布 GitHub 的完整更新测试：运行 `python scripts/local_update_test.py`，在隔离副本中操作实际更新窗口；追加 `--auto` 自动验证。详见 [本地更新测试](docs/本地更新测试.md)。
+
 ## 许可证与数据来源
 
 项目代码采用 [AGPL-3.0-or-later](LICENSE)，依赖组件的许可证和声明见 [第三方声明](app/licenses/THIRD-PARTY.md)。

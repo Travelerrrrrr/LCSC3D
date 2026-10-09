@@ -290,9 +290,10 @@ class MainWindow(QMainWindow):
     batch_done = Signal()
     preview_changed = Signal(str)
 
-    def __init__(self, settings_enabled=True):
+    def __init__(self, settings_enabled=True, *, update_source=None):
         super().__init__()
-        self.setWindowTitle('LCSC3D')
+        self.update_source = update_source
+        self.setWindowTitle('LCSC3D（本地更新测试）' if update_source is not None else 'LCSC3D')
         self.resize(1240, 850)
         self.setMinimumSize(1060, 740)
         self.setWindowIcon(QIcon(str(ROOT / 'assets' / 'app.ico')))
@@ -1458,7 +1459,7 @@ class MainWindow(QMainWindow):
             self.update_dialog.raise_()
             self.update_dialog.activateWindow()
             return
-        self.update_dialog = UpdateDialog(VERSION, self)
+        self.update_dialog = UpdateDialog(VERSION, self, source=self.update_source)
         self.update_dialog.show()
 
     def begin_update(self, manifest):
@@ -1510,7 +1511,17 @@ def main():
     parser.add_argument('--self-test-settings', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--capture-docs', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--update-ack', metavar='PLAN', help=argparse.SUPPRESS)
+    parser.add_argument('--local-update-source', metavar='URL', help='仅测试：本机 HTTP 更新源（http://127.0.0.1:端口）')
+    parser.add_argument('--local-update-current-version', metavar='VERSION', help='仅测试：模拟版本比较的当前版本')
+    parser.add_argument('--self-test-local-update', metavar='FOLDER', help=argparse.SUPPRESS)
     args = parser.parse_args()
+    from updater import LocalUpdateSource, UpdateError
+    if (args.local_update_current_version or args.self_test_local_update) and not args.local_update_source:
+        parser.error('本地更新测试参数必须同时提供 --local-update-source')
+    try:
+        update_source = LocalUpdateSource(args.local_update_source, args.local_update_current_version) if args.local_update_source else None
+    except UpdateError as exc:
+        parser.error(str(exc))
     ad_test_parts, ad_invalid_parts, _ = parse_part_numbers(args.self_test_ad_parts)
     if args.self_test_ad and (not ad_test_parts or ad_invalid_parts):
         parser.error('--self-test-ad-parts requires valid C numbers')
@@ -1531,9 +1542,12 @@ def main():
     from app_logging import install_qt_logging, start_crash_capture
     install_qt_logging()
     start_crash_capture()
-    window = MainWindow(settings_enabled=not bool(test_destination))
+    window = MainWindow(settings_enabled=not bool(test_destination), update_source=update_source)
     log_event('INFO', 'application.started', **window.preferences.to_mapping())
     window.show()
+    if args.self_test_local_update:
+        from update_selftest import start
+        start(window, args.self_test_local_update)
     if args.self_test_settings:
         from settings_selftest import start
         start(window, args.self_test_settings)
@@ -1552,7 +1566,7 @@ def main():
         return app.exec()
     if args.update_ack:
         QTimer.singleShot(250, lambda: acknowledge_update(args.update_ack))
-    if getattr(sys, 'frozen', False) and not (args.self_test or args.self_test_ad):
+    if getattr(sys, 'frozen', False) and not (args.self_test or args.self_test_ad or update_source is not None):
         QTimer.singleShot(8000, lambda: threading.Thread(target=cleanup_updates, args=(updates_directory(),), daemon=True).start())
     if args.self_test_ad:
         destination = Path(args.self_test_ad).resolve()

@@ -39,6 +39,41 @@ class UpdateError(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class LocalUpdateSource:
+    """Explicit, process-only test source. Never loaded from saved settings."""
+    origin: str
+    current_version: str | None = None
+
+    def __post_init__(self):
+        try:
+            if not isinstance(self.origin, str):
+                raise ValueError()
+            parsed = urlsplit(self.origin)
+            port = parsed.port
+            if (parsed.scheme != 'http' or parsed.hostname != '127.0.0.1'
+                    or parsed.username is not None or parsed.password is not None
+                    or not port or parsed.netloc != f'127.0.0.1:{port}'
+                    or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
+                raise ValueError()
+        except (TypeError, ValueError) as exc:
+            raise UpdateError('本地测试源必须为 http://127.0.0.1:端口') from exc
+        object.__setattr__(self, 'origin', f'http://127.0.0.1:{port}')
+        if self.current_version is not None:
+            version_tuple(self.current_version)
+
+    def permits(self, url):
+        parsed = urlsplit(url)
+        return (parsed.scheme == 'http' and parsed.netloc == urlsplit(self.origin).netloc
+                and not parsed.query and not parsed.fragment)
+
+    def arguments(self, *, restarted=False):
+        arguments = ['--local-update-source', self.origin]
+        if self.current_version is not None and not restarted:
+            arguments += ['--local-update-current-version', self.current_version]
+        return arguments
+
+
 def version_tuple(version: str) -> tuple[int, int, int]:
     if not isinstance(version, str) or not re.fullmatch(r'v?\d+\.\d+\.\d+', version):
         raise UpdateError('发行版本号无效，需要正式版本 vX.Y.Z')
@@ -56,7 +91,7 @@ class Release:
     digest: str = ''
 
 
-def parse_release(data, current_version: str) -> Release | None:
+def parse_release(data, current_version: str, *, source: LocalUpdateSource | None = None) -> Release | None:
     if not isinstance(data, dict) or data.get('draft') or data.get('prerelease'):
         raise UpdateError('更新接口没有返回正式发行版本')
     tag = data.get('tag_name')
@@ -65,7 +100,8 @@ def parse_release(data, current_version: str) -> Release | None:
     current = version_tuple(current_version.split('-')[0] if demo else current_version)
     if version < current or (version == current and not demo):
         return None
-    prefix = f'https://github.com/{REPOSITORY}/releases/download/{quote(tag, safe="")}/'
+    base = source.origin if source is not None else f'https://github.com/{REPOSITORY}'
+    prefix = f'{base}/releases/download/{quote(tag, safe="")}/'
     assets = data.get('assets')
     if not isinstance(assets, list):
         raise UpdateError('新版本没有可用的发行附件')
@@ -82,7 +118,7 @@ def parse_release(data, current_version: str) -> Release | None:
     digest = exe.get('digest') or ''
     if digest and not re.fullmatch(r'sha256:[a-fA-F0-9]{64}', digest):
         raise UpdateError('更新文件的 SHA-256 元数据无效')
-    return Release(tag.lstrip('v'), f'https://github.com/{REPOSITORY}/releases/tag/{quote(tag, safe="")}',
+    return Release(tag.lstrip('v'), f'{base}/releases/tag/{quote(tag, safe="")}',
                    exe['browser_download_url'], selected['SHA256SUMS.txt']['browser_download_url'],
                    size, str(data.get('body') or '')[:24000], digest.removeprefix('sha256:').lower())
 
@@ -103,8 +139,9 @@ def checksum_for_exe(raw: bytes) -> str:
 
 
 class UpdateClient:
-    def __init__(self, cancelled: threading.Event | None = None):
+    def __init__(self, cancelled: threading.Event | None = None, *, source: LocalUpdateSource | None = None):
         self.cancelled = cancelled or threading.Event()
+        self.source = source
 
     def check_cancelled(self):
         if self.cancelled.is_set():
@@ -115,10 +152,14 @@ class UpdateClient:
         for _ in range(6):
             self.check_cancelled()
             parsed = urlsplit(url)
-            if parsed.scheme != 'https' or parsed.hostname not in DOWNLOAD_HOSTS or parsed.username:
+            allowed = (self.source.permits(url) if self.source is not None else
+                       parsed.scheme == 'https' and parsed.hostname in DOWNLOAD_HOSTS and not parsed.username)
+            if not allowed:
                 raise UpdateError('更新服务器返回了不受支持的下载地址')
-            proxy = proxy_for_url(url, 'update')
-            log_event('DEBUG', 'update.request_started', proxy_mode=proxy_mode('update'), using_proxy=proxy is not None)
+            proxy = None if self.source is not None else proxy_for_url(url, 'update')
+            log_event('DEBUG', 'update.request_started',
+                      source_kind='local_test' if self.source is not None else 'github',
+                      proxy_mode='direct' if self.source is not None else proxy_mode('update'), using_proxy=proxy is not None)
             response = connection_pool(proxy).request('GET', url, preload_content=False, redirect=False,
                 headers={'User-Agent': 'LCSC3D-updater/2.1.1', 'Accept': 'application/vnd.github+json',
                          'Accept-Encoding': 'identity'}, timeout=Timeout(connect=6, read=18), pool_timeout=18,
@@ -137,7 +178,7 @@ class UpdateClient:
                 response.close()
                 response.release_conn()
                 if status in (403, 429):
-                    raise UpdateError('GitHub 请求受限，请稍后重试或打开发布页面')
+                    raise UpdateError('更新服务器请求受限，请稍后重试或打开发布页面')
                 raise UpdateError(f'更新服务器返回 HTTP {status}，请稍后重试')
             return response
         raise UpdateError('更新下载重定向次数过多')
@@ -170,10 +211,13 @@ class UpdateClient:
     @traced('update.check', lambda self, current_version: {'current_version': current_version}, level='INFO')
     def check(self, current_version):
         try:
-            data = json.loads(self._read(LATEST_API))
+            data = json.loads(self._read(self.source.origin + '/latest.json' if self.source is not None else LATEST_API))
         except (ValueError, UnicodeDecodeError) as exc:
             raise UpdateError('更新接口返回了无法识别的数据') from exc
-        result = parse_release(data, current_version)
+        comparison = self.source.current_version if self.source is not None and self.source.current_version is not None else current_version
+        result = parse_release(data, comparison, source=self.source)
+        log_event('INFO', 'update.source_selected', source_kind='local_test' if self.source is not None else 'github',
+                  actual_version=current_version, compared_version=comparison)
         log_event('INFO', 'update.check_result', available=result is not None, target_version=result.version if result else None)
         return result
 
@@ -223,6 +267,8 @@ class UpdateClient:
                     'diagnostics': {key: value for key, value in current_context().items()
                                     if key in ('operation_id', 'parent_id', 'root_id')},
                     'parent_pid': os.getpid(), 'nonce': secrets.token_hex(24), 'version': release.version}
+            if self.source is not None:
+                plan['local_test'] = {'origin': self.source.origin, 'current_version': self.source.current_version}
             manifest = stage / 'plan.json'
             manifest.write_text(json.dumps(plan, ensure_ascii=False), encoding='utf-8')
             prepared = True
@@ -270,6 +316,11 @@ def _load_plan(manifest):
     plan['diagnostics'] = {key: value for key, value in (context.items() if isinstance(context, dict) else [])
                            if key in ('operation_id', 'parent_id', 'root_id') and isinstance(value, str)
                            and re.fullmatch(r'[a-f0-9]{32}', value)}
+    if 'local_test' in plan:
+        local = plan['local_test']
+        if not isinstance(local, dict) or set(local) != {'origin', 'current_version'}:
+            raise UpdateError('本地更新测试计划无效')
+        LocalUpdateSource(local['origin'], local['current_version'])
     return manifest, stage, target, plan
 
 
@@ -367,6 +418,7 @@ def _apply_update(manifest, stage, target, plan):
     moved = False
     process = None
     phase = 'wait_for_exit'
+    source = LocalUpdateSource(**plan['local_test']) if 'local_test' in plan else None
     try:
         log_event('INFO', 'update.install_stage', stage=phase)
         _wait_for_parent(plan['parent_pid'])
@@ -383,7 +435,8 @@ def _apply_update(manifest, stage, target, plan):
         _replace(stage / 'new.exe', target)
         phase = 'restart'
         log_event('INFO', 'update.install_stage', stage=phase)
-        process = _spawn([str(target), '--update-ack', str(manifest)], target.parent)
+        restart_args = source.arguments(restarted=True) if source is not None else []
+        process = _spawn([str(target), '--update-ack', str(manifest), *restart_args], target.parent)
         phase = 'confirm_startup'
         log_event('INFO', 'update.install_stage', stage=phase)
         if not _wait_for_ack(stage, plan['nonce'], process):
@@ -402,7 +455,7 @@ def _apply_update(manifest, stage, target, plan):
                 if process is not None:
                     _stop_restarted_process(process)
                 _replace(backup, target)
-                _spawn([str(target)], target.parent)
+                _spawn([str(target), *(source.arguments() if source is not None else [])], target.parent)
                 log_event('INFO', 'update.rollback_completed')
                 result['rollback'] = 'success'
             except Exception as rollback_error:

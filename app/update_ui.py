@@ -21,9 +21,10 @@ class UpdateWorker(QThread):
     failed = Signal(str)
     cancelled_download = Signal()
 
-    def __init__(self, version, release=None, parent=None):
+    def __init__(self, version, release=None, parent=None, *, source=None):
         super().__init__(parent)
         self.version, self.release = version, release
+        self.source = source
         self.cancelled = threading.Event()
         self.log_context = new_context(feature='update')
 
@@ -32,7 +33,7 @@ class UpdateWorker(QThread):
         try:
             operation = '检查更新' if self.release is None else '下载更新'
             log_event('INFO', 'update.job_started', operation=operation)
-            client = UpdateClient(self.cancelled)
+            client = UpdateClient(self.cancelled) if self.source is None else UpdateClient(self.cancelled, source=self.source)
             if self.release is None:
                 self.checked.emit(client.check(self.version))
             else:
@@ -49,19 +50,27 @@ class UpdateWorker(QThread):
 
 
 class UpdateDialog(QDialog):
-    def __init__(self, version, parent):
+    def __init__(self, version, parent, *, source=None):
         super().__init__(parent)
-        self.setWindowTitle('检查更新')
+        self.setWindowTitle('检查更新（本地测试）' if source is not None else '检查更新')
         self.setWindowModality(Qt.WindowModal)
         self.resize(540, 360)
         self.version = version
+        self.source = source
         self.worker = None
         self.release = None
         self.manifest = None
         self.closing = False
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(f'当前版本：{version}'))
-        self.status = QLabel('正在检查 GitHub Release…')
+        if source is not None:
+            hint = QLabel(f'本地模拟更新源：{source.origin}\n仅本次启动生效，使用直连。')
+            if source.current_version is not None:
+                hint.setText(hint.text() + f'\n版本比较模拟为 {source.current_version}，程序实际版本仍为 {version}。')
+            hint.setWordWrap(True)
+            layout.addWidget(hint)
+        self.check_message = '正在检查本地模拟更新源…' if source is not None else '正在检查 GitHub Release…'
+        self.status = QLabel(self.check_message)
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.notes = QPlainTextEdit()
@@ -78,7 +87,8 @@ class UpdateDialog(QDialog):
         self.install.clicked.connect(self.perform_action)
         buttons.addWidget(self.install)
         self.page = QPushButton('打开发布页面')
-        self.page.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.release.page_url if self.release else RELEASES_URL)))
+        self.page.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.release.page_url if self.release else
+            self.source.origin if self.source is not None else RELEASES_URL)))
         buttons.addWidget(self.page)
         buttons.addStretch()
         self.dismiss = QPushButton('取消')
@@ -93,7 +103,7 @@ class UpdateDialog(QDialog):
         self.progress.show()
         self.progress.setRange(0, 0)
         self.dismiss.setText('取消')
-        worker = UpdateWorker(self.version, release, self)
+        worker = UpdateWorker(self.version, release, self, source=self.source)
         self.worker = worker
         worker.checked.connect(self.on_checked)
         worker.prepared.connect(self.on_prepared)
@@ -118,7 +128,7 @@ class UpdateDialog(QDialog):
         if self.worker is not None:
             return
         if self.release is None:
-            self.status.setText('正在检查 GitHub Release…')
+            self.status.setText(self.check_message)
             self.start_worker()
             return
         if self.parent().batch_running:

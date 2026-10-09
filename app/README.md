@@ -131,6 +131,8 @@ EXE 所在目录需要可写。更新保留 `LCSC3D-settings.json` 和下载目�
 
 ## 构建与验证
 
+开发时无需发布即可测试更新：在源码仓库运行 `python scripts/local_update_test.py`，使用自动打开的隔离程序副本点击“检查更新”→“下载并重启”；默认模拟 2.1.0 → 2.1.1，程序实际版本不修改。支持自动验证和校验失败场景，详见 [本地更新测试](../docs/本地更新测试.md)。普通启动仍从 GitHub 检查正式更新。
+
 Windows x64、Python 3.12.10、PySide6 6.11.1、PyInstaller 6.20.0、urllib3 2.7.0。
 
 ```powershell

@@ -497,6 +497,20 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertTrue(dialog.page.isEnabled())
         dialog.close()
 
+    def test_local_source_is_visible_and_reaches_the_update_worker(self):
+        from updater import LocalUpdateSource
+        source = LocalUpdateSource('http://127.0.0.1:8765', '2.1.0')
+        self.window.update_source = source
+        self.window.show()
+        with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)) as client:
+            self.window.update_button.click()
+            self.wait_for_update_check()
+        dialog = self.window.update_dialog
+        self.assertIs(client.call_args.kwargs['source'], source)
+        self.assertIn('本地测试', dialog.windowTitle())
+        self.assertIs(dialog.source, source)
+        dialog.close()
+
     def test_closing_update_check_cancels_request_and_keeps_main_window_open(self):
         started = threading.Event()
         class Client:

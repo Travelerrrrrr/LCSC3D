@@ -12,6 +12,7 @@ parser.add_argument('--update-report',type=Path,default=root/'work/self-update-v
 parser.add_argument('--store-dir',type=Path)
 parser.add_argument('--store-offline-dir',type=Path)
 parser.add_argument('--settings-dir',type=Path)
+parser.add_argument('--local-update-report',type=Path)
 parser.add_argument('--verification-date',default=date.today().isoformat())
 args=parser.parse_args()
 assert args.test_count>0
@@ -54,6 +55,13 @@ if args.store_offline_dir:
  for key in ('qr_native','native_password_login','native_sms_login','native_image_captcha','restore_without_qr','logout_clears_account','independent_price_tiers','queue_delete_preserves_files'):assert offline[key]
  store_text+=('- 原生商城离线 EXE 验证通过：扫码、密码、短信与图片验证、加密保存和恢复、退出清除、分页、收藏及商品资料。登录和短信仅使用受控本地服务，不访问用户真实账号。\n')
 settings_text=''
+local_update_text=''
+if args.local_update_report:
+ local=json.loads(args.local_update_report.read_text(encoding='utf-8'))
+ assert local['success'] and local['scenario']=='success'
+ assert local['ui']['check_clicked'] and local['ui']['download_clicked'] and local['ui']['sha256_verified']
+ assert local['update']['status']=='success' and local['settings_preserved'] and local['exe_directory_clean']
+ local_update_text='- 本地模拟更新源实际 EXE 验证通过：真实点击检查更新和下载按钮，经本机 HTTP 下载、SHA-256 校验、助手替换、重启确认并保留设置；不发布 GitHub，使用隔离副本。\n'
 if args.settings_dir:
  settings=json.loads((args.settings_dir/'settings-verification.json').read_text(encoding='utf-8'))
  assert settings['success'] and settings['frozen'] and settings['version']==version
@@ -71,7 +79,7 @@ text=f"""# LCSC3D {version} 成品验证
 验证日期：{args.verification_date}。Windows x64、Python 3.12.10、PySide6 6.11.1。
 
 - {args.test_count} 项本地回归通过，包含商城专项、下载列表删除、官方 STEP/OBJ、原生 AD 库、27 个官方 AD 样本、预览和自更新。
-{settings_text}{store_text}- 独立中文目录运行真实 EXE，清除 Python/Qt 环境变量，仅保留系统 PATH，退出码 0。
+{settings_text}{store_text}{local_update_text}- 独立中文目录运行真实 EXE，清除 Python/Qt 环境变量，仅保留系统 PATH，退出码 0。
 - C2040 与 C20197 各保存官方 STEP/OBJ；无效编号失败，未勾选 C163691 不下载，模型目录没有其他导出文件。
 - 两次本地 3D 预览 ready，符号/封装分别识别 57/57 和 8/8 个引脚/焊盘，窗口句柄稳定。
 - 冻结 EXE 自更新通过：原程序退出、独立进程替换、重启 Qt 窗口并确认、设置保留，耗时 {update['seconds']} 秒。使用隔离账号目录，未访问用户真实保存会话。
@@ -100,7 +108,7 @@ def normalize(code):
  return code.replace(co_filename='',co_consts=tuple(normalize(v) if isinstance(v,types.CodeType) else v for v in code.co_consts))
 executable_archive=CArchiveReader(str(outputs/'LCSC3D.exe'))
 frozen=executable_archive.open_embedded_archive('PYZ.pyz')
-for name in ('main','favorites','favorites_selftest','store','store_crypto','store_session','store_images','store_diagnostics','app_paths','app_settings','app_logging','log_support','settings_ui','settings_selftest','docs_capture','updater','update_ui','backend','altium','resources','model3d','library_preview'):
+for name in ('main','favorites','favorites_selftest','store','store_crypto','store_session','store_images','store_diagnostics','app_paths','app_settings','app_logging','log_support','settings_ui','settings_selftest','docs_capture','updater','update_ui','update_selftest','backend','altium','resources','model3d','library_preview'):
  code=compile((root/'app'/f'{name}.py').read_text(encoding='utf-8'),'','exec',dont_inherit=True)
  assert normalize(frozen.extract(name))==normalize(code),name
 for name in ('viewer.html','vector_viewer.html'):
