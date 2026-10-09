@@ -108,7 +108,10 @@ def start(window, destination):
             window.schlib_box.setChecked(True)
             window.merge_schlib_box.setChecked(True)
             window.keep_schlib_box.setChecked(True)
-            window.export_targets = {'schlib_target': 'D:/库/原库.SchLib', 'pcblib_target': '', 'project_path': 'D:/工程/测试.PrjPcb'}
+            window.export_targets = {'schlib_target': 'D:/库/原库.SchLib', 'pcblib_target': '',
+                                     'project_path': 'D:/工程/测试.PrjPcb',
+                                     'keep_individual': True, 'import_existing_to_project': True}
+            window.lib_append_box.setChecked(True)
             dialog.store_proxy_combo.setCurrentIndex(1)
             dialog.log_level_combo.setCurrentIndex(dialog.log_level_combo.findData('ERROR'))
             dialog.save_button.click()
@@ -126,6 +129,9 @@ def start(window, destination):
             assert window.keep_schlib_box.isChecked()
             assert window.export_targets['schlib_target'] == 'D:/库/原库.SchLib'
             assert window.export_targets['project_path'] == 'D:/工程/测试.PrjPcb'
+            assert window.lib_append_box.isChecked() and not window.lib_merge_box.isChecked()
+            assert not window.path_input.isEnabled()
+            assert window.export_targets['keep_individual'] and window.export_targets['import_existing_to_project']
             report['library_options_restored'] = True
             report['restored_from_disk'] = True
             assert not log_event('DEBUG', 'settings.self_test_debug')

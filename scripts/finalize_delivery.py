@@ -14,6 +14,7 @@ parser.add_argument('--store-offline-dir',type=Path)
 parser.add_argument('--settings-dir',type=Path)
 parser.add_argument('--merge-dir',type=Path)
 parser.add_argument('--integration-dir',type=Path)
+parser.add_argument('--export-dir',type=Path)
 parser.add_argument('--capture-dir',type=Path)
 parser.add_argument('--local-update-report',type=Path)
 parser.add_argument('--startup-silent-reports',nargs='+',type=Path)
@@ -61,6 +62,40 @@ if args.store_offline_dir:
 settings_text=''
 merge_text=''
 integration_text=''
+if args.export_dir:
+ export=json.loads((args.export_dir/'export-verification.json').read_text(encoding='utf-8'))
+ assert export['success'] and export['frozen'] and export['version']==version
+ expected={'merge-grouped','merge-individual','append-grouped','append-individual',
+           'append-symbol','append-footprint','project-grouped','project-individual','empty-import'}
+ assert {case['name'] for case in export['cases']}==expected
+ assert all(case['success'] for case in export['cases'])
+ sys.path.insert(0,str(root/'app/tests'))
+ from altium_inspect import schematic,pcb,merged_pcb_section
+ for case in export['cases']:
+  for row in case.get('results',[]):
+   assert row['status']=='成功'
+   files=[Path(name) for name in row['files']]
+   assert all(path.is_file() for path in files)
+   for path in files:
+    single=path.parent.name.endswith('_'+row['part'])
+    expected_count={'C2040':57,'C20197':8}[row['part']]
+    if path.suffix=='.SchLib':
+     header,records,pins=schematic(path.read_bytes(),None if single else row['part']+'_Symbol')
+     assert len(pins)==expected_count
+     counterpart=next((other for other in files if other.suffix=='.PcbLib' and
+                       other.parent.name.endswith('_'+row['part'])==single),None)
+     if counterpart:
+      board=counterpart.read_bytes()
+      name,_,_=pcb(board,None if single else merged_pcb_section(board,row['part']))
+      assert next(record['MODELNAME'] for record in records if record.get('RECORD')=='45')==name
+    elif path.suffix=='.PcbLib':
+     board=path.read_bytes()
+     name,pads,primitives=pcb(board,None if single else merged_pcb_section(board,row['part']))
+     assert len(pads)==expected_count
+ integration_text+='- Lib 模式专项通过：136 组合覆盖合并/追加、单库/双库、STEP/OBJ、独立导出、工程联动开关及项目重复追加；另测空列表导入、模式恢复、不同库目录、取消、无效库、写入失败与文件竞争。\n'
+ integration_text+='- 冻结 EXE 离线执行 9 个完整窗口流程，确认互斥/按需显示、追加路径禁用、集中 3D 目录、配套独立库和空列表直接导入；生成的 AD 文件再由独立测试读取器验证。\n'
+ integration_text+='- 新增导出规划、目录规则、库提交和空列表工程导入日志；隔离配置验证日志打包/清除后继续写入，不读取真实登录会话。\n'
+ integration_text+='- 工程引用、原文件保留及库内引脚/焊盘/配套引用已自动核验；本次未在 Altium Designer 界面中重新加载工程或实际放置器件。\n'
 if args.integration_dir:
  integration=json.loads((args.integration_dir/'verification.json').read_text(encoding='utf-8'))
  assert integration['success'] and integration['frozen'] and integration['integrated'] and integration['version']==version
@@ -148,7 +183,7 @@ if args.settings_dir:
   settings_text+='- EXE 配置、日志和运行时解压验证位于 LOCALAPPDATA/LCSC3D，旧配置迁移与删除、默认导出和临时下载路径由本地回归核对。\n'
  settings_text+='- 冻结 EXE 日志工具验证通过：ZIP 内容与诊断字段、AppData 保存路径、清除前确认、清除后继续记录、运行状态标记及已打包 ZIP 保留。\n'
  if settings.get('library_options_restored'):
-  settings_text+='- 冻结 EXE 保存与恢复“同时单独输出”、已有库路径和 PCB 工程路径通过，使用隔离配置。\n'
+  settings_text+='- 冻结 EXE 保存与恢复“独立导出器件”、Lib 模式、已有库路径和 PCB 工程路径通过，使用隔离配置。\n'
 for source,name in [('软件界面.png','软件界面'),('符号_C2040.png','符号预览'),('封装_C2040.png','封装预览'),('型号查询.png','型号查询')]:shutil.copyfile(tested/source,outputs/f'{name}.png')
 shutil.copyfile(tested/'符号_C2040.png',root/'docs/images/app.png')
 shutil.copyfile(tested/'封装_C2040.png',root/'docs/images/footprint.png')
@@ -186,7 +221,7 @@ def normalize(code):
  return code.replace(co_filename='',co_consts=tuple(normalize(v) if isinstance(v,types.CodeType) else v for v in code.co_consts))
 executable_archive=CArchiveReader(str(outputs/'LCSC3D.exe'))
 frozen=executable_archive.open_embedded_archive('PYZ.pyz')
-for name in ('main','favorites','favorites_selftest','store','store_crypto','store_session','store_images','store_diagnostics','app_paths','app_settings','app_logging','log_support','settings_ui','settings_selftest','docs_capture','updater','update_ui','update_selftest','backend','altium','compound_storage','library_merge','altium_project','export_targets','product_preview','resources','model3d','library_preview'):
+for name in ('main','favorites','favorites_selftest','store','store_crypto','store_session','store_images','store_diagnostics','app_paths','app_settings','app_logging','log_support','settings_ui','settings_selftest','docs_capture','updater','update_ui','update_selftest','backend','altium','compound_storage','library_merge','altium_project','export_targets','export_selftest','product_preview','resources','model3d','library_preview'):
  code=compile((root/'app'/f'{name}.py').read_text(encoding='utf-8'),'','exec',dont_inherit=True)
  assert normalize(frozen.extract(name))==normalize(code),name
 for name in ('viewer.html','vector_viewer.html'):

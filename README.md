@@ -9,11 +9,11 @@
 
 LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。它把商城选型、账号收藏、模型下载、Altium Designer 元件库导出和三类预览放在一起。下载 `LCSC3D.exe` 即可运行，无须安装 Python；导出 AD 库也无须在电脑上安装 Altium Designer。
 
-**当前版本：2.1.2** · **[下载 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.1.2.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**当前本地版本：2.1.3** · **[下载公开发行版](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [公开版源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.1.3.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
-2.1.2 支持 SchLib / PcbLib 独立合并、自定义库名、同时单独输出和追加已有库，并可将库加入指定 `.PrjPcb` 工程。主页新增商品图片预览，商城加入下载列表后显示结果弹窗；手动检查更新入口位于“设置”。
+2.1.3 将 **Lib → 合并 / 追加** 分为互斥模式，勾选后显示配置，统一使用 **独立导出器件** 选项。3D 文件可集中到 SchLib 同名文件夹；追加支持单选一种库、联动 PCB 工程和空下载列表直接导入已有库。本地成品固定为 `outputs/LCSC3D.exe`，本次未发布 GitHub Release。
 
-![LCSC3D 2.1.2 主窗口：独立合并开关与自定义库名称](docs/images/2.1.2/main.png)
+![LCSC3D 2.1.3：Lib 合并配置](docs/images/2.1.3/merge.png)
 
 ## 功能一览
 
@@ -138,21 +138,23 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 ## 追加已有库和加入 PCB 工程
 
-点击 **库与工程…** 选择已有 SchLib/PcbLib，可将勾选元件追加进去；同名条目保留并跳过。合并选项旁的 **同时单独输出** 控制是否另外生成各器件的库。选定 `.PrjPcb` 后可以自动加入下载成功的库，也可点击 **立即导入已有库到工程…** 直接添加已有库。写入前自动备份到 AppData；原库和工程的其他内容保留。详见 [使用说明](app/README.md#追加已有库与-pcb-工程)。
+勾选 **Lib → 追加**，选择已有 SchLib/PcbLib，可只选一种库；同名条目保留并跳过。“保存到”路径变灰，导出位置跟随库或工程。**独立导出器件** 控制是否另存逐器件库与模型；关闭时模型集中到 SchLib（仅有 PcbLib 时为 PcbLib）旁的同名文件夹。
+
+同时指定已有库和 `.PrjPcb` 后，可勾选 **将已选已有库导入PCB工程**，下载完成后将成功追加的库加入工程；下载列表为空时，主页 **导入已有库** 可直接加入所选库。只指定工程时，在工程旁按工程名称创建或追加配套库。写入前自动备份到 AppData，保留原有内容。详见 [使用说明](app/README.md#追加已有库与-pcb-工程)。
 
 ## 批量下载与文件管理
 
 - **灵活输入**：支持换行、空格、中英文逗号和分号，C 编号不区分大小写；重复编号自动合并。
 - **先查询，再勾选**：载入列表后后台查询全部元件型号，下载只处理勾选的器件。全选、反选和当前预览行分别控制选择与查看。
 - **删除勾选器件**：从下载列表及输入框移除打勾的器件，保留其他器件的结果和已下载文件；下载期间禁用删除。
-- **合并元件库**：分别勾选“合并 .SchLib”“合并 .PcbLib”并自定义名称，本次成功转换的勾选器件保存到目录根部的合并库；同名库在生成成功后替换。
+- **合并元件库**：勾选“Lib → 合并”后配置 SchLib/PcbLib 合并开关与名称，本次成功转换的器件保存到目录根部的合并库；同名库在生成成功后替换。
 - **自由组合格式**：`STEP`、`OBJ`、`SchLib`、`PcbLib` 可任意组合，也可仅导出 AD 库。
 - **逐项反馈**：展示本次任务进度及成功、部分完成、无模型或失败等结果；一种格式失败时保留其他成功资源。
 - **自动覆盖更新**：每次下载重新获取所选资源，覆盖已有同名文件。获取或生成成功后才替换，失败或取消时保留原文件。
 - **停止与重试**：停止任务会保留已完成文件；重新下载需要更新的器件即可。
 - **设置记忆**：保存目录和格式选项自动记忆，器件目录与商城页面可从软件中直接打开。
 
-未选择合并的文件保存在独立的 **“元件型号_C编号”** 文件夹中。AD 库文件仅使用元件型号命名；STEP / OBJ 文件保留编号与模型名称。文件名中的 Windows 禁用字符会替换为下划线。
+普通导出的文件保存在独立的 **“元件型号_C编号”** 文件夹中。合并或追加时未启用独立导出，STEP/OBJ 集中到优先库的同名文件夹。独立 AD 库文件使用元件型号命名；STEP/OBJ 文件保留编号与模型名称。文件名中的 Windows 禁用字符会替换为下划线。
 
 ```text
 所选保存目录/

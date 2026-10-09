@@ -358,6 +358,7 @@ class SettingsWindowTests(PreferencesTestCase):
         self.assertFalse(window.schlib_name_input.isEnabled())
         window.schlib_box.setChecked(True)
         window.merge_schlib_box.setChecked(True)
+        window.lib_merge_box.setChecked(True)
         window.schlib_name_input.setText('我的符号')
         window.pcblib_name_input.setText('我的封装.PcbLib')
         window.save_settings()
