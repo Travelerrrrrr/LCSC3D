@@ -33,7 +33,8 @@ class ExportFixture(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        # Windows runners can supply an 8.3 TEMP alias; compare canonical paths.
+        self.root = Path(temporary.name).resolve()
         environment = patch.dict(os.environ, {'LOCALAPPDATA': str(self.root / 'profile')})
         environment.start()
         self.addCleanup(environment.stop)

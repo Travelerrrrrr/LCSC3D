@@ -26,7 +26,8 @@ class LibraryIntegrationTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        self.root = Path(directory.name)
+        # Match production path normalization, including injected write failures.
+        self.root = Path(directory.name).resolve()
         env = patch.dict(os.environ, {'LOCALAPPDATA': str(self.root / 'profile')})
         env.start()
         self.addCleanup(env.stop)

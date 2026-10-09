@@ -229,6 +229,7 @@ text=f"""# LCSC3D {version} 成品验证
 验证日期：{args.verification_date}。Windows x64、Python 3.12.10、PySide6 6.11.1。
 
 - {args.test_count} 项本地回归通过，包含商城专项、下载列表删除、官方 STEP/OBJ、原生 AD 库、27 个官方 AD 样本、预览和自更新。
+- Windows 8.3 临时目录专项：在真实短路径下复现并修正测试路径比较与写入故障注入，相关 33 项导出和工程集成测试通过。
 {settings_text}{store_text}{local_update_text}{merge_text}{integration_text}{ad_evidence_text}- 独立中文目录运行真实 EXE，清除 Python/Qt 环境变量，仅保留系统 PATH，退出码 0。
 - C2040 与 C20197 各保存官方 STEP/OBJ；无效编号失败，未勾选 C163691 不下载，模型目录没有其他导出文件。
 - 两次本地 3D 预览 ready，符号/封装分别识别 57/57 和 8/8 个引脚/焊盘，窗口句柄稳定。
