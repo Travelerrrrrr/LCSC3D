@@ -7,11 +7,12 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 
-def start(window, destination):
+def start(window, destination, *, startup=False):
     destination = Path(destination).resolve()
     destination.mkdir(parents=True, exist_ok=True)
     state = {'deadline': time.monotonic() + 120, 'clicked_download': False, 'finished': False}
-    report = {'source_kind': 'local_test', 'check_clicked': False, 'download_clicked': False}
+    report = {'source_kind': 'local_test', 'check_clicked': False, 'download_clicked': False,
+              'startup_check': startup, 'notification_shown': False}
     application = QApplication.instance()
     timer = QTimer(window)
     timer.setInterval(25)
@@ -45,6 +46,17 @@ def start(window, destination):
                 stop('timeout')
                 return
             dialog = window.update_dialog
+            if startup and not state['clicked_download']:
+                if window.startup_update_outcome is None:
+                    return
+                if window.startup_update_outcome in ('latest', 'failed'):
+                    assert dialog is None
+                    report['silent'] = True
+                    stop('no_update_silent' if window.startup_update_outcome == 'latest' else 'check_failed_silent')
+                    return
+                assert window.startup_update_outcome == 'available'
+                assert dialog is not None and dialog.isVisible()
+                report['notification_shown'] = True
             if dialog.worker is not None:
                 return
             if dialog.release is None:
@@ -68,8 +80,9 @@ def start(window, destination):
             stop('test_failed', type(exc).__name__ + ': ' + str(exc))
 
     def begin():
-        window.update_button.click()
-        report['check_clicked'] = True
+        if not startup:
+            window.update_button.click()
+            report['check_clicked'] = True
         timer.timeout.connect(poll)
         timer.start()
 

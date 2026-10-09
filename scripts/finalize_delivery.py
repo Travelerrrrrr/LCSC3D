@@ -13,6 +13,7 @@ parser.add_argument('--store-dir',type=Path)
 parser.add_argument('--store-offline-dir',type=Path)
 parser.add_argument('--settings-dir',type=Path)
 parser.add_argument('--local-update-report',type=Path)
+parser.add_argument('--startup-silent-reports',nargs='+',type=Path)
 parser.add_argument('--verification-date',default=date.today().isoformat())
 args=parser.parse_args()
 assert args.test_count>0
@@ -59,9 +60,18 @@ local_update_text=''
 if args.local_update_report:
  local=json.loads(args.local_update_report.read_text(encoding='utf-8'))
  assert local['success'] and local['scenario']=='success'
- assert local['ui']['check_clicked'] and local['ui']['download_clicked'] and local['ui']['sha256_verified']
+ assert (local['ui']['check_clicked'] or local['ui'].get('startup_check') and local['ui'].get('notification_shown')) and local['ui']['download_clicked'] and local['ui']['sha256_verified']
  assert local['update']['status']=='success' and local['settings_preserved'] and local['exe_directory_clean']
- local_update_text='- 本地模拟更新源实际 EXE 验证通过：真实点击检查更新和下载按钮，经本机 HTTP 下载、SHA-256 校验、助手替换、重启确认并保留设置；不发布 GitHub，使用隔离副本。\n'
+ local_update_text='- 本地模拟更新源实际 EXE 验证通过：界面检查版本并点击下载按钮，经本机 HTTP 下载、SHA-256 校验、助手替换、重启确认并保留设置；不发布 GitHub，使用隔离副本。\n'
+ if local['ui'].get('startup_check'):
+  local_update_text+='- 启动后台检查真实 EXE 验证通过：发现新版自动展示可下载的更新窗口，复用已获取的版本信息。\n'
+if args.startup_silent_reports:
+ silent=[json.loads(path.read_text(encoding='utf-8')) for path in args.startup_silent_reports]
+ assert {value['scenario'] for value in silent}=={'no-update','check-failure'}
+ for value in silent:
+  assert value['success'] and value['startup_check'] and value['ui']['silent']
+  assert not value['ui']['notification_shown'] and not value['ui']['check_clicked'] and not value['ui']['download_clicked']
+ local_update_text+='- 启动后台检查的“没有新版”和“检查失败”实际 EXE 验证均保持静默，未创建更新窗口，也未发起下载。\n'
 if args.settings_dir:
  settings=json.loads((args.settings_dir/'settings-verification.json').read_text(encoding='utf-8'))
  assert settings['success'] and settings['frozen'] and settings['version']==version

@@ -30,7 +30,7 @@ New-Item -ItemType Directory -Path outputs -Force
 Copy-Item -LiteralPath app/dist/LCSC3D.exe -Destination outputs/LCSC3D.exe
 python scripts/verify_portable.py
 python scripts/verify_self_update.py
-python scripts/finalize_delivery.py --test-count 314
+python scripts/finalize_delivery.py --test-count 321
 ```
 
 `verify_portable.py` 从独立中文目录运行 EXE，清理 Python/Qt 环境变量并限制 PATH，验证下载前型号、勾选过滤、STEP/OBJ、符号/封装及本地 3D 预览与窗口稳定性，并确认下载目录没有 JSON/SVG 或其他非模型文件。它只重建 `work/便携验证/验证结果/` 中的生成数据，保留正式 EXE；验证结束会删除临时 EXE 副本。
@@ -70,6 +70,8 @@ Demo.5 的商城离线验证还覆盖单价精度、库存与缺失值、最低�
 日志改动需运行 `test_logging_diagnostics.py` 的故障注入回归，核对事件是否包含元件/格式/阶段、异常原因链与代码位置，确认后台线程关联、更新助手关联和敏感信息排除。功能事件及排查方法见 [日志覆盖与排查](docs/日志排查.md)。
 
 更新源改动需运行 `test_updater.py` 与 `test_local_update.py`，核对正式源约束、本机 HTTP 下载、代理绕过、跨源重定向拒绝、完整性校验和回滚参数，再执行 `local_update_test.py --auto` 的真实 EXE 验证。`finalize_delivery.py --local-update-report <verification.json>` 将该报告纳入交付核对。
+
+启动后台检查另运行 `test_startup_update.py`，覆盖有新版弹窗、无更新/网络失败静默、只检查一次、手动查询接管和关闭时不等待网络。真实 EXE 使用 `local_update_test.py --auto --startup`，再分别追加 `--scenario no-update`、`--scenario check-failure` 验证静默分支。其他自测入口不自动请求 GitHub。
 
 版本信息在 `app/main.py` 的 `VERSION` 与 `app/version_info.txt` 的 Windows 版本资源中。同步使用说明与版本记录后，通过测试、构建和成品验证，再创建对应的 `vX.Y.Z` Git 标签和 GitHub Release。
 

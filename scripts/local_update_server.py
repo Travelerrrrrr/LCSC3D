@@ -15,7 +15,7 @@ class LocalReleaseServer(ThreadingHTTPServer):
     def __init__(self, executable, version, *, scenario='success', delay_ms=0):
         if not re.fullmatch(r'\d+\.\d+\.\d+', version):
             raise ValueError('Expected a numeric X.Y.Z version')
-        if scenario not in ('success', 'bad-checksum', 'no-update'):
+        if scenario not in ('success', 'bad-checksum', 'no-update', 'check-failure'):
             raise ValueError('Unknown test scenario')
         self.executable = Path(executable).resolve(strict=True)
         self.version, self.scenario = version, scenario
@@ -53,6 +53,10 @@ class ReleaseHandler(BaseHTTPRequestHandler):
             self.send_error(400)
             return
         if self.path == '/latest.json':
+            if server.scenario == 'check-failure':
+                server.requests.append(self.path)
+                self.send_error(503, 'Simulated update check failure')
+                return
             data, kind = json.dumps(server.release(), ensure_ascii=False).encode(), 'application/json; charset=utf-8'
         elif self.path == server.prefix + 'SHA256SUMS.txt':
             data, kind = (server.published_digest + '  LCSC3D.exe\n').encode(), 'text/plain'

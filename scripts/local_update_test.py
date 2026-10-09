@@ -91,12 +91,15 @@ def main():
     parser.add_argument('--candidate-exe', type=Path, help='Optional replacement EXE; defaults to the same build')
     parser.add_argument('--target-version', help='Version advertised by the fixture; defaults to the repository version')
     parser.add_argument('--current-version', help='Simulated comparison version; does not change the EXE version')
-    parser.add_argument('--scenario', choices=('success', 'bad-checksum', 'no-update'), default='success')
+    parser.add_argument('--scenario', choices=('success', 'bad-checksum', 'no-update', 'check-failure'), default='success')
     parser.add_argument('--delay-ms', type=int, default=5, help='Delay per 256 KiB download chunk')
     parser.add_argument('--auto', action='store_true', help='Drive the real update buttons and verify the result')
+    parser.add_argument('--startup', action='store_true', help='With --auto, verify the automatic startup check instead of clicking Check')
     args = parser.parse_args()
     if sys.platform != 'win32':
         parser.error('This test launcher requires Windows')
+    if args.startup and not args.auto:
+        parser.error('--startup requires --auto')
     version = args.target_version or re.search(r"VERSION = '([^']+)'", (ROOT / 'app/main.py').read_text(encoding='utf-8')).group(1)
     if not re.fullmatch(r'\d+\.\d+\.\d+', version):
         parser.error('Versions must use X.Y.Z')
@@ -133,7 +136,7 @@ def main():
     environment['PATH'] = os.pathsep.join((str(windows / 'System32'), str(windows)))
     report = {'scenario': args.scenario, 'actual_source': str(source), 'test_executable': str(executable),
               'simulated_current_version': current, 'target_version': version,
-              'same_build_candidate': original_hash == file_hash(candidate), 'success': False}
+              'same_build_candidate': original_hash == file_hash(candidate), 'startup_check': args.startup, 'success': False}
     result, result_path, process = None, None, None
     started = time.monotonic()
     print('TEST_DIRECTORY', folder, flush=True)
@@ -143,9 +146,11 @@ def main():
                        '--local-update-current-version', current]
             if args.auto:
                 command += ['--self-test-local-update', str(folder)]
+            if args.startup:
+                command += ['--self-test-startup-update']
             print('LOCAL_SOURCE', server.origin, flush=True)
             print(f'版本比较模拟为 {current} → {version}，EXE 内的实际版本不修改。', flush=True)
-            print('在测试窗口点击“检查更新”→“下载并重启”。测试完成后回到此终端按 Ctrl+C 结束。', flush=True)
+            print('启动后发现新版会自动提醒，也可点击“检查更新”→“下载并重启”。手动测试完成后按 Ctrl+C 结束。', flush=True)
             process = subprocess.Popen(command, cwd=executable.parent, env=environment,
                                        creationflags=subprocess.CREATE_NO_WINDOW)
             deadline = time.monotonic() + 160
@@ -164,7 +169,7 @@ def main():
                     if args.scenario == 'success' and result is not None:
                         assert result['status'] == 'success', result
                         assert ui and ui['outcome'] == 'prepared' and ui['sha256_verified'], ui
-                        assert ui['check_clicked'] and ui['download_clicked'] and ui['local_source_visible']
+                        assert (ui['check_clicked'] or ui['startup_check'] and ui['notification_shown']) and ui['download_clicked'] and ui['local_source_visible']
                         assert process.wait(timeout=15) == 0
                         assert file_hash(executable) == file_hash(candidate)
                         assert read_json(result_path.parent / 'ack.json')
@@ -176,7 +181,9 @@ def main():
                         break
                     if args.scenario != 'success' and ui and process.poll() is not None:
                         assert process.returncode == 0
-                        expected = 'no_update' if args.scenario == 'no-update' else 'download_failed'
+                        expected = {'no-update': 'no_update', 'bad-checksum': 'download_failed', 'check-failure': 'check_failed'}[args.scenario]
+                        if args.startup and args.scenario in ('no-update', 'check-failure'):
+                            expected += '_silent'
                         assert ui['outcome'] == expected, ui
                         assert file_hash(executable) == original_hash and result is None
                         if args.scenario == 'bad-checksum':
@@ -184,7 +191,9 @@ def main():
                             assert not list((data / 'updates').glob('.LCSC3D-update-*'))
                         report.update(success=True, ui=ui, original_preserved=True)
                         break
-                    expected_outcome = {'success': 'prepared', 'bad-checksum': 'download_failed', 'no-update': 'no_update'}[args.scenario]
+                    expected_outcome = {'success': 'prepared', 'bad-checksum': 'download_failed', 'no-update': 'no_update', 'check-failure': 'check_failed'}[args.scenario]
+                    if args.startup and args.scenario in ('no-update', 'check-failure'):
+                        expected_outcome += '_silent'
                     if ui and ui['outcome'] != expected_outcome:
                         raise AssertionError(ui)
                     if time.monotonic() > deadline:

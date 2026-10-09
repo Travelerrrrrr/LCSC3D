@@ -3,15 +3,67 @@ import sys
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QTimer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout
 
 from errors import Cancelled
 from updater import RELEASES_URL, UpdateClient, discard_update
-from app_logging import log_event, new_context, contextual, record_error
+from app_logging import log_event, new_context, contextual, record_error, log_context
 from store_diagnostics import record_request_error
+
+
+class StartupUpdateCheck(QObject):
+    """Check metadata without owning a window or delaying application shutdown."""
+    completed = Signal(object)
+
+    def __init__(self, version, parent, *, source=None):
+        super().__init__(parent)
+        self.cancelled = threading.Event()
+        self.state = {'finished': False, 'release': None, 'outcome': 'failed'}
+        self.log_context = new_context(feature='update', trigger='startup')
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.poll)
+        # The daemon only holds ordinary Python data; it never touches a Qt
+        # object after cancellation or while the application is shutting down.
+        self.thread = threading.Thread(target=type(self).run,
+            args=(version, source, self.cancelled, self.state, self.log_context),
+            name='startup-update', daemon=True)
+
+    def start(self):
+        self.thread.start()
+        self.timer.start(50)
+
+    @staticmethod
+    def run(version, source, cancelled, state, context):
+        with log_context(context):
+            try:
+                log_event('INFO', 'update.startup_check_started')
+                client = UpdateClient(cancelled) if source is None else UpdateClient(cancelled, source=source)
+                release = client.check(version)
+                state.update(release=release, outcome='available' if release is not None else 'latest')
+            except Cancelled:
+                state.update(release=None, outcome='cancelled')
+            except Exception as exc:
+                record_error(exc, 'update.startup_check_failed')
+                state.update(release=None, outcome='failed')
+            finally:
+                if cancelled.is_set():
+                    state.update(release=None, outcome='cancelled')
+                log_event('INFO', 'update.startup_check_result', outcome=state['outcome'])
+                state['finished'] = True
+
+    def poll(self):
+        if self.state['finished']:
+            self.timer.stop()
+            if not self.cancelled.is_set():
+                with log_context(self.log_context):
+                    self.completed.emit(dict(self.state))
+
+    def cancel(self):
+        self.cancelled.set()
+        self.timer.stop()
 
 
 class UpdateWorker(QThread):
@@ -50,7 +102,7 @@ class UpdateWorker(QThread):
 
 
 class UpdateDialog(QDialog):
-    def __init__(self, version, parent, *, source=None):
+    def __init__(self, version, parent, *, source=None, release=None):
         super().__init__(parent)
         self.setWindowTitle('检查更新（本地测试）' if source is not None else '检查更新')
         self.setWindowModality(Qt.WindowModal)
@@ -95,7 +147,11 @@ class UpdateDialog(QDialog):
         self.dismiss.clicked.connect(self.close)
         buttons.addWidget(self.dismiss)
         layout.addLayout(buttons)
-        self.start_worker()
+        if release is None:
+            self.start_worker()
+        else:
+            self.on_checked(release)
+            self.install.setEnabled(bool(getattr(sys, 'frozen', False)))
 
     def start_worker(self, release=None):
         self.manifest = None

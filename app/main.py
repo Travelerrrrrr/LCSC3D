@@ -26,7 +26,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from backend import Cancelled, NetworkApi, Options, Result, download_batch, get_component_metadata, parse_part_numbers
 from model3d import model_reference, read_obj
 from library_preview import build_library_preview, VectorPreviewView, SYMBOL_BACKGROUND, FOOTPRINT_BACKGROUND
-from update_ui import UpdateDialog
+from update_ui import UpdateDialog, StartupUpdateCheck
 from updater import acknowledge_update, cleanup_updates, launch_update
 from favorites import FavoritesDialog, normalize_items
 from app_settings import Preferences, set_preferences, write_settings, read_settings, initial_log_level
@@ -332,6 +332,12 @@ class MainWindow(QMainWindow):
         self.web_profile.setHttpCacheMaximumSize(8 * 1024 * 1024)
         self.close_when_finished = False
         self.update_dialog = None
+        self.startup_update_check = None
+        self.startup_update_attempted = False
+        self.startup_update_outcome = None
+        self.startup_update_timer = QTimer(self)
+        self.startup_update_timer.setSingleShot(True)
+        self.startup_update_timer.timeout.connect(self.check_startup_update)
         self.favorites_dialog = None
         self.account_menu = None
         self._setup_ui()
@@ -1448,13 +1454,53 @@ class MainWindow(QMainWindow):
             '3D 预览由 LCSC3D 在本地渲染官方模型；拖动旋转，滚轮缩放，右键拖动平移。<br><br>'
             '右侧上方可切换「3D 模型 / 符号 / 封装」，无需先下载。<br>'
             '符号和封装直接加载商城使用的官方 SVG，支持滚轮缩放、拖动平移及「适应窗口」；多单元符号可选择单元。<br><br>'
-            '点击顶部「检查更新」可查询新版；便携 EXE 支持下载、SHA-256 校验并重启更新。<br>'
+            '启动后自动后台检查新版，发现新版时提醒；连接失败或已是最新版时不弹窗。'
+            '也可点击顶部「检查更新」手动查询；便携 EXE 支持下载、SHA-256 校验并重启更新。<br>'
             '模型来源：<a href="https://lceda.cn/">JLCEDA</a> / <a href="https://easyeda.com/">EasyEDA 官方库</a>。<br>'
             '资源下载与本地 3D 预览由本项目实现，软件采用 AGPL-3.0-or-later。<br>'
             '对应源码、构建脚本与第三方说明随交付提供。')
         message.exec()
 
+    def schedule_startup_update_check(self):
+        if not self.startup_update_attempted and not self.close_when_finished:
+            self.startup_update_timer.start(1500)
+
+    def check_startup_update(self):
+        if self.startup_update_attempted or self.close_when_finished:
+            return
+        self.startup_update_attempted = True
+        self.startup_update_timer.stop()
+        check = StartupUpdateCheck(VERSION, self, source=self.update_source)
+        self.startup_update_check = check
+        check.completed.connect(self.startup_update_completed)
+        check.start()
+
+    def cancel_startup_update(self):
+        self.startup_update_timer.stop()
+        self.startup_update_attempted = True
+        check, self.startup_update_check = self.startup_update_check, None
+        if check is not None:
+            check.cancel()
+            check.deleteLater()
+            self.startup_update_outcome = 'cancelled'
+            log_event('INFO', 'update.startup_notification_cancelled')
+
+    def startup_update_completed(self, result):
+        check, self.startup_update_check = self.startup_update_check, None
+        if check is None:
+            return
+        check.deleteLater()
+        self.startup_update_outcome = result['outcome']
+        if self.close_when_finished or not self.isVisible() or result['release'] is None:
+            return
+        if self.update_dialog is not None and self.update_dialog.isVisible():
+            return
+        self.update_dialog = UpdateDialog(VERSION, self, source=self.update_source, release=result['release'])
+        self.update_dialog.show()
+        log_event('INFO', 'update.startup_notification_shown', target_version=result['release'].version)
+
     def check_updates(self):
+        self.cancel_startup_update()
         if self.update_dialog is not None and self.update_dialog.isVisible():
             self.update_dialog.raise_()
             self.update_dialog.activateWindow()
@@ -1469,6 +1515,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self.close)
 
     def closeEvent(self, event):
+        self.cancel_startup_update()
         if self.favorites_dialog:
             self.favorites_dialog.shutdown()
             self.favorites_dialog.close()
@@ -1514,10 +1561,13 @@ def main():
     parser.add_argument('--local-update-source', metavar='URL', help='仅测试：本机 HTTP 更新源（http://127.0.0.1:端口）')
     parser.add_argument('--local-update-current-version', metavar='VERSION', help='仅测试：模拟版本比较的当前版本')
     parser.add_argument('--self-test-local-update', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-startup-update', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     from updater import LocalUpdateSource, UpdateError
     if (args.local_update_current_version or args.self_test_local_update) and not args.local_update_source:
         parser.error('本地更新测试参数必须同时提供 --local-update-source')
+    if args.self_test_startup_update and not args.self_test_local_update:
+        parser.error('--self-test-startup-update requires --self-test-local-update')
     try:
         update_source = LocalUpdateSource(args.local_update_source, args.local_update_current_version) if args.local_update_source else None
     except UpdateError as exc:
@@ -1547,7 +1597,9 @@ def main():
     window.show()
     if args.self_test_local_update:
         from update_selftest import start
-        start(window, args.self_test_local_update)
+        start(window, args.self_test_local_update, startup=args.self_test_startup_update)
+    if not test_destination and (not args.self_test_local_update or args.self_test_startup_update):
+        window.schedule_startup_update_check()
     if args.self_test_settings:
         from settings_selftest import start
         start(window, args.self_test_settings)
