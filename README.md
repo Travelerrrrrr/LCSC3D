@@ -1,9 +1,9 @@
-[![赞助支持 LCSC3D](docs/images/sponsorship/button.svg)](docs/sponsorship.md)
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="app/assets/branding/lcsc3d-logo-dark.svg">
-  <img src="app/assets/branding/lcsc3d-logo.svg" width="300" alt="LCSC3D">
-</picture>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="app/assets/branding/lcsc3d-logo-dark.svg">
+    <img src="app/assets/branding/lcsc3d-logo.svg" width="360" alt="LCSC3D">
+  </picture>
+</p>
 
 # LCSC3D：立创元件 3D 模型下载与 Altium Designer 元件库导出
 
@@ -11,42 +11,30 @@
 [![Windows build](https://github.com/Travelerrrrrr/LCSC3D/actions/workflows/windows.yml/badge.svg)](https://github.com/Travelerrrrrr/LCSC3D/actions/workflows/windows.yml)
 [![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-0078D6)](https://github.com/Travelerrrrrr/LCSC3D/releases/latest)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![赞助支持 LCSC3D](docs/images/sponsorship/button.svg)](docs/sponsorship.md)
 
 **从立创商城搜索、账号收藏或 C 编号选择元件，查看价格、库存和资料，批量下载 STEP / OBJ、导出 AD 元件库并预览。**
 
 LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。它把商城选型、账号收藏、模型下载、Altium Designer 元件库导出和四类预览放在一起。下载 `LCSC3D.exe` 即可运行，无须安装 Python；导出 AD 库也无须在电脑上安装 Altium Designer。
 
-**当前源码版本：2.2.1** · **[下载已发布的 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [已发布的源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.2.1.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**当前版本：2.2.1** · **[下载 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.2.1.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
-**2026-10-10 本地 UI 重构：** 接入 [UN-GCPDS/qt-material](https://github.com/UN-GCPDS/qt-material)，重排工作台、商城、登录、设置、图片浏览、追加配置、更新和帮助，全部嵌入同一个窗口。提醒从右上角向左滑入；下拉列表贴齐输入框、账号菜单等宽，商城与工作台共用拖动分隔条，勾选框采用平滑圆角 SVG。设置分组标题放在框内左上角，保留“⭐点个Star⭐”与“🍔赞助作者🍔”。最新本地程序为 `outputs/LCSC3D.exe`，本次改动尚未发布到 GitHub Release。
+**新 Logo、新界面、备份可恢复。** 2.2.1 使用蓝色 L 标识和默认浅色品牌蓝，将工作台、商城、登录与设置整合到一个窗口；支持管理自动备份、查看占用空间、恢复与清理备份。
 
-**一体化窗口：** 系统标题栏已并入应用顶部，账号入口右侧提供最小化、最大化/还原及关闭；支持拖动顶部空白处、双击最大化/还原和边角缩放，通知不遮挡窗口按钮。
+![LCSC3D 2.2.1：一体化浅色工作台与官方 Type-C 3D 模型](docs/images/2.2.1-release/main.png)
 
-**新 Logo 与备份管理：** 软件图标、任务栏和界面使用新的蓝色 L 标识，首次启动默认浅色与品牌蓝。**设置 → 备份** 可保存自动备份开关，查看备份占用空间、恢复选中备份或清除备份；恢复覆盖前保留当前文件。既有个人主题设置继续沿用。
-
-![Material 工作台：官方 RP2040 符号预览](docs/images/material/workspace-symbol-light.png)
-
-**2.2.1 新增“主题设置”和“赞助与支持”。** 支持简体中文 / English、跟随系统 / 浅色 / 深色，以及预设或自定义配色。English 在软件内使用 LCSC 国际商城的英文资料与美元价格。**⭐点个Star⭐** 打开本仓库首页；**🍔赞助作者🍔** 离线展示支付宝和微信收款码。
-
-**2.2.0 将 AD 元件库的批量合并、追加和 PCB 工程联动集中到 Lib 区域，并加入相同 footprint 复用、独立导出和更清晰的文件组织。** 主页也可直接预览商品图片，商城加入下载列表后会显示导入结果。
-
-![LCSC3D 2.2.0 主窗口：官方 3D 模型、四类预览与 Lib 模式](docs/images/2.2.0/main.png)
-
-## 2.2.0 更新重点
+## 2.2.1 更新重点
 
 | 更新 | 使用方式与效果 |
 | --- | --- |
-| **Lib 合并 / 追加** | 两个模式互斥，勾选后展开配置；SchLib / PcbLib 可独立选择，合并库可自定义名称。 |
-| **独立导出器件** | 合并或追加的同时，可额外保留各器件的配套库和模型。 |
-| **已有库与 PCB 工程** | 支持只选 SchLib 或 PcbLib，追加成功后可将库加入指定 `.PrjPcb`；空下载列表也能直接导入已有库。 |
-| **相同 footprint 复用** | 相同封装不重复新增，符号引用同步指向实际保留的封装；同名不同内容用序号区分，原库条目保留。 |
-| **库名_3D 与简洁命名** | 未独立导出时，模型集中到 `库名_3D`；Lib 文件及新库内名称不自动附加器件编号。 |
-| **导出兼容修复** | 修复 C23922 等器件的 `NONE` 无填充错误，保留多单元符号和完整引脚。 |
-| **预览与操作反馈** | 新增主页商品图片预览、商城导入结果弹窗；手动检查更新集中到“设置”。 |
+| **一体化窗口** | 系统标题栏并入应用顶部，保留最小化、最大化/还原、关闭、拖动和边角缩放；商城、登录、图片、设置及帮助均在主窗口内切换。 |
+| **新 Logo 与默认浅色** | 界面、EXE 和窗口图标全面更新；首次启动采用浅色与品牌蓝，已有主题设置继续沿用。 |
+| **备份管理与恢复** | 设置中开关自动备份、查看数量和占用空间、恢复选中备份或清除备份；恢复覆盖前保留当前文件。 |
+| **主题、字体与语言** | 中文 / English、跟随系统 / 浅色 / 深色、预设与自定义配色、按钮文字颜色、字体及 10–24px 字号。 |
+| **国际商城** | English 使用 LCSC 国际站的英文商品资料、美元价格、库存和原图。 |
+| **设置与支持** | 外观、网络、日志与诊断、关于与支持、备份五类设置；保留“⭐点个Star⭐”与“🍔赞助作者🍔”。 |
 
-下面是本次实际运行 2.2.0 的合并界面：C23922、C8734、C20197 导出 **3 个符号、2 个 footprint**，前两个 STM32 器件复用同一份 LQFP-48 封装。
-
-![LCSC3D 2.2.0：共享封装合并与符号预览](docs/images/2.2.0/merge.png)
+库合并、追加、PCB 工程联动、相同 footprint 复用及独立导出继续保留。旧版改动见 [版本历史](docs/版本历史.md)。以下软件截图均来自 2.2.1 的实际运行；公开商品价格与库存以使用时查询结果为准。
 
 ## 功能一览
 
@@ -66,6 +54,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 | 任务与文件管理 | 显示进度和逐项结果；可以停止任务、打开器件目录、重新获取同名文件。 |
 | 便携与自更新 | 单个 EXE 直接运行，保存目录及格式设置自动记忆，支持检查更新、校验和重启更新。 |
 | 设置与日志 | 商城和检查更新独立选择系统代理或直连；调整日志等级，打开、打包或清除日志。 |
+| 备份与恢复 | 自动备份开关、空间统计、恢复旧文件、恢复前保护副本及清理确认。 |
 
 ## 主题、代理设置与日志
 
@@ -81,13 +70,13 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 例如，想保留青绿色背景并使用白字，可将 **按钮文字颜色** 设为 **白色** 后保存。
 
-![文字颜色和字体设置](docs/images/2.2.1/settings-text-font.png)
+![文字颜色和字体设置](docs/images/2.2.1-release/settings-appearance.png)
 
 国际站登录和账号收藏在 LCSC.com 网页管理，软件内提供对应入口；国内账号与国际站会话不混用。切回简体中文即可使用原有国内商城搜索、登录和收藏。符号与封装保留官方图形的原始颜色。
 
-![English 深色设置](docs/images/2.2.1/settings-English-dark.png)
+![English 深色设置](docs/images/2.2.1-release/settings-English-dark.png)
 
-![软件内搜索国际站：英文参数、美元价格与商品原图](docs/images/2.2.1/store-English-dark.png)
+![软件内搜索国际站：英文参数、美元价格与商品原图](docs/images/2.2.1-release/store-English-dark.png)
 
 主窗口左侧点击 **设置 → 关于与支持 → 检查更新** 可手动检查新版，启动后台检查继续保留。点击 **设置**，可分别为 **立创商城** 和 **检查更新** 选择 **使用系统代理 / 不使用系统代理**，默认均使用系统代理。商城选项覆盖登录、搜索、收藏、图片及元件资源，更新选项覆盖新版检查和更新包下载。保存后对新请求立即生效，当前登录保留，重启后恢复设置。
 
@@ -99,7 +88,15 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 设置窗口 **关于与支持** 页的 **赞助与支持** 提供仓库首页和作者收款码入口，点击即可使用，无须保存设置。赞助自愿，金额随意。
 
-![LCSC3D 2.2.1 设置：主题、软件更新、代理、日志与赞助支持](docs/images/2.2.1/settings.png)
+![LCSC3D 2.2.1 关于与支持：新版 Logo、检查更新与赞助入口](docs/images/2.2.1-release/settings-about.png)
+
+## 备份与恢复
+
+**设置 → 备份** 显示备份数量、占用空间、文件名、原路径和时间。自动备份默认开启，可关闭后保存；追加或修改已有 SchLib、PcbLib 和 PCB 工程时按此设置保留旧文件。
+
+选择一份备份后点击 **恢复选中备份**，确认恢复路径后执行；覆盖已有文件前会保留该文件的当前内容，即使自动备份已关闭。旧版备份也可恢复，需要手动指定目标路径。**清除备份** 经确认后只删除列出的备份，原有库与工程保持不变。详见 [备份与恢复说明](app/README.md#备份与恢复)。
+
+![备份管理：自动备份开关、占用空间、恢复和清理](docs/images/2.2.1-release/backups-light.png)
 
 ## 商城搜索、价格与商品详情
 
@@ -107,13 +104,13 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 每页最多 **50 个元件**，点击上一页或下一页才获取目标页。跨页勾选会保留，**加入下载列表** 导入本次搜索各页勾选的元件；全选只作用于当前页。新搜索清空上一轮的勾选与价格梯度选择。
 
-![商城搜索结果：50 条分页、独立价格梯度和现货库存](docs/images/2.1.1/store-search.png)
+![商城搜索结果：50 条分页、独立价格梯度和现货库存](docs/images/2.2.1-release/store-search.png)
 
 价格列列出每个商品实际提供的人民币单价梯度，保留原始小数精度。默认显示 **1+**；最低 5 个起订时显示 **5+ 对应单价**，只有更高起始梯度时使用最低可用梯度。库存显示商城现货数量，零库存显示 `0`，缺少价格或库存显示 `—`。翻页后返回仍保留该商品手动选择的梯度。
 
 右侧商品介绍和参数自动换行，文字详情区可以上下滚动。图片、原图入口、数据手册和收藏按钮保持可见，长参数完整显示。
 
-![C499531 的完整介绍与参数，价格默认 1+](docs/images/2.1.1/store-details.png)
+![C499531 的完整介绍与参数，价格默认 1+](docs/images/2.2.1-release/store-details.png)
 
 ## 登录、记住登录与账号收藏
 
@@ -121,7 +118,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 | 账号密码登录 | 手机验证码登录 |
 | --- | --- |
-| <img src="docs/images/2.1.1/login-password.png" alt="原生账号密码登录空白表单" width="360"> | <img src="docs/images/2.1.1/login-sms.png" alt="原生手机验证码登录空白表单" width="360"> |
+| <a href="docs/images/2.2.1-release/login-password.png"><img src="docs/images/2.2.1-release/login-password.png" alt="应用内账号密码登录空白表单" width="440"></a> | <a href="docs/images/2.2.1-release/login-sms.png"><img src="docs/images/2.2.1-release/login-sms.png" alt="应用内手机验证码登录空白表单" width="440"></a> |
 
 **记住登录** 默认开启，会话有效时重启软件自动恢复。登录状态使用 Windows 当前用户加密，只保存会话，不保存账号密码；**退出登录** 清除保存的会话。
 
@@ -131,7 +128,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 点击商品图片或 **查看全部原图** 打开图片窗口。缩略图、上一张/下一张和方向键可切换图片；滚轮或按钮缩放，拖动平移，支持原始大小和适应窗口。
 
-![C499531 的全部商品原图与缩放操作](docs/images/2.1.1/gallery.png)
+![C499531 的全部商品原图与缩放操作](docs/images/2.2.1-release/gallery.png)
 
 ## 原生 Altium Designer 元件库
 
@@ -170,7 +167,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 选择 **商品图片** 可在主页查看商城原图，多张图片用上一张/下一张切换，支持缩放、拖动和重新加载。
 
-![LCSC3D 2.2.0 主页商品图片预览](docs/images/2.2.0/product-photo.png)
+![LCSC3D 2.2.1 主页商品图片预览](docs/images/2.2.1-release/product-photo.png)
 
 3D 初始视角保持元件顶部朝上。切换器件和下载进度更新时，预览仍可操作；资源可以先查看，再决定需要保存哪些格式。
 
@@ -178,13 +175,13 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 同一 Type-C 连接器的符号预览，可查看 A1～A12、B1～B12 等实际引脚编号。
 
-![LCSC3D 2.2.0 中 Type-C 连接器的原理图符号预览](docs/images/2.2.0/symbol.png)
+![LCSC3D 2.2.1 中 Type-C 连接器的原理图符号预览](docs/images/2.2.1-release/symbol.png)
 
 ### PCB 封装预览
 
 同一元件的封装预览，可查看焊盘编号、固定孔、轮廓和图层颜色。
 
-![LCSC3D 2.2.0 中 Type-C 连接器的 PCB 封装预览](docs/images/2.2.0/footprint.png)
+![LCSC3D 2.2.1 中 Type-C 连接器的 PCB 封装预览](docs/images/2.2.1-release/footprint.png)
 
 ### 与立创商城官方页面对照
 
@@ -198,14 +195,12 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 同时指定已有库和 `.PrjPcb` 后，可勾选 **将已选已有库导入PCB工程**，下载完成后将成功追加的库加入工程；下载列表为空时，主页 **导入已有库** 可直接加入所选库。只指定工程时，在工程旁按工程名称创建或追加配套库。默认写入前自动备份到 AppData，可在设置中管理备份开关、恢复和清理。详见 [使用说明](app/README.md#追加已有库与-pcb-工程)。
 
-![追加配置：独立导出器件、已有库选择和 PCB 工程联动](docs/images/2.2.0/append.png)
+![追加配置：独立导出器件、已有库选择和 PCB 工程联动](docs/images/2.2.1-release/append-targets.png)
 
 <details>
-<summary>查看空列表直接导入已有库，以及商城导入结果提示</summary>
+<summary>查看商城加入下载列表后的导入结果提示</summary>
 
-![空下载列表直接将已选库加入 PCB 工程](docs/images/2.2.0/empty-import.png)
-
-![商城加入下载列表后的导入结果提示](docs/images/2.2.0/import-result.png)
+![商城加入下载列表后的导入结果提示](docs/images/2.2.1-release/import-result.png)
 
 </details>
 
@@ -299,7 +294,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 部分元件没有关联的 3D 模型，仍可能有可用的符号与封装；某些模型格式也可能不可获取。导出结果以实际官方资源和软件提示为准。预览用于选型和检查，生产设计前仍需根据器件数据手册核对引脚、尺寸和封装。
 
-当前版本通过 **414 项本地回归测试**，涵盖字体列表展开与选择、主题与语言切换、国际站数据解析、队列保留、导出和更新；已有专项继续覆盖 **136 组导出模式组合、16 组共享封装组合**及 **27 个官方 AD 对照样本**。本次正式 EXE 验证主题保存、语言切换、自定义配色与文字颜色、界面字体、系统明暗变化、赞助和日志功能；另以实网验证国际商城搜索、分页、分类、美元价格、原图和加入下载列表。先前版本的 EXE 导出、自更新及用户 AD 实测记录保留在 [验证记录](docs/验证记录.md)。
+当前版本通过 **447 项本地回归测试**，覆盖一体化窗口、主题与语言切换、备份与恢复、商城、导出和更新；已有专项继续覆盖 **136 组导出模式组合、16 组共享封装组合**及 **27 个官方 AD 对照样本**。实际 EXE 通过 Material 界面、设置与日志、备份、离线商城、导出五组自检，并用公开商品实网核对 3D、符号、封装、图片、国内搜索和国际站美元价格。EXE 模块、资源、Logo 与源码包逐项核对，截图及历史 AD 实测见 [验证记录](docs/验证记录.md)。
 
 ## 源码运行与构建
 

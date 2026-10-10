@@ -9,15 +9,17 @@ import time
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtWidgets import QApplication
 
+from app_settings import Preferences
 from favorites import LoginDialog
 
 
 def start(window, destination):
     from main import DOWNLOAD_COLUMN, VERSION
     QApplication.instance().setQuitOnLastWindowClosed(False)
+    window.resize(1380, 880)
     destination = Path(destination).resolve()
     destination.mkdir(parents=True, exist_ok=True)
-    window.path_input.setText('下载目录')
+    window.path_input.setText('D:/LCSC3D/Models')
     window.input.setPlainText('C456013\nC2040\nC20197\nC163691')
     for box in (window.step_box, window.obj_box, window.schlib_box, window.pcblib_box):
         box.setChecked(True)
@@ -32,10 +34,15 @@ def start(window, destination):
               'public_products_only': True, 'saved_session_accessed': False, 'screenshots': []}
 
     def capture(widget, name):
-        pixmap = widget.grab()
+        # Pages and notifications now live inside the single application shell.
+        # Capture that shell after layout and notification animations settle.
+        for notice in getattr(window.notifications, 'toasts', ()):
+            notice.animation.setCurrentTime(notice.animation.duration())
+        QApplication.processEvents()
+        pixmap = window.grab()
         if name in ('symbol', 'footprint'):
             view = window.symbol_view if name == 'symbol' else window.footprint_view
-            origin = view.mapTo(widget, QPoint(0, 0))
+            origin = view.mapTo(window, QPoint(0, 0))
             scale = pixmap.devicePixelRatio()
             image = pixmap.toImage().copy(int(origin.x() * scale), int(origin.y() * scale),
                                          int(view.width() * scale), int(view.height() * scale))
@@ -79,6 +86,8 @@ def start(window, destination):
             dialog = window.favorites_dialog
             phase = state['phase']
             if phase == 'main' and window.preview_state == 'ready' and window.info_worker is None:
+                if not vector_frame_ready(phase):
+                    return
                 assert window.current_preview == 'C456013'
                 capture(window, 'main')
                 window.open_settings()
@@ -86,6 +95,10 @@ def start(window, destination):
                 QApplication.processEvents()
                 assert settings.store_proxy_combo.currentData() == settings.update_proxy_combo.currentData() == 'system'
                 assert settings.log_level_combo.currentData() == 'DEBUG'
+                for index, name in enumerate(('appearance', 'network', 'diagnostics', 'about')):
+                    settings.section_buttons[index].click()
+                    capture(settings, 'settings-' + name)
+                settings.section_buttons[0].click()
                 capture(settings, 'settings')
                 settings.reject()
                 window.set_preview_mode('symbol')
@@ -154,6 +167,20 @@ def start(window, destination):
                 assert not dialog.login_dialog.phone_input.text() and not dialog.login_dialog.sms_input.text()
                 capture(dialog.login_dialog, 'login-sms')
                 dialog.login_dialog.reject()
+                window.apply_preferences(Preferences(language='en_US', theme_mode='dark'))
+                window.open_settings()
+                capture(window.settings_dialog, 'settings-English-dark')
+                window.settings_dialog.reject()
+                window.open_favorites('search')
+                dialog = window.favorites_dialog
+                assert not dialog.client.account
+                dialog.search_input.setText('C2040')
+                dialog.start_search()
+                state['phase'] = 'store-English-dark'
+            elif phase == 'store-English-dark' and not dialog.searching and not dialog.has_jobs():
+                assert dialog.current_product and dialog.current_product['part'] == 'C2040'
+                capture(dialog, 'store-English-dark')
+                report['international_public_search'] = True
                 finish()
         except Exception as exc:
             finish(state['phase'] + ': ' + (str(exc) or type(exc).__name__))
