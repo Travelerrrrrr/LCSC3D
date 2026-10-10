@@ -63,6 +63,23 @@ def start(window, folder):
             assert window.content_scroll.verticalScrollBar().maximum() == 0, 'Default workspace must fit without scrolling'
             report['default_workspace_fits'] = True
             capture(window, 'workspace-symbol-light')
+            normal_geometry, hwnd = window.geometry(), int(window.winId())
+            window.title_bar.maximize_button.click()
+            settle()
+            assert window.isMaximized() and window.title_bar.maximize_button.action == 'restore'
+            assert window.screen().availableGeometry().contains(window.geometry())
+            capture(window, 'workspace-maximized')
+            window.title_bar.maximize_button.click()
+            settle()
+            assert not window.isMaximized() and window.geometry() == normal_geometry
+            window.title_bar.minimize_button.click()
+            settle()
+            assert window.isMinimized()
+            window.showNormal()
+            settle()
+            assert int(window.winId()) == hwnd and window.geometry() == normal_geometry
+            report['integrated_window_controls'] = report['maximize_respects_work_area'] = True
+            report['minimize_restore_preserves_window'] = True
             assert 'Qt-Material' in app.styleSheet()
             window.lib_merge_box.setChecked(True)
             capture(window, 'workspace-merge-light')
@@ -144,6 +161,7 @@ def start(window, folder):
             window.refresh_store_account()
             notice = notify(window, '加入下载列表成功', '元件已加入下载列表，可返回工作台继续操作。', persistent=True)
             notice.animation.setCurrentTime(notice.animation.duration())
+            assert notice.y() > window.title_bar.mapTo(notice.parentWidget(), QPoint(0, window.title_bar.height())).y()
             capture(window, 'notification')
             notice.close()
             report['single_native_window'] = report['anchored_equal_width_dropdowns'] = True

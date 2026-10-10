@@ -16,7 +16,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QHeaderView, QProgressBar, QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QVBoxLayout, QWidget, QAbstractItemView)
-from localized_widgets import (QCheckBox, QComboBox, QLabel, QLineEdit, QMainWindow, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem)
+from localized_widgets import (QCheckBox, QComboBox, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem)
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from shiboken6 import isValid
@@ -39,6 +39,7 @@ from export_targets import ExportTargetsDialog
 from product_preview import ProductPreview
 from ui_components import IconButton, title_block, surface, HelpDialog, ColumnSplitter
 from shell_ui import PageHost, NotificationCenter, AccountPanel, choose_path, notify
+from window_chrome import FramelessMainWindow, TitleBar
 from international_store import storefront_url
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
@@ -245,7 +246,7 @@ class ModelPreviewWorker(QThread):
                 self.failed.emit(self.part, self.revision, str(exc))
 
 
-class MainWindow(QMainWindow):
+class MainWindow(FramelessMainWindow):
     batch_done = Signal()
     preview_changed = Signal(str)
 
@@ -364,24 +365,20 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
-        global_header = QHBoxLayout()
-        global_header.setContentsMargins(24, 12, 24, 0)
         self.back_button = QPushButton(ui_text('返回'))
         self.back_button.setProperty('variant', 'text')
-        global_header.addWidget(self.back_button)
         self.page_caption = label('', 'muted')
-        global_header.addWidget(self.page_caption, 1)
         self.account_button = IconButton(ui_text('账号登录'), 'user')
         self.account_button.clicked.connect(self.open_account)
-        global_header.addWidget(self.account_button)
-        right_layout.addLayout(global_header)
+        self.title_bar = TitleBar(self, self.back_button, self.page_caption, self.account_button)
+        right_layout.addWidget(self.title_bar)
         self._page_host = PageHost(self, self.content_scroll)
         self.back_button.clicked.connect(self._page_host.back)
         self._page_host.changed.connect(self.page_changed)
         right_layout.addWidget(self._page_host, 1)
         shell_layout.addWidget(right, 1)
         self.setCentralWidget(shell)
-        self.notifications = NotificationCenter(shell)
+        self.notifications = NotificationCenter(shell, top_inset=self.title_bar)
         for button in (self.workspace_button, self.market_button, self.settings_button, self.help_button):
             button.setCheckable(True)
         self.page_changed(self.content_scroll)

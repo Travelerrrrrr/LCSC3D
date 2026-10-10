@@ -421,10 +421,13 @@ class Toast(W.QFrame):
 
 
 class NotificationCenter(QObject):
-    def __init__(self, parent):
+    def __init__(self, parent, *, top_inset=None):
         super().__init__(parent)
         self.toasts = []
+        self.top_inset = top_inset
         parent.installEventFilter(self)
+        if top_inset is not None:
+            top_inset.installEventFilter(self)
 
     def notify(self, title, message, *, severity='info', actions=(), persistent=False):
         if len(self.toasts) >= 3:
@@ -450,7 +453,11 @@ class NotificationCenter(QObject):
 
     def reflow(self):
         root = self.parent()
+        if not self.toasts or not isValid(root):
+            return
         y = 16
+        if self.top_inset is not None and isValid(self.top_inset):
+            y += self.top_inset.mapTo(root, QPoint(0, self.top_inset.height())).y()
         for toast in self.toasts:
             toast.setFixedWidth(min(440, max(220, root.width() - 32)))
             toast.adjustSize()

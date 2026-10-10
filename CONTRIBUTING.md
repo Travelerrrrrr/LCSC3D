@@ -23,6 +23,8 @@ AD 导出回归也需要 Windows，以 `olefile` 独立读取 CFB 并核对引�
 
 Material UI 使用 `qt-material==2.17`，公共控件在 `app/ui_components.py`，应用样式覆盖在 `app/assets/material-overrides.qss`。`ThemeManager` 从上游模板生成样式，将图标按配色缓存到 AppData；不要直接调用默认写入用户主目录的主题导出接口。修改主题后运行 `test_theme.py`、`test_material_ui.py` 及相关窗口回归。
 
+一体化标题栏位于 `app/window_chrome.py`。Windows 保留原生移动、缩放与系统菜单，仅替换标题栏绘制；原生命中测试使用物理坐标，Qt 控件使用逻辑坐标。修改窗口行为后运行 `test_window_chrome.py`，核对边角命中、按钮与拖动区分离、最大化工作区、还原尺寸、关闭事件与通知避让，并实测鼠标拖动和双击。`--self-test-material` 在实际 EXE 中验证最大化、最小化与还原后句柄和尺寸不变。
+
 `LCSC3D.exe --self-test-material <隔离目录>` 离线捕获明暗工作台、最小窗口/24px 英文界面、四个设置分类、三种空白登录表单、追加和帮助窗口，并验证官方符号/封装预览。提前把 `C2040_svgs.json` 和 `C20197_svgs.json` 放入该目录的 `fixtures/`，设置隔离的 `LOCALAPPDATA`。它不恢复会话、不请求二维码、不访问商城网络，输出 `material-verification.json` 和 PNG。
 
 `app/.venv/Scripts/python.exe scripts/verify_bundle.py --exe outputs/LCSC3D.exe --source-zip outputs/LCSC3D.zip` 逐一比较成品中的应用模块、界面资源、许可证和源码 ZIP，核对 Qt Material 模板和 SVG 已打包；不运行 EXE、不访问用户设置。
