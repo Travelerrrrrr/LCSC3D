@@ -138,7 +138,6 @@ def stylesheet(c):
     c = dict(typography(), **c)
     assets = Path(__file__).resolve().parent / 'assets'
     c['control_height'] = max(20, round(c['font_size'] * 1.5))
-    c['legend_offset'] = c['control_height'] // 2
     result = (assets / 'material-overrides.qss').read_text(encoding='utf-8') % c
     # Upstream supplies selected/focused table indicators with more specific
     # selectors. Cover those combinations so high contrast ticks also survive

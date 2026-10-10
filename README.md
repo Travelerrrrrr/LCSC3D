@@ -13,7 +13,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 **当前源码版本：2.2.1** · **[下载已发布的 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [已发布的源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.2.1.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
-**2026-10-10 本地 UI 重构：** 接入 [UN-GCPDS/qt-material](https://github.com/UN-GCPDS/qt-material)，重排工作台、商城、登录、设置、图片浏览、追加配置、更新和帮助，全部嵌入同一个窗口。提醒从右上角向左滑入；下拉列表贴齐输入框、账号菜单等宽，商城与工作台共用拖动分隔条，勾选框采用平滑圆角 SVG。设置分组标题嵌入边框，保留“⭐点个Star⭐”与“🍔赞助作者🍔”。最新本地程序为 `outputs/LCSC3D.exe`，本次改动尚未发布到 GitHub Release。
+**2026-10-10 本地 UI 重构：** 接入 [UN-GCPDS/qt-material](https://github.com/UN-GCPDS/qt-material)，重排工作台、商城、登录、设置、图片浏览、追加配置、更新和帮助，全部嵌入同一个窗口。提醒从右上角向左滑入；下拉列表贴齐输入框、账号菜单等宽，商城与工作台共用拖动分隔条，勾选框采用平滑圆角 SVG。设置分组标题放在框内左上角，保留“⭐点个Star⭐”与“🍔赞助作者🍔”。最新本地程序为 `outputs/LCSC3D.exe`，本次改动尚未发布到 GitHub Release。
 
 ![Material 工作台：官方 RP2040 符号预览](docs/images/material/workspace-symbol-light.png)
 

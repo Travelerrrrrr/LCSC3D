@@ -38,8 +38,8 @@ QComboBox QAbstractItemView { border:1px solid %(border)s; outline:0; }
 QMenu { border:1px solid %(border)s; padding:6px; }
 QMenu::item { padding:8px 20px; }
 QMenu::item:selected { background:%(accent)s; color:%(on_accent)s; border-radius:4px; }
-QGroupBox { background:%(surface)s; border:1px solid %(border)s; border-radius:8px; margin-top:%(legend_offset)spx; padding:0; font-weight:600; }
-QGroupBox::title { subcontrol-origin:margin; subcontrol-position:top left; left:16px; top:0; margin:0; padding:0 6px; height:%(control_height)spx; background:%(bg)s; color:%(muted)s; }
+QGroupBox { background:%(surface)s; border:1px solid %(border)s; border-radius:8px; margin:0; padding-top:%(control_height)spx; font-weight:600; }
+QGroupBox::title { subcontrol-origin:margin; subcontrol-position:top left; left:16px; top:12px; margin:0; padding:0; height:%(control_height)spx; background:transparent; color:%(muted)s; text-transform:none; }
 QTabWidget::pane { background:transparent; border:0; border-radius:0; }
 QTabBar { text-transform:none; }
 QTabBar::tab, QTabBar::tab:top { color:%(muted)s; background:transparent; border:0; border-bottom:3px solid transparent; padding:8px 16px; min-width:48px; height:%(control_height)spx; text-transform:none; }
