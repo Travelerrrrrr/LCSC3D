@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QHBoxLayout, QProgressBar, QVBoxLayout)
 from localized_widgets import (QDialog, QLabel, QPlainTextEdit, QPushButton)
 
 from errors import Cancelled
+from ui_components import title_block, IconButton
 from updater import RELEASES_URL, UpdateClient, discard_update
 from app_logging import log_event, new_context, contextual, record_error, log_context
 from store_diagnostics import record_request_error
@@ -109,7 +110,7 @@ class UpdateDialog(QDialog):
         self.controller = controller if controller is not None else parent
         self.setWindowTitle(ui_text('检查更新（本地测试）') if source is not None else ui_text('检查更新'))
         self.setWindowModality(Qt.WindowModal)
-        self.resize(540, 360)
+        self.resize(640, 480)
         self.version = version
         self.source = source
         self.worker = None
@@ -117,7 +118,9 @@ class UpdateDialog(QDialog):
         self.manifest = None
         self.closing = False
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(ui_message('当前版本：{0}', version)))
+        layout.setContentsMargins(24, 22, 24, 18)
+        layout.setSpacing(16)
+        layout.addWidget(title_block(ui_text('软件更新'), ui_message('当前版本：{0}', version), large=True))
         if source is not None:
             hint = QLabel(ui_message('本地模拟更新源：{0}\n仅本次启动生效，使用直连。', source.origin))
             if source.current_version is not None:
@@ -133,14 +136,15 @@ class UpdateDialog(QDialog):
         self.notes.setPlaceholderText(ui_text('新版说明将在这里显示'))
         layout.addWidget(self.notes, 1)
         self.progress = QProgressBar()
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(6)
         self.progress.setRange(0, 0)
         layout.addWidget(self.progress)
         buttons = QHBoxLayout()
-        self.install = QPushButton(ui_text('下载并重启'))
-        self.install.setObjectName('primary')
+        self.install = IconButton(ui_text('下载并重启'), 'download', role='primary')
         self.install.setEnabled(False)
         self.install.clicked.connect(self.perform_action)
-        buttons.addWidget(self.install)
+
         self.page = QPushButton(ui_text('打开发布页面'))
         self.page.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.release.page_url if self.release else
             self.source.origin if self.source is not None else RELEASES_URL)))
@@ -149,6 +153,7 @@ class UpdateDialog(QDialog):
         self.dismiss = QPushButton(ui_text('取消'))
         self.dismiss.clicked.connect(self.close)
         buttons.addWidget(self.dismiss)
+        buttons.addWidget(self.install)
         layout.addLayout(buttons)
         if release is None:
             self.start_worker()

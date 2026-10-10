@@ -1,13 +1,14 @@
 """Library append destinations and Altium project integration controls."""
 from i18n import text as ui_text, message as ui_message
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout)
+from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QWidget)
 from localized_widgets import (QCheckBox, QDialog, QFileDialog, QFormLayout, QLabel, QLineEdit, QPushButton)
 
 from altium_project import read_project
 from library_merge import read_library
 from app_logging import log_event, record_error, traced
 from errors import DownloadError
+from ui_components import title_block, surface, scroll_page
 
 
 class ExportTargetsDialog(QDialog):
@@ -15,12 +16,24 @@ class ExportTargetsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(ui_text('追加 · 已有库与 PCB 工程'))
         self.setWindowModality(Qt.WindowModal)
-        self.resize(660, 350)
-        layout = QVBoxLayout(self)
+        self.resize(820, min(740, self.screen().availableGeometry().height() - 60))
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(24, 22, 24, 18)
+        outer.setSpacing(18)
+        outer.addWidget(title_block(ui_text('追加 · 已有库与 PCB 工程'), ui_text('选择目标文件，配置库与工程的连接方式'), large=True))
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 10, 0)
+        layout.setSpacing(16)
+        outer.addWidget(scroll_page(content), 1)
         hint = QLabel(ui_text('已有库可只选 SchLib 或 PcbLib，只追加对应格式。\n只指定 PCB 工程时，在工程旁按工程名称生成配套库并加入工程；同名库存在时继续追加。\n相同封装自动复用，同名不同封装加序号；原有内容保留，修改前自动备份到应用数据目录。'))
         hint.setWordWrap(True)
         layout.addWidget(hint)
+        files, files_layout = surface()
+        files_layout.addWidget(title_block(ui_text('目标文件')))
         form = QFormLayout()
+        form.setSpacing(14)
+        files_layout.addLayout(form)
         self.inputs = {}
         for key, title, suffix in (('schlib_target', ui_text('已有符号库'), 'SchLib'),
                                     ('pcblib_target', ui_text('已有封装库'), 'PcbLib'),
@@ -37,24 +50,27 @@ class ExportTargetsDialog(QDialog):
             clear.clicked.connect(edit.clear)
             row.addWidget(clear)
             form.addRow(title, row)
-        layout.addLayout(form)
+        layout.addWidget(files)
+        behavior, behavior_layout = surface()
+        behavior_layout.addWidget(title_block(ui_text('导出行为')))
         self.keep_box = QCheckBox(ui_text('独立导出器件'))
         self.keep_box.setChecked(values.get('keep_individual') is True)
-        layout.addWidget(self.keep_box)
+        behavior_layout.addWidget(self.keep_box)
         model_hint = QLabel(ui_text('不勾选时，所有 3D 文件集中到 SchLib 旁的“库名_3D”文件夹；仅选 PcbLib 时跟随其名称。\n勾选后，另按器件保存独立库与 3D 文件。'))
         model_hint.setWordWrap(True)
-        layout.addWidget(model_hint)
+        behavior_layout.addWidget(model_hint)
         self.project_box = QCheckBox(ui_text('将已选已有库导入PCB工程'))
         self.project_box.setChecked(values.get('import_existing_to_project') is True)
         self.project_box.setToolTip(ui_text('同时指定已有库和 PCB 工程后可选；下载完成后将成功追加的库加入工程'))
-        layout.addWidget(self.project_box)
+        behavior_layout.addWidget(self.project_box)
         project_hint = QLabel(ui_text('工程中保存库的文件引用；已打开的 AD 工程需重新加载后查看。\n下载列表为空时，确定后点击主页“导入已有库”即可直接加入工程。'))
         project_hint.setWordWrap(True)
-        layout.addWidget(project_hint)
+        behavior_layout.addWidget(project_hint)
+        layout.addWidget(behavior)
         self.status = QLabel('')
         self.status.setTextFormat(Qt.PlainText)
         self.status.setWordWrap(True)
-        layout.addWidget(self.status)
+        outer.addWidget(self.status)
         buttons = QHBoxLayout()
         buttons.addStretch()
         cancel = QPushButton(ui_text('取消'))
@@ -64,7 +80,7 @@ class ExportTargetsDialog(QDialog):
         save.setObjectName('primary')
         save.clicked.connect(self.save)
         buttons.addWidget(save)
-        layout.addLayout(buttons)
+        outer.addLayout(buttons)
         for edit in self.inputs.values():
             edit.textChanged.connect(self.update_controls)
         self.update_controls()

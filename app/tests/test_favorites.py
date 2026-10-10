@@ -670,7 +670,9 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(self.dialog.datasheet_button.isVisible())
         self.assertTrue(self.dialog.image_label.isVisible())
-        self.assertFalse(self.dialog.detail_scroll.isAncestorOf(self.dialog.image_label))
+        # The Material inspector scrolls the photo together with long details;
+        # the account and document actions remain available outside the scroll.
+        self.assertTrue(self.dialog.detail_scroll.isAncestorOf(self.dialog.image_label))
         self.assertFalse(self.dialog.detail_scroll.isAncestorOf(self.dialog.collect_button))
         self.dialog.resize(1420, 820)
         self.wait_until(lambda: label.height() >= label.heightForWidth(label.width()))
@@ -771,11 +773,11 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.assertTrue(self.dialog.isVisible())
         self.assertEqual(foreground(), int(self.window.winId()))
 
-    def test_header_account_entry_is_before_settings_and_uses_shared_login_state(self):
+    def test_header_and_store_account_entries_share_login_with_settings_in_navigation(self):
         self.window.show()
         self.app.processEvents()
-        self.assertLess(self.window.account_button.geometry().right(), self.window.settings_button.geometry().left())
-        self.assertFalse(hasattr(self.dialog, 'login_button'))
+        self.assertTrue(self.window.navigation.isAncestorOf(self.window.settings_button))
+        self.assertFalse(self.window.navigation.isAncestorOf(self.window.account_button))
         self.window.account_button.click()
         self.wait_until(lambda: self.dialog.login_dialog and self.dialog.login_dialog.token)
         self.assertIs(self.dialog.login_dialog.parentWidget(), self.window)
@@ -784,10 +786,12 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.wait_until(lambda: self.dialog.client.account and not self.dialog.has_jobs())
         self.assertIn('账号：', self.window.account_button.text())
         self.assertIn('已登录', self.dialog.account_label.text())
+        self.assertEqual(self.dialog.login_button.text(), '退出登录')
         self.window.account_button.click()
         self.assertTrue(any(action.text() == '退出登录' for action in self.window.account_menu.actions()))
         self.dialog.clear_session()
         self.assertEqual(self.window.account_button.text(), '账号登录')
+        self.assertEqual(self.dialog.login_button.text(), '账号登录')
 
     def test_password_tab_authenticates_natively_and_clears_the_secret_on_close(self):
         self.window.account_button.click()

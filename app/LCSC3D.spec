@@ -3,6 +3,7 @@
 from pathlib import Path
 import sys
 from PySide6.QtCore import QLibraryInfo
+from PyInstaller.utils.hooks import collect_data_files
 
 root = Path(SPECPATH)
 
@@ -13,6 +14,7 @@ a = Analysis(
     datas=[(str(root / 'viewer.html'), '.'), (str(root / 'vector_viewer.html'), '.'),
            (str(Path(QLibraryInfo.path(QLibraryInfo.TranslationsPath)) / 'qtbase_zh_CN.qm'), 'assets'),
            (str(root / 'assets'), 'assets'), (str(root / 'licenses'), 'licenses')]
+          + collect_data_files('qt_material', includes=['*.template', 'themes/*.xml', 'resources/source/*.svg'])
           + [(str(root.parent / 'docs/images/sponsorship' / filename), 'docs/images/sponsorship')
              for filename in ('alipay.png', 'wechat.png')],
     hiddenimports=[],
@@ -38,6 +40,12 @@ a.binaries = [entry for entry in a.binaries
 # browser resources, developer tools and unused browser translations.
 def needed_resource(entry):
     name = entry[0].replace('\\', '/').lower()
+    # The package's own hook collects fonts, example UI and even source caches.
+    # We render with the user's installed font and only need the QSS/SVG inputs.
+    if name.startswith('qt_material/'):
+        return (name == 'qt_material/material.qss.template'
+                or name.startswith('qt_material/resources/source/') and name.endswith('.svg')
+                or name.startswith('qt_material/themes/') and name.endswith('.xml'))
     if '/qml/' in name or '.debug.' in name:
         return False
     if '/qtwebengine_locales/' in name:

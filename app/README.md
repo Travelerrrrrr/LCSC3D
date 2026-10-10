@@ -2,9 +2,17 @@
 
 Windows 10/11 x64 便携软件，用嘉立创商城 C 编号下载官方 STEP/OBJ 模型、导出原生 AD 符号与封装库，提供模型、符号、封装和商品图片预览与自更新。运行文件固定为 `LCSC3D.exe`，源码包为 `LCSC3D.zip`，版本号单独显示。
 
+## Material 工作台（2026-10-10 本地重构）
+
+全局界面使用 [UN-GCPDS/qt-material 2.17](https://github.com/UN-GCPDS/qt-material)，保留系统明暗、自定义配色、字体与中英文切换。左侧导航打开工作台、商城、设置和使用说明；工作区左侧添加器件和管理下载列表，右侧切换四类预览，底部集中选择保存目录、输出格式、Lib 模式并开始下载。列表和预览可拖动中间分隔条调整宽度。
+
+设置按 **外观 / 网络 / 日志与诊断 / 关于与支持** 分页，切换页面不会丢失未保存的输入。商城采用搜索列表与商品详情并排布局；登录窗口提供三种登录方式；商品原图窗口左侧为缩略图，底部为缩放工具。库追加设置按“目标文件”和“导出行为”分组，使用说明改为可滚动窗口。
+
+默认 1380×880 窗口完整显示常用操作；小窗口或大字号下可滚动访问超出区域。主题生成文件和图标只缓存在 `%LOCALAPPDATA%/LCSC3D/cache/qt-material-2.17/`，无需联网下载主题资源。
+
 ## 设置、代理与日志
 
-主窗口顶部点击 **设置** 打开设置窗口。更改后点击 **保存**，点击 **取消** 则保留原设置。设置随下载目录和格式选项一起保存在 `%LOCALAPPDATA%/LCSC3D/LCSC3D-settings.json`，重启和自更新后恢复；旧版本配置自动补充默认值。首次使用本版时，EXE 旁旧配置会迁移到应用数据目录，保存成功后清除旧文件；迁移失败时保留旧配置。
+主窗口左侧点击 **设置** 打开设置窗口。更改后点击 **保存**，点击 **取消** 则保留原设置。设置随下载目录和格式选项一起保存在 `%LOCALAPPDATA%/LCSC3D/LCSC3D-settings.json`，重启和自更新后恢复；旧版本配置自动补充默认值。首次使用本版时，EXE 旁旧配置会迁移到应用数据目录，保存成功后清除旧文件；迁移失败时保留旧配置。
 
 ### 主题设置 / Theme settings
 
@@ -22,20 +30,20 @@ Windows 10/11 x64 便携软件，用嘉立创商城 C 编号下载官方 STEP/OB
 
 **国际站账号**：English 模式的账号登录、收藏管理按钮打开 LCSC.com 网页；国际站的搜索、分类、翻页、商品详情、原图和加入下载列表均在软件内操作。国际站不读取或发送国内站保存的登录会话。切回简体中文后，国内站原有的原生登录和账号收藏流程继续可用。
 
-**English quick start:** Open **Settings → Theme settings**, select **English**, choose **Follow system / Light / Dark** and an accent color, then click **Save**. Open **LCSC International** to search by C-number, MPN or keyword. Broad searches include a category selector. Check products and click **Add to download list**. Prices use USD. International sign-in and account favorites are managed on LCSC.com.
+**English quick start:** Open **Settings → Appearance**, select **English**, choose **Follow system / Light / Dark** and an accent color, then click **Save**. Open **LCSC International** to search by C-number, MPN or keyword. Broad searches include a category selector. Check products and click **Add to download list**. Prices use USD. International sign-in and account favorites are managed on LCSC.com.
 
 For white text on teal buttons, set **Button text color → White**. **Choose text color…** opens a custom color picker. Select an installed font under **Interface font**, or click **Reset to default**. Preview changes in Settings, then click **Save** to apply and remember them.
 
 程序内部文件统一存放在 `%LOCALAPPDATA%/LCSC3D/`：配置和加密会话位于根目录，日志位于 `logs/`，诊断 ZIP 位于 `diagnostics/`，缓存位于 `cache/`，临时文件位于 `temp/`，单文件 EXE 的运行时解压位于 `runtime/`，更新下载、计划和备份位于 `updates/`。正常启动和关闭不在 EXE 目录生成配置或日志。模型和元件库默认保存到 `downloads/`，也可主动选择其他导出目录。
 
-**代理设置** 包含两个独立下拉框，均默认 **使用系统代理**：
+**设置 → 网络 → 代理设置** 包含两个独立下拉框，均默认 **使用系统代理**：
 
 - **立创商城**：控制搜索、登录、短信、二维码图片、商品图片、账号收藏，以及元件资料、模型和库数据请求。
 - **检查更新**：控制新版检查、校验文件和更新包下载。
 
 选择 **使用系统代理** 时，优先读取 HTTP/HTTPS 环境变量代理，没有环境变量代理时读取 Windows 当前用户的手动系统代理，并遵守代理绕过规则。选择 **不使用系统代理** 时，忽略系统和环境变量代理。两项对保存后的新请求立即生效，不清除当前登录会话；已经发出的请求继续完成。此选项不控制浏览器打开的网页，也不关闭 VPN/TUN 等网络层转发。
 
-**日志** 可选择 **Debug / Info / Warning / Error / Critical**，默认 **Debug**。所选等级及更严重的信息会写入日志，保存后立即生效，启动阶段也遵守已保存的等级。点击 **打开日志** 打开 `%LOCALAPPDATA%/LCSC3D/logs`。主程序写入 `LCSC3D.log`，独立更新助手写入 `LCSC3D-update.log`，各自单个文件最多约 2 MiB，保留最近 3 份轮转备份。
+**设置 → 日志与诊断** 可选择 **Debug / Info / Warning / Error / Critical**，默认 **Debug**。所选等级及更严重的信息会写入日志，保存后立即生效，启动阶段也遵守已保存的等级。点击 **打开日志** 打开 `%LOCALAPPDATA%/LCSC3D/logs`。主程序写入 `LCSC3D.log`，独立更新助手写入 `LCSC3D-update.log`，各自单个文件最多约 2 MiB，保留最近 3 份轮转备份。
 
 **打包日志** 在后台生成 ZIP，包含主程序、更新助手、轮转、崩溃日志及运行状态标记，另附 `diagnostics.json`（软件/系统/Python/Qt 版本、当前生效的代理模式、日志等级、主题、按钮文字颜色、界面字体、日志写入状态及收集清单）和反馈说明。ZIP 保存在 `%LOCALAPPDATA%/LCSC3D/diagnostics/`，完成后打开该目录。它不读取会话文件、完整配置、代理地址、环境变量或模型；异常大文件保留最近内容，读取失败或截短会在界面和收集清单中说明。
 
@@ -51,10 +59,10 @@ For white text on teal buttons, set **Button text color → White**. **Choose te
 
 ## 赞助与支持
 
-设置窗口底部新增 **赞助与支持** 栏：
+设置窗口 **关于与支持** 页的 **赞助与支持** 栏：
 
-- **⭐点个Star⭐**：使用默认浏览器打开 [LCSC3D 仓库首页](https://github.com/Travelerrrrrr/LCSC3D)，可在 GitHub 上为项目点 Star。
-- **🍔赞助作者🍔**：弹出支付宝和微信两张收款码，使用对应应用扫码即可。图片内置于程序，离线也能显示。自愿赞助，金额随意。
+- **项目主页**：使用默认浏览器打开 [LCSC3D 仓库首页](https://github.com/Travelerrrrrr/LCSC3D)，可在 GitHub 上为项目点 Star。
+- **赞助作者**：弹出支付宝和微信两张收款码，使用对应应用扫码即可。图片内置于程序，离线也能显示。自愿赞助，金额随意。
 
 这两个按钮无须保存设置即可使用。关闭收款码弹窗后返回设置窗口，尚未保存的修改会保留。
 
@@ -64,7 +72,7 @@ For white text on teal buttons, set **Button text color → White**. **Choose te
 
 搜索列表新增 **单价 / 梯度** 和 **库存**。价格列下拉框列出该商品的真实阶梯，显示人民币单价及计价单位，例如 `1+ ¥0.011/个`。默认选择 1+，最低 5 个起订则默认显示 5+ 对应价格；若商城只提供更高起始梯度，选择最低可用梯度。每个商品独立切换，保留原始价格精度；翻页返回仍保留手动选择，开始新搜索恢复默认梯度。价格和现货库存随搜索页面取得，切换梯度即时显示。
 
-库存显示商城搜索页的现货数量，缺货显示 `0`，缺少库存或报价显示 `—`。右侧商品型号、介绍及参数所在的文字详情区可上下滚动；介绍和长参数自动换行，参数行随文字高度调整。商品图片、原图入口及下方操作按钮保持可见。
+库存显示商城搜索页的现货数量，缺货显示 `0`，缺少库存或报价显示 `—`。右侧商品型号、介绍及参数所在的文字详情区可上下滚动；介绍和长参数自动换行，参数行随文字高度调整。图片、原图入口、商品介绍和参数一起滚动；下方数据手册、商城页和收藏操作保持可见。
 
 搜索无需登录，每页最多 **50 个元件**，显示结果总数和当前页。点击 **上一页 / 下一页** 才获取目标页，列表仅保留当前页，避免一次加载全部商品。元件默认不勾选；跨页手动勾选会保留，点击 **加入下载列表** 导入本次搜索各页已勾选的元件。全选和反选只作用于当前页；开始新搜索会清除旧搜索的勾选。2026-10-08 实测「单片机」共 1,500 个结果，按软件每页 50 个展示为 30 页。
 
@@ -76,7 +84,7 @@ For white text on teal buttons, set **Button text color → White**. **Choose te
 
 本节介绍简体中文模式的国内商城。English 模式的国际站账号操作见上方“国际站账号”。
 
-1. 点击主窗口顶部 **账号登录**，按钮位于 **设置** 之前；登录状态与商城窗口共享。
+1. 点击主窗口顶部 **账号登录**，或商城窗口右上角 **账号登录**；登录状态与商城窗口共享。
 2. 在原生登录框选择 **扫码登录 / 账号密码 / 手机验证码**。扫码用微信确认；账号密码直接在软件内输入；短信登录先获取验证码再提交。若商城要求图片验证，在同一登录框输入图中文字，支持 **换一张**。短信发送后有 60 秒重试倒计时。
 3. **记住登录，下次启动自动恢复** 默认勾选。重启软件自动恢复并校验会话，无须重新登录；取消勾选则只在本次运行中保留登录。会话过期后需重新登录。
 4. 打开 **立创商城 → 账号收藏**，已登录时自动获取收藏；也可点击 **获取收藏** 刷新。软件后台读取全部账号收藏，筛选框用于过滤已获取元件。
@@ -90,7 +98,7 @@ For white text on teal buttons, set **Button text color → White**. **Choose te
 
 收藏后台获取可随时停止，停止或普通网络失败保留已获取的部分；账号登录失效会清除暂存的账号数据并提示重新登录。账号收藏的添加、取消均在服务器确认后更新列表，失败时保留现有数据。收藏读取最多 200 页、暂存 10,000 个有效 C 编号元件。商品搜索按需获取当前 50 个元件，不预取后续软件页。
 
-登录网络错误会标明失败步骤，并区分响应不完整、超时、域名解析、证书校验和代理配置等问题。请求诊断统一写入上述日志，可在 **设置 → 打开日志** 中查看。
+登录网络错误会标明失败步骤，并区分响应不完整、超时、域名解析、证书校验和代理配置等问题。请求诊断统一写入上述日志，可在 **设置 → 日志与诊断 → 打开日志** 中查看。
 
 本地回归覆盖代理切换、配置保存、日志等级及脱敏、登录网络失败，以及价格精度、库存、最低起订量、独立梯度选择、完整文字与参数、删除勾选器件、分页、收藏和预览。手机验证码和图片验证已在 2.1.0 开发期间经过真实账号验证；本版登录流程使用本地模拟服务回归。详见 [2.2.0 更新记录](../docs/releases/v2.2.0.md) 与 [2.2.1 更新记录](../docs/releases/v2.2.1.md)。
 
@@ -184,11 +192,11 @@ PcbLib 目前不内嵌或绑定 STEP 模型，不生成 IntLib。回归包含 27
 
 ## 检查更新与自更新
 
-设置窗口的“软件更新”区域显示当前版本，点击“检查更新”打开更新窗口。关闭更新窗口后返回设置，检查使用已保存的代理选项；修改代理后应先保存。
+设置窗口“关于与支持”页的“软件更新”区域显示当前版本，点击“检查更新”打开更新窗口。关闭更新窗口后返回设置，检查使用已保存的代理选项；修改代理后应先保存。
 
 软件启动、主窗口显示后自动后台检查一次本仓库的正式 GitHub Release。发现新版时弹出更新窗口，展示版本、说明、大小和“下载并重启”；不会自动下载或安装。已是最新版、连接失败或接口异常时不弹窗，失败记录到日志。
 
-点击“设置 → 检查更新”可手动查询，显示最新状态或失败原因，并可重试或打开发布页面。手动查询会取消尚未展示的启动提醒；软件关闭时取消启动检查，后台网络等待不会阻碍退出。
+点击“设置 → 关于与支持 → 检查更新”可手动查询，显示最新状态或失败原因，并可重试或打开发布页面。手动查询会取消尚未展示的启动提醒；软件关闭时取消启动检查，后台网络等待不会阻碍退出。
 
 便携 EXE 可点击“下载并重启”。软件在后台下载新版，与 Release 的 `SHA256SUMS.txt` 和 GitHub 附件 SHA-256（若提供）核对；校验通过后关闭当前窗口，独立更新进程等待程序退出、备份原 EXE、替换并启动新版。新版成功显示窗口后确认启动；替换或启动失败自动恢复原程序并提示错误。下载期间可取消，校验失败不修改原 EXE。
 
@@ -208,7 +216,7 @@ EXE 所在目录需要可写。更新保留 AppData 内的 `LCSC3D-settings.json
 
 ## 构建与验证
 
-开发时无需发布即可测试更新：在源码仓库运行 `python scripts/local_update_test.py`，使用自动打开的隔离程序副本点击“设置 → 检查更新”→“下载并重启”；默认模拟 2.1.1 → 2.1.2，程序实际版本不修改。支持自动验证和校验失败场景，详见 [本地更新测试](../docs/本地更新测试.md)。普通启动仍从 GitHub 检查正式更新。
+开发时无需发布即可测试更新：在源码仓库运行 `python scripts/local_update_test.py`，使用自动打开的隔离程序副本点击“设置 → 关于与支持 → 检查更新”→“下载并重启”；默认模拟 2.1.1 → 2.1.2，程序实际版本不修改。支持自动验证和校验失败场景，详见 [本地更新测试](../docs/本地更新测试.md)。普通启动仍从 GitHub 检查正式更新。
 
 Windows x64、Python 3.12.10、PySide6 6.11.1、PyInstaller 6.20.0、urllib3 2.7.0。
 
@@ -219,4 +227,4 @@ python -m unittest discover -s app/tests -v
 .\app\build.ps1
 ```
 
-`app/build.ps1` 构建后将最新 EXE 同步到 `outputs/LCSC3D.exe`，构建中间结果为 `app/dist/LCSC3D.exe`。联网成品验证：`LCSC3D.exe --self-test .\verification` 检查现有模型和预览流程；`LCSC3D.exe --self-test-ad .\verification-ad` 检查 C2765186 的 APP 勾选及实际 SchLib/PcbLib 导出，并保存界面与报告。追加 `--self-test-ad-parts C20197,C2765186` 可指定多个验证器件。追加 `--self-test-ad-merge` 验证实际界面的两个合并开关和自定义名称。完整发行及实际 EXE 自更新验证流程见根目录 `CONTRIBUTING.md`。
+`app/build.ps1` 构建后将最新 EXE 同步到 `outputs/LCSC3D.exe`，构建中间结果为 `work/dist/LCSC3D.exe`。联网成品验证：`LCSC3D.exe --self-test .\verification` 检查现有模型和预览流程；`LCSC3D.exe --self-test-ad .\verification-ad` 检查 C2765186 的 APP 勾选及实际 SchLib/PcbLib 导出，并保存界面与报告。追加 `--self-test-ad-parts C20197,C2765186` 可指定多个验证器件。追加 `--self-test-ad-merge` 验证实际界面的两个合并开关和自定义名称。完整发行及实际 EXE 自更新验证流程见根目录 `CONTRIBUTING.md`。

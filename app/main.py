@@ -36,6 +36,7 @@ from app_logging import (configure_logging, log_event, set_log_level, record_err
 from settings_ui import SettingsDialog
 from export_targets import ExportTargetsDialog
 from product_preview import ProductPreview
+from ui_components import IconButton, title_block, surface, HelpDialog
 from international_store import storefront_url
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
@@ -57,12 +58,7 @@ def label(text, role=None):
 
 
 def card():
-    widget = QFrame()
-    widget.setObjectName('card')
-    layout = QVBoxLayout(widget)
-    layout.setContentsMargins(18, 16, 18, 16)
-    layout.setSpacing(12)
-    return widget, layout
+    return surface()
 
 
 class BatchWorker(QThread):
@@ -288,7 +284,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.update_source = update_source
         self.setWindowTitle(ui_text('LCSC3D（本地更新测试）') if update_source is not None else 'LCSC3D')
-        self.resize(1240, 850)
+        self.resize(1380, 880)
         self.setMinimumSize(1060, 740)
         self.setWindowIcon(QIcon(str(ROOT / 'assets' / 'app.ico')))
         self.settings_enabled = settings_enabled
@@ -358,35 +354,60 @@ class MainWindow(QMainWindow):
         self.content_scroll.setFrameShape(QFrame.NoFrame)
         self.content_scroll.setWidgetResizable(True)
         self.content_scroll.setWidget(canvas)
-        self.setCentralWidget(self.content_scroll)
-        layout = QVBoxLayout(canvas)
-        layout.setContentsMargins(24, 20, 24, 16)
-        layout.setSpacing(16)
-
-        heading = QHBoxLayout()
+        shell = QWidget()
+        shell_layout = QHBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+        self.navigation = QFrame()
+        self.navigation.setObjectName('navigation')
+        nav = QVBoxLayout(self.navigation)
+        nav.setContentsMargins(12, 24, 12, 16)
+        nav.setSpacing(8)
         logo = label('')
-        logo.setPixmap(QPixmap(str(ROOT / 'assets' / 'app.png')).scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        heading.addWidget(logo)
-        title_col = QVBoxLayout()
-        title_col.setSpacing(3)
-        title_col.addWidget(label('LCSC3D', 'title'))
-        title_col.addWidget(label(ui_text('批量下载 3D 模型，导出 AD 符号与封装库'), 'muted'))
-        heading.addLayout(title_col)
-        heading.addStretch()
-        heading.addWidget(label(ui_text('版本 ') + VERSION, 'badge'))
-        self.account_button = QPushButton(ui_text('账号登录'))
+        logo.setPixmap(QPixmap(str(ROOT / 'assets' / 'app.png')).scaled(44, 44, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        nav.addWidget(logo, 0, Qt.AlignHCenter)
+        brand = label('LCSC3D', 'section')
+        brand.setAlignment(Qt.AlignCenter)
+        nav.addWidget(brand)
+        nav.addSpacing(28)
+        self.workspace_button = IconButton(ui_text('工作台'), 'workspace', role='navButton')
+        self.workspace_button.setCheckable(True)
+        self.workspace_button.setChecked(True)
+        self.workspace_button.clicked.connect(lambda: self.workspace_button.setChecked(True))
+        self.market_button = IconButton(ui_text('立创商城'), 'store', role='navButton')
+        self.market_button.setToolTip(ui_text('搜索商品、查看原图、登录及管理账号收藏'))
+        self.market_button.clicked.connect(self.open_favorites)
+        nav.addWidget(self.workspace_button)
+        nav.addWidget(self.market_button)
+        nav.addStretch()
+        self.settings_button = IconButton(ui_text('设置'), 'settings', role='navButton')
+        self.settings_button.clicked.connect(self.open_settings)
+        self.help_button = IconButton(ui_text('使用说明'), 'help', role='navButton')
+        self.help_button.clicked.connect(self.show_help)
+        nav.addWidget(self.settings_button)
+        nav.addWidget(self.help_button)
+        version = label('v' + VERSION, 'muted')
+        version.setAlignment(Qt.AlignCenter)
+        nav.addSpacing(12)
+        nav.addWidget(version)
+        shell_layout.addWidget(self.navigation)
+        shell_layout.addWidget(self.content_scroll, 1)
+        self.setCentralWidget(shell)
+        layout = QVBoxLayout(canvas)
+        layout.setContentsMargins(24, 20, 24, 10)
+        layout.setSpacing(12)
+        heading = QHBoxLayout()
+        heading.addWidget(title_block(ui_text('元件工作台'), ui_text('从器件编号到 3D 模型与 AD 元件库'), large=True), 1)
+        self.account_button = IconButton(ui_text('账号登录'), 'user')
         self.account_button.setToolTip(ui_text('登录立创商城账号，支持记住登录'))
         self.account_button.clicked.connect(self.open_account)
         heading.addWidget(self.account_button)
-        self.settings_button = QPushButton(ui_text('设置'))
-        self.settings_button.clicked.connect(self.open_settings)
-        heading.addWidget(self.settings_button)
-        about = QPushButton(ui_text('使用说明'))
-        about.clicked.connect(self.show_help)
-        heading.addWidget(about)
         layout.addLayout(heading)
 
-        splitter = ColumnSplitter()
+        splitter = self.workspace_splitter = ColumnSplitter()
+        # Wrapped preview captions must not force QScrollArea to allocate the
+        # splitter's preferred height. Reserve only its actual child minimums.
+        splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         left_column = QWidget()
         left_layout = QVBoxLayout(left_column)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -395,13 +416,15 @@ class MainWindow(QMainWindow):
         input_card, input_layout = card()
         input_layout.setSpacing(8)
         input_head = QHBoxLayout()
-        input_head.addWidget(label(ui_text('1  输入器件编号'), 'section'))
+        input_head.addWidget(label(ui_text('添加器件'), 'section'))
         input_head.addStretch()
         sample = QPushButton(ui_text('填入示例'))
+        sample.setProperty('variant', 'text')
         sample.clicked.connect(lambda: self.input.setPlainText('C2040\nC20197\nC163691'))
         self.sample_button = sample
         input_head.addWidget(sample)
         clear = QPushButton(ui_text('清空'))
+        clear.setProperty('variant', 'text')
         clear.clicked.connect(lambda: self.input.clear())
         self.clear_button = clear
         input_head.addWidget(clear)
@@ -415,11 +438,7 @@ class MainWindow(QMainWindow):
         self.input_info = label(ui_text('输入立创商城 C 开头的器件编号'), 'muted')
         self.input_info.setWordWrap(True)
         count_row.addWidget(self.input_info, 1)
-        self.market_button = QPushButton(ui_text('立创商城'))
-        self.market_button.setToolTip(ui_text('搜索商品、查看原图、登录及管理账号收藏'))
-        self.market_button.clicked.connect(self.open_favorites)
-        count_row.addWidget(self.market_button)
-        self.queue_button = QPushButton(ui_text('载入列表'))
+        self.queue_button = IconButton(ui_text('载入列表'), 'add', role='primary')
         self.queue_button.clicked.connect(self.load_queue)
         count_row.addWidget(self.queue_button)
         input_layout.addLayout(count_row)
@@ -428,11 +447,11 @@ class MainWindow(QMainWindow):
         output_card, output_layout = card()
         output_layout.setSpacing(8)
         path_row = QHBoxLayout()
-        path_row.addWidget(label(ui_text('2  保存到'), 'section'))
+        path_row.addWidget(label(ui_text('导出设置'), 'section'))
         self.path_input = QLineEdit()
         self.path_input.setPlaceholderText(ui_text('选择资源保存目录'))
         path_row.addWidget(self.path_input, 1)
-        self.browse_button = QPushButton(ui_text('选择文件夹…'))
+        self.browse_button = IconButton(ui_text('选择文件夹…'), 'folder')
         self.browse_button.clicked.connect(self.choose_folder)
         path_row.addWidget(self.browse_button)
         open_button = QPushButton(ui_text('打开目录'))
@@ -466,9 +485,10 @@ class MainWindow(QMainWindow):
         self.stop_button = QPushButton(ui_text('停止'))
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_batch)
-        self.start_button = QPushButton(ui_text('开始下载'))
-        self.start_button.setObjectName('primary')
+        self.start_button = IconButton(ui_text('开始下载'), 'download', role='primary')
         self.start_button.clicked.connect(self.start_batch)
+        option_row.addWidget(self.stop_button)
+        option_row.addWidget(self.start_button)
         output_layout.addLayout(option_row)
         self.merge_schlib_box = QCheckBox(ui_text('合并 .SchLib'))
         self.merge_pcblib_box = QCheckBox(ui_text('合并 .PcbLib'))
@@ -512,17 +532,15 @@ class MainWindow(QMainWindow):
         self.lib_append_box.toggled.connect(lambda checked: self.change_library_mode('append', checked))
         self.lib_append_box.clicked.connect(self.append_clicked)
         self.update_merge_controls()
-        left_layout.addWidget(output_card)
+        self.export_card = output_card
 
         list_card, list_layout = card()
         list_layout.setSpacing(8)
         list_head = QHBoxLayout()
         list_head.addWidget(label(ui_text('下载列表'), 'section'))
         list_head.addStretch()
-        self.summary = label(ui_text('0 个器件'), 'muted')
+        self.summary = label(ui_text('0 个器件'), 'badge')
         list_head.addWidget(self.summary)
-        list_head.addWidget(self.stop_button)
-        list_head.addWidget(self.start_button)
         list_layout.addLayout(list_head)
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels([ui_text('下载'), ui_text('器件编号'), ui_text('型号 / 模型'), ui_text('结果')])
@@ -533,7 +551,8 @@ class MainWindow(QMainWindow):
         self.table.setWordWrap(False)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(40)
-        self.table.setMinimumHeight(112)
+        self.table.setMinimumHeight(128)
+        self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setSectionResizeMode(DOWNLOAD_COLUMN, QHeaderView.Fixed)
         self.table.setColumnWidth(DOWNLOAD_COLUMN, 56)
         self.table.horizontalHeader().setSectionResizeMode(PART_COLUMN, QHeaderView.Fixed)
@@ -567,18 +586,23 @@ class MainWindow(QMainWindow):
         self.invert_selection_button.clicked.connect(self.invert_download_selection)
         list_actions.addWidget(self.invert_selection_button)
         self.remove_checked_button = QPushButton(ui_text('删除已勾选器件'))
+        self.remove_checked_button.setProperty('variant', 'danger')
         self.remove_checked_button.setEnabled(False)
         self.remove_checked_button.setToolTip(ui_text('从下载列表及输入框移除勾选器件，保留已下载文件'))
         self.remove_checked_button.clicked.connect(self.remove_checked_downloads)
         list_actions.addWidget(self.remove_checked_button)
         self.selection_summary = label(ui_text('已勾选 0 / 0'), 'muted')
-        list_actions.addWidget(self.selection_summary)
+
         list_actions.addStretch()
         self.part_folder_button = QPushButton(ui_text('打开器件目录'))
         self.part_folder_button.clicked.connect(self.open_part_folder)
         self.part_folder_button.setEnabled(False)
-        list_actions.addWidget(self.part_folder_button)
-        list_layout.addLayout(list_actions)
+        list_layout.insertLayout(1, list_actions)
+        list_footer = QHBoxLayout()
+        list_footer.addWidget(self.selection_summary)
+        list_footer.addStretch()
+        list_footer.addWidget(self.part_folder_button)
+        list_layout.addLayout(list_footer)
         left_layout.addWidget(list_card, 1)
         splitter.addWidget(left_column)
 
@@ -599,12 +623,12 @@ class MainWindow(QMainWindow):
             self.preview_mode_group.addButton(button)
             self.preview_mode_buttons[mode] = button
             preview_modes.addWidget(button)
-        preview_modes.addStretch()
+
         self.symbol_unit_box = QComboBox()
         self.symbol_unit_box.setToolTip(ui_text('选择符号单元'))
         self.symbol_unit_box.currentIndexChanged.connect(self.show_symbol_unit)
         self.symbol_unit_box.hide()
-        preview_modes.addWidget(self.symbol_unit_box)
+        preview_head.addWidget(self.symbol_unit_box)
         preview_layout.addLayout(preview_modes)
         self.preview_caption = label(ui_text('选择左侧列表中的器件'), 'muted')
         self.preview_caption.setWordWrap(True)
@@ -651,7 +675,7 @@ class MainWindow(QMainWindow):
         self.preview_status.setWordWrap(True)
         preview_layout.addWidget(self.preview_status)
         preview_actions = QHBoxLayout()
-        self.reload_button = QPushButton(ui_text('重新加载'))
+        self.reload_button = IconButton(ui_text('重新加载'), 'refresh')
         self.reload_button.setEnabled(False)
         self.reload_button.clicked.connect(lambda: self.show_preview(self.current_preview, reload=True))
         preview_actions.addWidget(self.reload_button)
@@ -666,9 +690,12 @@ class MainWindow(QMainWindow):
         preview_actions.addWidget(self.store_button)
         preview_layout.addLayout(preview_actions)
         splitter.addWidget(preview_card)
-        splitter.setSizes([670, 470])
+        splitter.setSizes([560, 590])
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
         splitter.setChildrenCollapsible(False)
         layout.addWidget(splitter, 1)
+        layout.addWidget(output_card)
 
         footer = QHBoxLayout()
         footer.addWidget(label(ui_text('官方资源下载 · AGPL-3.0'), 'muted'))
@@ -767,7 +794,7 @@ class MainWindow(QMainWindow):
         tokens = theme_manager().tokens
         scale = tokens['font_size'] / 13
         self.input.setFixedHeight(max(76, self.input.fontMetrics().lineSpacing() * 2 + 22))
-        self.table.verticalHeader().setDefaultSectionSize(round(40 * scale))
+        self.table.verticalHeader().setDefaultSectionSize(max(round(40 * scale), self.table.fontMetrics().height() + 14))
         for row, part in enumerate(self.ids):
             item = self.table.item(row, RESULT_COLUMN)
             if item is not None:
@@ -781,6 +808,7 @@ class MainWindow(QMainWindow):
         if self.web is not None:
             self.web.page().setBackgroundColor(QColor(tokens['field']))
             self.update_viewer_appearance()
+        self.export_layout_timer.start(0)
         self.update()
 
     def update_viewer_appearance(self):
@@ -1257,6 +1285,8 @@ class MainWindow(QMainWindow):
 
     def adjust_export_layout(self):
         # Reflow the canvas inside its scroll area when merge controls appear.
+        self.workspace_splitter.setMinimumHeight(0)
+        self.workspace_splitter.setMinimumHeight(self.workspace_splitter.minimumSizeHint().height())
         self.content_scroll.widget().layout().activate()
         self.setMinimumHeight(max(740, self.minimumSizeHint().height()))
 
@@ -1744,9 +1774,8 @@ class MainWindow(QMainWindow):
             log_event('INFO' if opened else 'WARNING', 'navigation.export_folder_result', opened=opened)
 
     def show_help(self):
-        message = QMessageBox(self)
+        message = HelpDialog(self)
         message.setWindowTitle(ui_text('使用说明与来源'))
-        message.setTextFormat(Qt.RichText)
         message.setText(ui_text('<b>LCSC3D</b><br>版本：') + VERSION + ui_text('<br><br>'
             '1. 输入 C 开头的立创编号，支持换行、空格和逗号。<br>'
             '2. 载入列表后自动查询型号，勾选需要下载的器件；可使用「全选」「反选」「删除已勾选器件」。删除只移除列表记录，保留已下载文件。<br>'
@@ -1760,7 +1789,7 @@ class MainWindow(QMainWindow):
             '搜索结果和账号收藏均可勾选加入下载列表，保留已有勾选与下载结果。'
             '商城元件默认不勾选；预览当前高亮行会将主窗口置于前台，商城窗口保持打开。'
             '默认记住登录，重启后自动恢复；取消勾选时只保留本次登录。「退出登录」可清除已保存会话。<br><br>'
-            '顶部「设置」可分别选择商城与检查更新是否使用系统代理，并调整日志等级；默认 Debug。「打开日志」可打开日志目录。<br><br>'
+            '左侧「设置」可分别选择商城与检查更新是否使用系统代理，并调整日志等级；默认 Debug。「打开日志」可打开日志目录。<br><br>'
             '可保存官方 STEP、OBJ，并导出原生 AD SchLib 符号库、PcbLib 封装库；不导出 JSON 或 SVG。<br>'
             'SchLib / PcbLib 可分别勾选合并并自定义库名，合并文件保存在所选目录根部；默认逐器件导出。<br>'
             'Lib「合并」「追加」互斥，勾选后显示配置。未勾选「独立导出器件」时，3D 文件集中到 SchLib 旁的“库名_3D”文件夹；仅有 PcbLib 时跟随其名称。<br>'
@@ -1773,7 +1802,7 @@ class MainWindow(QMainWindow):
             '商品图片展示商城原图，可切换多张图片、缩放与拖动。<br>'
             '符号和封装直接加载商城使用的官方 SVG，支持滚轮缩放、拖动平移及「适应窗口」；多单元符号可选择单元。<br><br>'
             '启动后自动后台检查新版，发现新版时提醒；连接失败或已是最新版时不弹窗。'
-            '也可点击「设置 → 检查更新」手动查询；便携 EXE 支持下载、SHA-256 校验并重启更新。<br>'
+            '也可点击「设置 → 关于与支持 → 检查更新」手动查询；便携 EXE 支持下载、SHA-256 校验并重启更新。<br>'
             '模型来源：<a href="https://lceda.cn/">JLCEDA</a> / <a href="https://easyeda.com/">EasyEDA 官方库</a>。<br>'
             '资源下载与本地 3D 预览由本项目实现，软件采用 AGPL-3.0-or-later。<br>'
             '对应源码、构建脚本与第三方说明随交付提供。'))
@@ -1881,6 +1910,7 @@ def main():
     parser.add_argument('--self-test-settings', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-export', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--capture-docs', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-material', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--update-ack', metavar='PLAN', help=argparse.SUPPRESS)
     parser.add_argument('--local-update-source', metavar='URL', help=ui_text('仅测试：本机 HTTP 更新源（http://127.0.0.1:端口）'))
     parser.add_argument('--local-update-current-version', metavar='VERSION', help=ui_text('仅测试：模拟版本比较的当前版本'))
@@ -1911,7 +1941,7 @@ def main():
     logging.getLogger().setLevel(logging.ERROR)
     test_destination = next((value for value in (args.self_test, args.self_test_ad, args.self_test_favorites,
                                                   args.self_test_store_live, args.self_test_settings,
-                                                  args.self_test_export, args.capture_docs) if value), None)
+                                                  args.self_test_export, args.capture_docs, args.self_test_material) if value), None)
     configure_logging('DEBUG' if test_destination else initial_log_level(SETTINGS_PATH), version=VERSION,
                       directory=Path(test_destination) / 'logs' if test_destination else None)
     install_exception_hooks()
@@ -1930,6 +1960,10 @@ def main():
     if args.self_test_settings:
         from settings_selftest import start
         start(window, args.self_test_settings)
+        return app.exec()
+    if args.self_test_material:
+        from material_selftest import start
+        start(window, args.self_test_material)
         return app.exec()
     if args.self_test_export:
         from export_selftest import start

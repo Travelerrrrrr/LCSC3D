@@ -214,6 +214,8 @@ def start(window, destination):
             verify_font_popup(dialog, 'light')
             assert dialog.grab().save(str(destination / '设置.png'))
             assert window.grab().save(str(destination / '主窗口.png'))
+            dialog.section_buttons[3].click()
+            assert dialog.star_button.isVisible() and dialog.sponsor_button.isVisible()
             dialog.star_button.click()
             assert report['opened_repository'] == 'https://github.com/Travelerrrrrr/LCSC3D'
             dialog.store_proxy_combo.setCurrentIndex(1)
@@ -237,6 +239,7 @@ def start(window, destination):
             report['support_preserves_unsaved_preferences'] = True
             from app_theme import theme_manager
             manager = theme_manager()
+            dialog.section_buttons[0].click()
             original_path_text = window.path_input.text()
             def choose_custom_color():
                 picker = QApplication.activeModalWidget()
@@ -408,6 +411,7 @@ def start(window, destination):
                 (get_log_directory() / name).write_text('synthetic diagnostic\n', encoding='utf-8')
             window.settings_button.click()
             dialog = window.settings_dialog
+            dialog.section_buttons[2].click()
             assert dialog.package_log_button.isVisible() and dialog.clear_log_button.isVisible()
             dialog.package_log_button.click()
             assert not dialog.clear_log_button.isEnabled()

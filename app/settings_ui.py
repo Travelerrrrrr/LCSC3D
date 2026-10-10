@@ -5,7 +5,7 @@ import sys
 
 from PySide6.QtCore import Qt, QUrl, QThread
 from PySide6.QtGui import QColor, QDesktopServices, QPixmap, QIcon, QFont, QFontDatabase
-from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QColorDialog, QSpinBox, QAbstractSpinBox,
+from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QColorDialog, QSpinBox, QAbstractSpinBox, QStackedWidget, QButtonGroup, QFrame,
                                QComboBox as NativeComboBox)
 from localized_widgets import (QComboBox, QDialog, QFormLayout, QGroupBox, QLabel, QPushButton, QMessageBox)
 
@@ -13,6 +13,7 @@ from app_settings import (LOG_LEVELS, PROXY_OPTIONS, Preferences, LANGUAGES,
                           THEME_MODES, ACCENT_COLORS, DEFAULT_ACCENT, DEFAULT_FONT_FAMILY,
                           DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE)
 from app_theme import effective_font_family, foreground
+from ui_components import IconButton, title_block, scroll_page
 from app_logging import (get_log_directory, log_event, record_error, logging_health,
                          contextual, new_context)
 from log_support import package_logs, clear_logs
@@ -107,19 +108,42 @@ class SettingsDialog(QDialog):
         self.sponsorship_dialog = None
         self.setWindowTitle(ui_text('设置'))
         self.setWindowModality(Qt.WindowModal)
-        self.setMinimumWidth(570)
-        self.resize(640, min(810, self.screen().availableGeometry().height() - 60))
+        self.setMinimumSize(680, 480)
+        self.resize(900, min(800, self.screen().availableGeometry().height() - 60))
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 14, 18, 14)
-        content = QWidget()
-        sections = QVBoxLayout(content)
-        sections.setContentsMargins(4, 4, 12, 4)
-        sections.setSpacing(14)
-        self.scroll = QScrollArea()
-        self.scroll.setFrameShape(QScrollArea.NoFrame)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setWidget(content)
-        layout.addWidget(self.scroll, 1)
+        layout.setContentsMargins(24, 22, 24, 18)
+        layout.setSpacing(18)
+        layout.addWidget(title_block(ui_text('设置'), ui_text('让工作台适合你的使用习惯'), large=True))
+        body = QHBoxLayout()
+        body.setSpacing(20)
+        navigation = QVBoxLayout()
+        navigation.setSpacing(6)
+        self.pages = QStackedWidget()
+        self.section_buttons = []
+        self.section_group = QButtonGroup(self)
+        page_layouts = []
+        for index, (title, symbol) in enumerate(((ui_text('外观'), 'workspace'), (ui_text('网络'), 'store'),
+                                                 (ui_text('日志与诊断'), 'settings'), (ui_text('关于与支持'), 'help'))):
+            button = IconButton(title, symbol, role='navButton')
+            button.setCheckable(True)
+            button.setChecked(index == 0)
+            button.clicked.connect(lambda checked=False, page=index: self.pages.setCurrentIndex(page))
+            self.section_group.addButton(button)
+            self.section_buttons.append(button)
+            navigation.addWidget(button)
+            content = QWidget()
+            sections = QVBoxLayout(content)
+            sections.setContentsMargins(2, 0, 10, 4)
+            sections.setSpacing(18)
+            page = scroll_page(content)
+            self.pages.addWidget(page)
+            page_layouts.append(sections)
+            if index == 0:
+                self.scroll = page
+        navigation.addStretch()
+        body.addLayout(navigation)
+        body.addWidget(self.pages, 1)
+        layout.addLayout(body, 1)
 
         theme_group = QGroupBox(ui_text('主题设置'))
         theme_form = QFormLayout(theme_group)
@@ -178,7 +202,8 @@ class SettingsDialog(QDialog):
         self.font_combo.setMinimumContentsLength(18)
         self.font_combo.setMaxVisibleItems(8)
         self.font_combo.setStyleSheet('QComboBox { combobox-popup: 0; } '
-                                     'QComboBox QAbstractItemView::item { min-height: 24px; }')
+                                     'QComboBox QAbstractItemView { padding:0; } '
+                                     'QComboBox QAbstractItemView::item { min-height:24px; padding:0 4px; margin:0; }')
         self.font_combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.font_combo.setCurrentText(effective_font_family(preferences.font_family))
         self.reset_font_button = QPushButton(ui_text('恢复默认'))
@@ -224,7 +249,7 @@ class SettingsDialog(QDialog):
         theme_hint.setObjectName('muted')
         theme_hint.setWordWrap(True)
         theme_form.addRow(theme_hint)
-        sections.addWidget(theme_group)
+        page_layouts[0].addWidget(theme_group)
 
         update_group = QGroupBox(ui_text('软件更新'))
         update_layout = QHBoxLayout(update_group)
@@ -237,7 +262,7 @@ class SettingsDialog(QDialog):
         self.update_button.setToolTip(ui_text('使用已保存的更新代理设置检查新版本'))
         self.update_button.clicked.connect(parent.check_updates)
         update_layout.addWidget(self.update_button)
-        sections.addWidget(update_group)
+        page_layouts[3].addWidget(update_group)
 
         proxy_group = QGroupBox(ui_text('代理设置'))
         proxy_form = QFormLayout(proxy_group)
@@ -250,7 +275,7 @@ class SettingsDialog(QDialog):
         hint = QLabel(ui_text('两项独立生效，保存后用于后续请求。'))
         hint.setObjectName('muted')
         proxy_form.addRow(hint)
-        sections.addWidget(proxy_group)
+        page_layouts[1].addWidget(proxy_group)
 
         log_group = QGroupBox(ui_text('日志'))
         log_form = QFormLayout(log_group)
@@ -275,23 +300,29 @@ class SettingsDialog(QDialog):
             button.setAutoDefault(False)
             log_buttons.addWidget(button)
         log_form.addRow(log_buttons)
-        sections.addWidget(log_group)
+        page_layouts[2].addWidget(log_group)
 
         support_group = QGroupBox(ui_text('赞助与支持'))
         support_layout = QHBoxLayout(support_group)
         support_layout.setContentsMargins(16, 22, 16, 16)
         support_layout.setSpacing(12)
-        self.star_button = QPushButton(ui_text('⭐点个Star⭐'))
+        self.star_button = IconButton(ui_text('项目主页'), 'store')
         self.star_button.setToolTip(ui_text('在浏览器中打开 LCSC3D 仓库首页'))
         self.star_button.clicked.connect(self.open_repository)
-        self.sponsor_button = QPushButton(ui_text('🍔赞助作者🍔'))
+        self.sponsor_button = IconButton(ui_text('赞助作者'), 'user')
         self.sponsor_button.setToolTip(ui_text('查看支付宝与微信收款码'))
         self.sponsor_button.clicked.connect(self.show_sponsorship)
         for button in (self.star_button, self.sponsor_button):
             button.setAutoDefault(False)
             support_layout.addWidget(button)
-        sections.addWidget(support_group)
-        sections.addStretch()
+        page_layouts[3].addWidget(support_group)
+        credit = QLabel('LCSC3D · AGPL-3.0<br>UI: <a href="https://github.com/UN-GCPDS/qt-material">UN-GCPDS / qt-material</a> · BSD-2-Clause')
+        credit.setObjectName('muted')
+        credit.setOpenExternalLinks(True)
+        credit.setWordWrap(True)
+        page_layouts[3].addWidget(credit)
+        for page_layout in page_layouts:
+            page_layout.addStretch()
 
         self.status = QLabel('')
         self.status.setTextFormat(Qt.PlainText)
@@ -344,8 +375,9 @@ class SettingsDialog(QDialog):
         font.setPixelSize(self.font_size_spin.value())
         self.color_preview.setFont(font)
         self.color_preview.setText(ui_text('配色与字体预览 · ') + 'LCSC3D Aa 123 · ' + value.upper())
-        self.color_preview.setStyleSheet(ui_message('background:{0};color:{1};font-size:{2}px;padding:7px;border-radius:6px;',
-                                                    value, text_color, self.font_size_spin.value()))
+        family = self.font_combo.currentText().replace('\\', '\\\\').replace('"', '\\"')
+        self.color_preview.setStyleSheet(ui_message('background:{0};color:{1};font-size:{2}px;padding:7px;border-radius:6px;font-family:"{3}";',
+                                                    value, text_color, self.font_size_spin.value(), family))
 
     def open_repository(self):
         if QDesktopServices.openUrl(QUrl(REPOSITORY_URL)):

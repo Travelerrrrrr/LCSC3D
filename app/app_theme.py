@@ -1,10 +1,55 @@
-"""Application palette, accent colors and live system appearance updates."""
+"""Qt Material themes, accessible application tokens and live appearance updates."""
+import hashlib
+import json
+import tempfile
 from pathlib import Path
+from xml.sax.saxutils import escape
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QColor, QPalette, QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
 from app_settings import Preferences, DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
+from app_paths import data_directory
+
+
+def material_stylesheet(c):
+    """Build upstream Qt Material with all generated assets in local app data.
+
+    Each palette gets immutable assets so two running copies cannot remove one
+    another's icons. Absolute URLs also avoid Qt's global icon search path
+    selecting icons left over from a previously applied palette.
+    """
+    from qt_material import build_stylesheet
+    theme = dict(primaryColor=c['accent'], primaryLightColor=c['accent_hover'],
+                 secondaryColor=c['field'], secondaryLightColor=c['border'],
+                 secondaryDarkColor=c['surface'], primaryTextColor=c['text'],
+                 secondaryTextColor=c['text'])
+    extra = dict(font_family=c['font_family'], font_size=c['font_size'],
+                 density_scale='0', danger=c['error'], warning=c['warning'], success=c['success'])
+    key = hashlib.sha256(json.dumps([theme, extra], sort_keys=True).encode()).hexdigest()[:20]
+    root = data_directory() / 'cache' / 'qt-material-2.17'
+    root.mkdir(parents=True, exist_ok=True)
+    cache = root / key
+    qss = cache / 'material.qss'
+    if qss.is_file():
+        return qss.read_text(encoding='utf-8')
+    with tempfile.TemporaryDirectory(prefix='build-', dir=root) as directory:
+        stage = Path(directory) / key
+        stage.mkdir()
+        xml = stage / 'theme.xml'
+        xml.write_text('<resources>' + ''.join(
+            f'<color name="{name}">{escape(value)}</color>' for name, value in theme.items()) + '</resources>', encoding='utf-8')
+        # Upstream's explicit-output prefix is a leading dot, followed by the
+        # full path. export=True skips Roboto in favor of the chosen system font.
+        result = build_stylesheet(str(xml), extra=extra, parent='.' + str(stage / 'icons'), export=True)
+        result = result.replace('icon:/', (cache / 'icons').as_posix() + '/')
+        (stage / 'material.qss').write_text(result, encoding='utf-8')
+        try:
+            stage.rename(cache)
+        except FileExistsError:
+            # Another process completed the same immutable palette first.
+            return qss.read_text(encoding='utf-8')
+    return result
 
 
 def luminance(color):
@@ -63,63 +108,20 @@ def stylesheet(c):
         c[state + '_color'] = foreground(background)
         c[state + '_image'] = (assets / ('check-' + mark + '.svg')).as_posix()
         c[state + '_partial_image'] = (assets / ('partial-' + mark + '.svg')).as_posix()
-    return '''
-QWidget { font-size:%(font_size)spx; color:%(text)s; }
-QMainWindow, QDialog, QWidget#canvas, QScrollArea, QScrollArea > QWidget > QWidget { background:%(bg)s; }
-QFrame#card { background:%(surface)s; border:1px solid %(border)s; border-radius:12px; }
-QLabel#title { font-size:%(title_font_size)spx; font-weight:700; }
-QLabel#section { font-size:%(section_font_size)spx; font-weight:700; }
-QLabel#muted, QLabel#previewHint { color:%(muted)s; font-size:%(small_font_size)spx; }
-QLabel#badge { color:%(accent_ink)s; background:%(surface)s; padding:5px 10px; border-radius:6px; font-weight:600; }
-QLineEdit, QPlainTextEdit { background:%(field)s; border:1px solid %(border)s; border-radius:7px; padding:9px; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
-QLineEdit:focus, QPlainTextEdit:focus { border:1px solid %(accent_ink)s; }
-QLineEdit:disabled { color:%(disabled)s; background:%(bg)s; }
-QPushButton { background:%(surface)s; border:1px solid %(border)s; border-radius:7px; padding:8px 13px; }
-QPushButton:hover { background:%(hover)s; border-color:%(accent_ink)s; }
-QPushButton:pressed { background:%(bg)s; }
-QPushButton:disabled { color:%(disabled)s; background:%(bg)s; border-color:%(border)s; }
-QPushButton#primary { background:%(accent)s; color:%(on_accent)s; border:1px solid %(accent)s; font-weight:600; }
-QPushButton#primary:hover { background:%(accent_hover)s; color:%(on_accent_hover)s; }
-QPushButton#primary:disabled { background:%(hover)s; color:%(disabled)s; border-color:%(border)s; }
-QPushButton#previewMode:checked { background:%(accent)s; color:%(on_accent)s; border-color:%(accent)s; font-weight:600; }
-QComboBox { border:1px solid %(border)s; border-radius:5px; padding:5px; background:%(surface)s; }
-QSpinBox { border:1px solid %(border)s; border-radius:5px; padding:5px; background:%(field)s; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
-QComboBox QAbstractItemView, QListWidget, QMenu { background:%(surface)s; color:%(text)s; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
-QMenu::item { padding:7px 18px; }
-QMenu::item:selected { background:%(accent)s; color:%(on_accent)s; }
-QGroupBox { background:%(surface)s; border:1px solid %(border)s; border-radius:9px; margin-top:10px; font-weight:600; }
-QGroupBox::title { subcontrol-origin:margin; left:14px; padding:0 5px; }
-QTabWidget::pane { background:%(surface)s; border:1px solid %(border)s; border-radius:7px; }
-QTabBar::tab { background:%(bg)s; padding:9px 18px; border:1px solid %(border)s; border-bottom:0; }
-QTabBar::tab:selected { background:%(accent)s; color:%(on_accent)s; font-weight:600; }
-QCheckBox { spacing:6px; }
-QCheckBox::indicator, QTableView::indicator, QListView::indicator { width:%(indicator_size)spx; height:%(indicator_size)spx; border:2px solid %(control_border)s; border-radius:3px; background:%(field)s; }
-QCheckBox::indicator:hover, QTableView::indicator:hover, QListView::indicator:hover { border-color:%(accent_ink)s; }
-QCheckBox::indicator:checked, QTableView::indicator:checked, QListView::indicator:checked { border-color:%(check_color)s; background:%(accent)s; image:url("%(check_image)s"); }
-QCheckBox::indicator:indeterminate, QTableView::indicator:indeterminate, QListView::indicator:indeterminate { border-color:%(check_color)s; background:%(accent)s; image:url("%(check_partial_image)s"); }
-QCheckBox::indicator:disabled, QTableView::indicator:disabled, QListView::indicator:disabled { border-color:%(disabled)s; background:%(bg)s; }
-QCheckBox::indicator:checked:disabled, QTableView::indicator:checked:disabled, QListView::indicator:checked:disabled { background:%(disabled)s; image:url("%(disabled_check_image)s"); }
-QCheckBox::indicator:indeterminate:disabled, QTableView::indicator:indeterminate:disabled, QListView::indicator:indeterminate:disabled { background:%(disabled)s; image:url("%(disabled_check_partial_image)s"); }
-QTableWidget { background:%(surface)s; alternate-background-color:%(field)s; border:1px solid %(border)s; border-radius:7px; gridline-color:%(border)s; outline:0; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
-QTableWidget::item { padding:5px; border-bottom:1px solid %(border)s; }
-QHeaderView::section { background:%(field)s; color:%(muted)s; border:0; border-bottom:1px solid %(border)s; padding:9px; font-weight:600; }
-QTableCornerButton::section { background:%(field)s; border:0; }
-QProgressBar { border:0; background:%(hover)s; border-radius:4px; height:8px; text-align:center; }
-QProgressBar::chunk { background:%(accent)s; border-radius:4px; }
-QScrollBar:vertical { background:%(bg)s; width:9px; border-radius:4px; }
-QScrollBar::handle:vertical { background:%(border)s; border-radius:4px; min-height:26px; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
-QScrollBar:horizontal { background:%(bg)s; height:9px; }
-QScrollBar::handle:horizontal { background:%(border)s; min-width:26px; }
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width:0; }
-QToolTip { background:%(surface)s; color:%(text)s; border:1px solid %(border)s; padding:5px; }
-QFrame#previewEmpty, QGraphicsView#photoCanvas { background:%(field)s; border:1px solid %(border)s; border-radius:8px; }
-QLabel#previewCube { font-size:64px; color:%(muted)s; }
-QLabel#previewStatus { color:%(muted)s; }
-QLabel#previewStatus[state="error"] { color:%(error)s; }
-QLabel#previewStatus[state="ready"] { color:%(success)s; }
-QLabel#productImage { background:%(surface)s; border:1px solid %(border)s; border-radius:8px; }
-''' % c
+    c['control_height'] = max(20, round(c['font_size'] * 1.5))
+    result = (assets / 'material-overrides.qss').read_text(encoding='utf-8') % c
+    # Upstream supplies selected/focused table indicators with more specific
+    # selectors. Cover those combinations so high contrast ticks also survive
+    # a selected row, keyboard focus and disabled download controls.
+    for state, image_key in (('unchecked', None), ('checked', 'image'), ('indeterminate', 'partial_image')):
+        for enabled in ('enabled', 'disabled'):
+            prefix = 'disabled_check' if enabled == 'disabled' else 'check'
+            image = 'none' if image_key is None else 'url("' + c[prefix + '_' + image_key] + '")'
+            selectors = [f'{widget}::indicator:{state}:{enabled}{selected}{focus}{active}'
+                         for widget in ('QCheckBox', 'QTableView', 'QTableWidget', 'QListView')
+                         for selected in ('', ':selected') for focus in ('', ':focus') for active in ('', ':active')]
+            result += '\n' + ', '.join(selectors) + ' { image:' + image + '; }'
+    return result
 
 
 class ThemeManager(QObject):
@@ -145,7 +147,7 @@ class ThemeManager(QObject):
         c = colors(self.dark, preferences.accent_color, preferences.accent_text_color)
         c['font_family'] = effective_font_family(preferences.font_family)
         c.update(typography(preferences.font_size))
-        if self.applied and c == self.tokens:
+        if self.applied and c == self.tokens and self.app.styleSheet() == self._stylesheet:
             self.changed.emit()
             return
         self.tokens = c
@@ -162,8 +164,9 @@ class ThemeManager(QObject):
             palette.setColor(getattr(QPalette.ColorRole, role), QColor(c[token]))
         for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
             palette.setColor(QPalette.Disabled, role, QColor(c['disabled']))
+        self._stylesheet = material_stylesheet(c) + '\n' + stylesheet(c)
         self.app.setPalette(palette)
-        self.app.setStyleSheet(stylesheet(c))
+        self.app.setStyleSheet(self._stylesheet)
         self.changed.emit()
 
 

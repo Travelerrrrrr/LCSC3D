@@ -4,10 +4,11 @@ from __future__ import annotations
 from i18n import text as ui_text, message as ui_message
 from PySide6.QtCore import Qt, QTimer, QSize, Signal
 from PySide6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut
-from PySide6.QtWidgets import (QGraphicsScene, QGraphicsView, QHBoxLayout, QListWidget, QListWidgetItem, QVBoxLayout)
+from PySide6.QtWidgets import (QGraphicsScene, QGraphicsView, QHBoxLayout, QListWidget, QListWidgetItem, QVBoxLayout, QSplitter)
 from localized_widgets import (QDialog, QLabel, QPushButton)
 
 from errors import Cancelled
+from ui_components import title_block
 from store import StoreError, check_cancelled
 from app_logging import traced, log_event, record_error, safe_part
 
@@ -127,9 +128,12 @@ class ImageGallery(QDialog):
         self.jobs.idle.connect(self.activity_finished)
         self.cache = {}
         self.setWindowTitle(ui_message('商品原图 · {0} · {1}', self.part, product.get('title', '')))
-        self.resize(960, 790)
+        self.resize(1080, 780)
         self.setMinimumSize(600, 460)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 18)
+        layout.setSpacing(16)
+        layout.addWidget(title_block(product.get('title') or self.part, self.part, large=True))
         controls = QHBoxLayout()
         self.previous = QPushButton(ui_text('上一张'))
         self.previous.clicked.connect(lambda: self.select_offset(-1))
@@ -148,27 +152,37 @@ class ImageGallery(QDialog):
             controls.addWidget(button)
         self.scale_label = QLabel('')
         controls.addWidget(self.scale_label)
-        layout.addLayout(controls)
         self.view = PhotoView()
         self.view.zoom_changed.connect(lambda value: self.scale_label.setText(ui_message('{0:.0f}%', value * 100)))
         self.minus.clicked.connect(lambda: self.view.set_zoom(self.view.zoom / 1.25))
         self.plus.clicked.connect(lambda: self.view.set_zoom(self.view.zoom * 1.25))
         self.actual.clicked.connect(lambda: self.view.set_zoom(1))
         self.fit.clicked.connect(self.view.fit_photo)
-        layout.addWidget(self.view, 1)
+        self.gallery_splitter = QSplitter(Qt.Horizontal)
+        self.gallery_splitter.setChildrenCollapsible(False)
+        self.gallery_splitter.setHandleWidth(12)
         self.thumbnails = QListWidget()
-        self.thumbnails.setFlow(QListWidget.LeftToRight)
+        self.thumbnails.setObjectName('thumbnailStrip')
+        self.thumbnails.setFlow(QListWidget.TopToBottom)
         self.thumbnails.setWrapping(False)
         self.thumbnails.setIconSize(QSize(76, 76))
-        self.thumbnails.setFixedHeight(112)
+        self.thumbnails.setMinimumWidth(128)
+        self.thumbnails.setMaximumWidth(160)
         for index, _ in enumerate(self.urls):
             item = QListWidgetItem(ui_message('{0}', index + 1))
             item.setTextAlignment(Qt.AlignCenter)
             item.setSizeHint(QSize(96, 92))
             self.thumbnails.addItem(item)
         self.thumbnails.currentRowChanged.connect(self.load_image)
-        layout.addWidget(self.thumbnails)
+        self.gallery_splitter.addWidget(self.thumbnails)
+        self.gallery_splitter.addWidget(self.view)
+        self.gallery_splitter.setStretchFactor(1, 1)
+        self.gallery_splitter.setSizes([144, 900])
+        layout.addWidget(self.gallery_splitter, 1)
+        layout.addLayout(controls)
         self.status = QLabel(ui_text('点击缩略图切换 · 滚轮缩放 · 拖动平移 · 双击适应窗口'))
+        self.status.setObjectName('muted')
+        self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.PlainText)
         layout.addWidget(self.status)
         self.shortcuts = []

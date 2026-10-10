@@ -21,15 +21,21 @@ AD 导出回归也需要 Windows，以 `olefile` 独立读取 CFB 并核对引�
 
 不要提交个人设置、日志、Python 环境、构建文件或下载的模型。官方测试样本应保留来源声明，第三方代码及资源应保留相应许可证。
 
+Material UI 使用 `qt-material==2.17`，公共控件在 `app/ui_components.py`，应用样式覆盖在 `app/assets/material-overrides.qss`。`ThemeManager` 从上游模板生成样式，将图标按配色缓存到 AppData；不要直接调用默认写入用户主目录的主题导出接口。修改主题后运行 `test_theme.py`、`test_material_ui.py` 及相关窗口回归。
+
+`LCSC3D.exe --self-test-material <隔离目录>` 离线捕获明暗工作台、最小窗口/24px 英文界面、四个设置分类、三种空白登录表单、追加和帮助窗口，并验证官方符号/封装预览。提前把 `C2040_svgs.json` 和 `C20197_svgs.json` 放入该目录的 `fixtures/`，设置隔离的 `LOCALAPPDATA`。它不恢复会话、不请求二维码、不访问商城网络，输出 `material-verification.json` 和 PNG。
+
+`app/.venv/Scripts/python.exe scripts/verify_bundle.py --exe outputs/LCSC3D.exe --source-zip outputs/LCSC3D.zip` 逐一比较成品中的应用模块、界面资源、许可证和源码 ZIP，核对 Qt Material 模板和 SVG 已打包；不运行 EXE、不访问用户设置。
+
 ## 构建与验证
 
 Lib 模式专项回归为 `test_export_modes.py`，包含 136 组导出组合与界面、故障保护检查。`test_export_integrity.py` 另覆盖 16 组共享封装合并/追加组合、原始 NONE 填充、同名异构、配套引用和无器件编号的 Lib 名称。冻结程序使用 `LCSC3D.exe --self-test-export <隔离目录>`：预先将 `app/tests/fixtures/` 中的 C2040、C20197、C2765186、C23922、C8734 JSON 复制到该目录的 `fixtures/`，并设置隔离 `LOCALAPPDATA`。此入口用固定离线资源执行 13 个实际按钮、合并、追加、工程和空列表流程，输出 `export-verification.json` 和截图；公开网络模型及预览另用便携验证覆盖。
 
-运行 `app/build.ps1`，结果为 `app/dist/LCSC3D.exe`。本地交付准备如下：
+运行 `app/build.ps1`，测试使用 `work/build-verification/` 下的隔离配置和临时目录；构建缓存放在 `work/pyinstaller/`，成品写到 `work/dist/LCSC3D.exe` 并自动同步 `outputs/LCSC3D.exe`。本地交付准备如下：
 
 ```powershell
 New-Item -ItemType Directory -Path outputs -Force
-Copy-Item -LiteralPath app/dist/LCSC3D.exe -Destination outputs/LCSC3D.exe
+# build.ps1 已自动更新 outputs/LCSC3D.exe
 python scripts/verify_portable.py
 python scripts/verify_self_update.py
 python scripts/finalize_delivery.py --test-count 322
