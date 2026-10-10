@@ -8,7 +8,7 @@ from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QColor, QPalette, QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
-from app_settings import Preferences, DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
+from app_settings import Preferences, DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_ACCENT
 from app_paths import data_directory
 
 
@@ -67,12 +67,12 @@ def foreground(background):
     return '#ffffff' if contrast(background, '#ffffff') >= contrast(background, '#000000') else '#000000'
 
 
-def colors(dark=False, accent='#168878', accent_text='auto'):
+def colors(dark=False, accent=DEFAULT_ACCENT, accent_text='auto'):
     result = (dict(bg='#171e28', surface='#222c39', field='#1b2531', text='#e5edf5',
                    muted='#a5b6c8', border='#435368', control_border='#9aacbf', hover='#303e50', disabled='#7f90a3',
                    success='#6cddbc', warning='#f2c47a', error='#ff9c9c') if dark else
-              dict(bg='#f1f5f8', surface='#ffffff', field='#fafcfd', text='#23354a',
-                   muted='#586b80', border='#cfd9e2', control_border='#66788a', hover='#eaf1f6', disabled='#718196',
+              dict(bg='#f3f6fc', surface='#ffffff', field='#f8faff', text='#192638',
+                   muted='#586b80', border='#d2ddeb', control_border='#66788a', hover='#e8f1ff', disabled='#718196',
                    success='#117767', warning='#9a620b', error='#b13d45'))
     ink = QColor(accent)
     # Small accent text remains legible even for custom near-white/black colors.

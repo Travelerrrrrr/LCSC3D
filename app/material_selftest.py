@@ -99,7 +99,7 @@ def start(window, folder):
             window.resize(1380, 880)
             settings = SettingsDialog(window.preferences, window.apply_preferences, window)
             settings.show()
-            for index, name in enumerate(('appearance', 'network', 'diagnostics', 'about')):
+            for index, name in enumerate(('appearance', 'network', 'diagnostics', 'about', 'backups')):
                 settings.section_buttons[index].click()
                 capture(window, 'settings-' + name)
             assert settings.star_button.text() == '⭐点个Star⭐'

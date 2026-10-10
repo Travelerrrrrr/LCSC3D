@@ -17,9 +17,9 @@ PROXY_OPTIONS = (('使用系统代理', 'system'), ('不使用系统代理', 'di
 LOG_LEVELS = ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
 LANGUAGES = (('简体中文', 'zh_CN'), ('English', 'en_US'))
 THEME_MODES = (('跟随系统', 'system'), ('浅色', 'light'), ('深色', 'dark'))
-ACCENT_COLORS = (('青绿', '#168878'), ('蓝色', '#2563eb'), ('紫色', '#7c3aed'),
+ACCENT_COLORS = (('品牌蓝', '#087af5'), ('青绿', '#168878'), ('蓝色', '#2563eb'), ('紫色', '#7c3aed'),
                  ('玫红', '#be185d'), ('橙色', '#c2410c'))
-DEFAULT_ACCENT = '#168878'
+DEFAULT_ACCENT = '#087af5'
 DEFAULT_FONT_FAMILY = 'Microsoft YaHei UI'
 DEFAULT_FONT_SIZE = 13
 MIN_FONT_SIZE, MAX_FONT_SIZE = 10, 24
@@ -35,11 +35,12 @@ class Preferences:
     update_proxy: str = 'system'
     log_level: str = 'DEBUG'
     language: str = 'zh_CN'
-    theme_mode: str = 'system'
+    theme_mode: str = 'light'
     accent_color: str = DEFAULT_ACCENT
     accent_text_color: str = 'auto'
     font_family: str = DEFAULT_FONT_FAMILY
     font_size: int = DEFAULT_FONT_SIZE
+    auto_backup: bool = True
 
     @classmethod
     def from_mapping(cls, values):
@@ -48,14 +49,15 @@ class Preferences:
                    update_proxy=values.get('update_proxy') if values.get('update_proxy') in ('system', 'direct') else 'system',
                    log_level=values.get('log_level') if values.get('log_level') in LOG_LEVELS else 'DEBUG',
                    language=values.get('language') if values.get('language') in ('zh_CN', 'en_US') else 'zh_CN',
-                   theme_mode=values.get('theme_mode') if values.get('theme_mode') in ('system', 'light', 'dark') else 'system',
+                   theme_mode=values.get('theme_mode') if values.get('theme_mode') in ('system', 'light', 'dark') else 'light',
                    accent_color=color_value(values.get('accent_color'), DEFAULT_ACCENT),
                    accent_text_color=color_value(values.get('accent_text_color'), 'auto'),
                    font_family=values['font_family'].strip() if isinstance(values.get('font_family'), str)
                    and 0 < len(values['font_family'].strip()) <= 128
                    and not any(ord(c) < 32 for c in values['font_family']) else DEFAULT_FONT_FAMILY,
                    font_size=values['font_size'] if type(values.get('font_size')) is int
-                   and MIN_FONT_SIZE <= values['font_size'] <= MAX_FONT_SIZE else DEFAULT_FONT_SIZE)
+                   and MIN_FONT_SIZE <= values['font_size'] <= MAX_FONT_SIZE else DEFAULT_FONT_SIZE,
+                   auto_backup=values.get('auto_backup') if type(values.get('auto_backup')) is bool else True)
 
     def to_mapping(self):
         return asdict(self)

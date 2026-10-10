@@ -6,27 +6,33 @@ from pathlib import Path
 import re
 import uuid
 
-from app_paths import data_directory
 from app_logging import traced, log_event
 from errors import DownloadError
 
 
 def commit_user_file(path, original, payload, check_cancelled=lambda: None):
     """Back up user data in AppData and refuse stale read/modify/write results."""
+    from backups import LOCK
+    with LOCK:
+        return _commit_user_file(path, original, payload, check_cancelled)
+
+
+def _commit_user_file(path, original, payload, check_cancelled):
     from backend import atomic_write
+    from app_settings import get_preferences
+    from backups import create_backup
     path = Path(path)
     check_cancelled()
     if path.read_bytes() != original:
         raise DownloadError('文件在处理期间已被修改，请重新执行；保留当前文件')
     if payload == original:
         return None
-    backup = data_directory() / 'backups' / (uuid.uuid4().hex + '-' + path.stem[:80] + path.suffix)
-    atomic_write(backup, original)
+    backup = create_backup(path, original) if get_preferences().auto_backup else None
     check_cancelled()
     if path.read_bytes() != original:
         raise DownloadError('文件在备份期间已被修改，请重新执行；保留当前文件')
     atomic_write(path, payload)
-    log_event('INFO', 'library.user_file_saved', format=path.suffix.lower(), backed_up=True)
+    log_event('INFO', 'library.user_file_saved', format=path.suffix.lower(), backed_up=backup is not None)
     return backup
 
 

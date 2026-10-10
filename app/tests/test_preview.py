@@ -123,7 +123,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.window.save_settings()
         self.window.settings_enabled = False
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
-                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size',
+                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
                           'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
                           'keep_schlib', 'keep_pcblib', 'schlib_target', 'pcblib_target', 'project_path',
                           'library_mode', 'keep_individual', 'import_existing_to_project'})
@@ -565,7 +565,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.window.settings_enabled = False
         self.assertTrue(self.window.step_box.isChecked())
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
-                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size',
+                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
                           'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
                           'keep_schlib', 'keep_pcblib', 'schlib_target', 'pcblib_target', 'project_path',
                           'library_mode', 'keep_individual', 'import_existing_to_project'})

@@ -18,6 +18,8 @@ from shiboken6 import isValid
 from app_logging import (get_log_directory, log_event, record_error, logging_health,
                          contextual, new_context)
 from log_support import package_logs, clear_logs
+from backup_ui import BackupPanel
+from branding import BrandLogo
 
 
 REPOSITORY_URL = 'https://github.com/Travelerrrrrr/LCSC3D'
@@ -124,7 +126,8 @@ class SettingsDialog(QDialog):
         self.section_group = QButtonGroup(self)
         page_layouts = []
         for index, (title, symbol) in enumerate(((ui_text('外观'), 'workspace'), (ui_text('网络'), 'store'),
-                                                 (ui_text('日志与诊断'), 'settings'), (ui_text('关于与支持'), 'help'))):
+                                                 (ui_text('日志与诊断'), 'settings'), (ui_text('关于与支持'), 'help'),
+                                                 (ui_text('备份'), 'folder'))):
             button = IconButton(title, symbol, role='navButton')
             button.setCheckable(True)
             button.setChecked(index == 0)
@@ -303,6 +306,10 @@ class SettingsDialog(QDialog):
         log_form.addRow(log_buttons)
         page_layouts[2].addWidget(log_group)
 
+        self.backup_panel = BackupPanel(preferences, self)
+        page_layouts[4].addWidget(self.backup_panel)
+        page_layouts[3].insertWidget(0, BrandLogo(), 0, Qt.AlignLeft)
+
         support_group = QGroupBox(ui_text('赞助与支持'))
         support_layout = QHBoxLayout(support_group)
         support_layout.setContentsMargins(16, 22, 16, 16)
@@ -408,7 +415,8 @@ class SettingsDialog(QDialog):
                                   theme_mode=self.theme_mode_combo.currentData(),
                                   accent_color=self.accent_combo.currentData(),
                                   accent_text_color=self.text_color_combo.currentData(),
-                                  font_family=self.font_combo.currentText(), font_size=self.font_size_spin.value())
+                                  font_family=self.font_combo.currentText(), font_size=self.font_size_spin.value(),
+                                  auto_backup=self.backup_panel.auto_box.isChecked())
         if self.save(preferences):
             self.accept()
         else:
@@ -446,6 +454,7 @@ class SettingsDialog(QDialog):
                        self.text_color_combo, self.text_color_button, self.font_combo, self.reset_font_button,
                        self.font_size_spin, self.reset_size_button, self.smaller_font_button, self.larger_font_button):
             widget.setEnabled(not busy)
+        self.backup_panel.refresh_buttons()
 
     def finish_log_package(self):
         worker, self.worker = self.worker, None

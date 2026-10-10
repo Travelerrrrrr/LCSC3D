@@ -27,7 +27,7 @@ class ExportTargetsDialog(QDialog):
         layout.setContentsMargins(0, 0, 10, 0)
         layout.setSpacing(16)
         outer.addWidget(scroll_page(content), 1)
-        hint = QLabel(ui_text('已有库可只选 SchLib 或 PcbLib，只追加对应格式。\n只指定 PCB 工程时，在工程旁按工程名称生成配套库并加入工程；同名库存在时继续追加。\n相同封装自动复用，同名不同封装加序号；原有内容保留，修改前自动备份到应用数据目录。'))
+        hint = QLabel(ui_text('已有库可只选 SchLib 或 PcbLib，只追加对应格式。\n只指定 PCB 工程时，在工程旁按工程名称生成配套库并加入工程；同名库存在时继续追加。\n相同封装自动复用，同名不同封装加序号；可在设置的“备份”页管理自动备份和恢复。'))
         hint.setWordWrap(True)
         layout.addWidget(hint)
         files, files_layout = surface()

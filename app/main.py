@@ -40,6 +40,7 @@ from product_preview import ProductPreview
 from ui_components import IconButton, title_block, surface, HelpDialog, ColumnSplitter
 from shell_ui import PageHost, NotificationCenter, AccountPanel, choose_path, notify
 from window_chrome import FramelessMainWindow, TitleBar
+from branding import BrandLogo
 from international_store import storefront_url
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
@@ -333,8 +334,7 @@ class MainWindow(FramelessMainWindow):
         nav = QVBoxLayout(self.navigation)
         nav.setContentsMargins(12, 24, 12, 16)
         nav.setSpacing(8)
-        logo = label('')
-        logo.setPixmap(QPixmap(str(ROOT / 'assets' / 'app.png')).scaled(44, 44, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        logo = BrandLogo(compact=True)
         nav.addWidget(logo, 0, Qt.AlignHCenter)
         brand = label('LCSC3D', 'section')
         brand.setAlignment(Qt.AlignCenter)
@@ -1209,6 +1209,8 @@ class MainWindow(FramelessMainWindow):
 
     def set_running(self, running):
         self.batch_running = running
+        if self.settings_dialog is not None:
+            self.settings_dialog.backup_panel.refresh_buttons()
         if self.favorites_dialog:
             self.favorites_dialog.set_import_enabled(not running)
         for widget in (self.input, self.sample_button, self.clear_button, self.path_input, self.browse_button, self.queue_button, self.start_button, self.step_box, self.obj_box, self.schlib_box, self.pcblib_box):
@@ -1326,6 +1328,9 @@ class MainWindow(FramelessMainWindow):
                        **(self.export_targets if self.lib_append_box.isChecked() else {}))
 
     def start_batch(self):
+        if self.settings_dialog is not None and self.settings_dialog.backup_panel.busy:
+            self.run_status.setText(ui_text('请等待备份操作完成后再开始导出。'))
+            return
         if self.batch_running or self.worker and self.worker.isRunning():
             return
         if self.lib_append_box.isChecked() and not self.ids and not self.input.toPlainText().strip():
@@ -1396,6 +1401,9 @@ class MainWindow(FramelessMainWindow):
         worker.start()
 
     def start_existing_library_import(self):
+        if self.settings_dialog is not None and self.settings_dialog.backup_panel.busy:
+            self.run_status.setText(ui_text('请等待备份操作完成后再开始导出。'))
+            return
         options = self.export_options()
         if not options.existing_targets() or not options.imports_project():
             self.run_status.setText(ui_text('请配置已有库和 PCB 工程，并勾选“将已选已有库导入PCB工程”'))
@@ -1934,6 +1942,7 @@ def main():
     parser.add_argument('--self-test-store', '--self-test-favorites', dest='self_test_favorites', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-store-live', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-settings', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-backups', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-export', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--capture-docs', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-material', metavar='FOLDER', help=argparse.SUPPRESS)
@@ -1966,7 +1975,7 @@ def main():
     app.setStyleSheet(STYLES)
     logging.getLogger().setLevel(logging.ERROR)
     test_destination = next((value for value in (args.self_test, args.self_test_ad, args.self_test_favorites,
-                                                  args.self_test_store_live, args.self_test_settings,
+                                                  args.self_test_store_live, args.self_test_settings, args.self_test_backups,
                                                   args.self_test_export, args.capture_docs, args.self_test_material) if value), None)
     configure_logging('DEBUG' if test_destination else initial_log_level(SETTINGS_PATH), version=VERSION,
                       directory=Path(test_destination) / 'logs' if test_destination else None)
@@ -1986,6 +1995,10 @@ def main():
     if args.self_test_settings:
         from settings_selftest import start
         start(window, args.self_test_settings)
+        return app.exec()
+    if args.self_test_backups:
+        from backup_selftest import start
+        start(window, args.self_test_backups)
         return app.exec()
     if args.self_test_material:
         from material_selftest import start

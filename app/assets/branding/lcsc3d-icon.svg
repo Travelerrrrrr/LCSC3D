@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+<title id="title">LCSC3D icon</title>
+<desc id="description">A blue geometric L with a solid darker extrusion. Transparent background. Two editable vector paths.</desc>
+<g id="lcsc3d-symbol">
+  <path id="depth" fill="#124DA5" d="M150 56 C144 56 140 58 136 61 L96 94 Q88 101 88 112 V436 Q88 456 108 456 H364 Q376 456 384 449 L418 421 Q424 416 424 404 H136 V74 Q136 56 150 56 Z"/>
+  <path id="front" fill="#087AF5" d="M154 56 H226 A18 18 0 0 1 244 74 V290 A18 18 0 0 0 262 308 H406 A18 18 0 0 1 424 326 V398 A18 18 0 0 1 406 416 H136 V74 A18 18 0 0 1 154 56 Z"/>
+</g>
+</svg>
