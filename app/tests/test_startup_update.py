@@ -50,11 +50,14 @@ class StartupUpdateTests(PreferencesTestCase):
             QTest.qWait(10)
         self.assertTrue(predicate())
 
-    def test_new_version_opens_ready_dialog_without_checking_twice_or_downloading(self):
+    def test_new_version_notifies_and_opens_ready_page_only_on_request(self):
         client = SimpleNamespace(check=Mock(return_value=self.release), download=Mock())
         with patch('update_ui.UpdateClient', return_value=client), patch.object(sys, 'frozen', True, create=True):
             self.start()
             self.wait_for(lambda: self.window.startup_update_outcome is not None)
+            self.assertIsNone(self.window.update_dialog)
+            self.assertIs(self.window._page_host.current_page(), self.window.content_scroll)
+            self.window.notifications.toasts[-1].action_buttons[0].click()
         dialog = self.window.update_dialog
         self.assertTrue(dialog.isVisible())
         self.assertEqual(dialog.release, self.release)

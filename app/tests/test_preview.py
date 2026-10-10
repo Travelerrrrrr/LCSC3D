@@ -478,10 +478,16 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.window.settings_button.click()
             self.window.settings_dialog.update_button.click()
             dialog = self.window.update_dialog
-            self.assertIs(dialog.parent(), self.window.settings_dialog)
+            self.assertIs(dialog._page_owner, self.window.settings_dialog)
+            self.assertIs(dialog.window(), self.window)
             self.assertIs(dialog.controller, self.window)
             self.window.check_updates()
             self.assertIs(self.window.update_dialog, dialog)
+            self.window.workspace_button.click()
+            self.window.check_updates()
+            self.assertIs(self.window.update_dialog, dialog)
+            self.window.open_settings()
+            self.window.check_updates()
             self.wait_for_update_check()
         self.assertIn('最新版本', dialog.status.text())
         dialog.close()
@@ -492,7 +498,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)):
             self.window.settings_dialog.update_button.click()
             self.wait_for_update_check()
-        self.assertIs(self.window.update_dialog.parent(), self.window.settings_dialog)
+        self.assertIs(self.window.update_dialog._page_owner, self.window.settings_dialog)
         self.window.update_dialog.close()
 
     def test_check_update_failure_can_retry_and_source_run_offers_release_page(self):

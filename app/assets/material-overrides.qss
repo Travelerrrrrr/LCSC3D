@@ -11,6 +11,7 @@ QLabel#section { font-size:%(section_font_size)spx; font-weight:600; }
 QLabel#muted, QLabel#previewHint { color:%(muted)s; font-size:%(small_font_size)spx; }
 QLabel#eyebrow { color:%(accent_ink)s; font-size:%(small_font_size)spx; font-weight:600; }
 QLabel#badge { color:%(accent_ink)s; background:%(hover)s; padding:5px 10px; border-radius:10px; font-weight:600; }
+QComboBox { combobox-popup:0; }
 QLineEdit, QComboBox, QSpinBox { color:%(text)s; background:%(field)s; border:0; border-bottom:2px solid %(border)s; border-radius:4px; padding:5px 10px; height:%(control_height)spx; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border-bottom:2px solid %(accent_ink)s; }
 QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled { color:%(disabled)s; background:%(bg)s; border-bottom:2px solid %(border)s; padding:5px 10px; height:%(control_height)spx; }
@@ -30,15 +31,16 @@ QPushButton[variant="danger"]:disabled { color:%(disabled)s; }
 QPushButton#navButton { color:%(muted)s; border:1px solid transparent; text-align:left; padding:10px 12px; height:%(control_height)spx; }
 QPushButton#navButton:hover { background:%(hover)s; }
 QPushButton#navButton:checked { color:%(accent_ink)s; background:%(hover)s; border-left:3px solid %(accent)s; font-weight:600; padding-left:10px; }
-QPushButton#navButton:focus { border:1px solid %(accent_ink)s; }
+QPushButton#navButton:focus { background:transparent; border:1px solid %(accent_ink)s; }
+QPushButton#navButton:checked:focus { background:%(hover)s; }
 QComboBox QAbstractItemView, QListWidget, QMenu { background:%(surface)s; color:%(text)s; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
 QComboBox QAbstractItemView { border:1px solid %(border)s; outline:0; }
 QMenu { border:1px solid %(border)s; padding:6px; }
 QMenu::item { padding:8px 20px; }
 QMenu::item:selected { background:%(accent)s; color:%(on_accent)s; border-radius:4px; }
-QGroupBox { background:%(surface)s; border:1px solid %(border)s; border-radius:8px; margin-top:14px; padding:0; font-weight:600; }
-QGroupBox::title { subcontrol-origin:margin; left:16px; padding:0 5px; color:%(muted)s; }
-QTabWidget::pane { background:%(surface)s; border:0; border-top:1px solid %(border)s; border-radius:0; }
+QGroupBox { background:%(surface)s; border:1px solid %(border)s; border-radius:8px; margin-top:%(legend_offset)spx; padding:0; font-weight:600; }
+QGroupBox::title { subcontrol-origin:margin; subcontrol-position:top left; left:16px; top:0; margin:0; padding:0 6px; height:%(control_height)spx; background:%(bg)s; color:%(muted)s; }
+QTabWidget::pane { background:transparent; border:0; border-radius:0; }
 QTabBar { text-transform:none; }
 QTabBar::tab, QTabBar::tab:top { color:%(muted)s; background:transparent; border:0; border-bottom:3px solid transparent; padding:8px 16px; min-width:48px; height:%(control_height)spx; text-transform:none; }
 QTabBar::tab:selected, QTabBar::tab:top:selected { color:%(accent_ink)s; background:transparent; border-bottom:3px solid %(accent)s; font-weight:600; }
@@ -46,13 +48,6 @@ QTabBar::tab:hover, QTabBar::tab:top:hover { color:%(accent_ink)s; background:%(
 QTabBar::tab:disabled { color:%(disabled)s; }
 QCheckBox { color:%(text)s; spacing:7px; background:transparent; height:%(control_height)spx; }
 QCheckBox:disabled { color:%(disabled)s; }
-QCheckBox::indicator, QTableView::indicator, QListView::indicator { width:%(indicator_size)spx; height:%(indicator_size)spx; border:2px solid %(control_border)s; border-radius:3px; background:%(field)s; image:none; }
-QCheckBox::indicator:hover, QTableView::indicator:hover, QListView::indicator:hover { border-color:%(accent_ink)s; }
-QCheckBox::indicator:checked, QTableView::indicator:checked, QListView::indicator:checked { border-color:%(check_color)s; background:%(accent)s; image:url("%(check_image)s"); }
-QCheckBox::indicator:indeterminate, QTableView::indicator:indeterminate, QListView::indicator:indeterminate { border-color:%(check_color)s; background:%(accent)s; image:url("%(check_partial_image)s"); }
-QCheckBox::indicator:disabled, QTableView::indicator:disabled, QListView::indicator:disabled { border-color:%(disabled)s; background:%(bg)s; }
-QCheckBox::indicator:checked:disabled, QTableView::indicator:checked:disabled, QListView::indicator:checked:disabled { background:%(disabled)s; image:url("%(disabled_check_image)s"); }
-QCheckBox::indicator:indeterminate:disabled, QTableView::indicator:indeterminate:disabled, QListView::indicator:indeterminate:disabled { background:%(disabled)s; image:url("%(disabled_check_partial_image)s"); }
 QTableWidget { background:%(surface)s; alternate-background-color:%(field)s; border:0; border-radius:0; gridline-color:%(border)s; outline:0; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
 QTableWidget::item { padding:6px; border:0; border-bottom:1px solid %(border)s; }
 QTableWidget::item:selected { background:%(accent)s; color:%(on_accent)s; }
@@ -79,3 +74,11 @@ QLabel#productImage { background:%(surface)s; border:1px solid %(border)s; borde
 QListWidget#thumbnailStrip { border:0; background:%(field)s; padding:8px; }
 QListWidget#thumbnailStrip::item { border:2px solid transparent; border-radius:6px; padding:4px; }
 QListWidget#thumbnailStrip::item:selected { border-color:%(accent)s; background:%(hover)s; color:%(text)s; }
+
+QFrame#anchoredPanel { background:%(surface)s; border:1px solid %(border)s; border-radius:6px; }
+QListView#comboChoices { background:%(surface)s; color:%(text)s; border:0; outline:0; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
+QListView#comboChoices::item:selected { background:%(accent)s; color:%(on_accent)s; }
+QFrame#notification { background:%(surface)s; border:1px solid %(border)s; border-left:4px solid %(accent)s; border-radius:8px; }
+QFrame#notification[severity="success"] { border-left-color:%(success)s; }
+QFrame#notification[severity="warning"] { border-left-color:%(warning)s; }
+QFrame#notification[severity="error"] { border-left-color:%(error)s; }

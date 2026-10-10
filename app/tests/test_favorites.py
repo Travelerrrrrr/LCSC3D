@@ -692,6 +692,7 @@ class NativeStoreWindowTests(unittest.TestCase):
             self.addCleanup(stub.stop)
         self.service = OfflineStore()
         self.window = main.MainWindow(settings_enabled=False)
+        self.window.show()
         self.dialog = FavoritesDialog(self.window, client_factory=self.service.client, vault=False)
         self.window.bind_store(self.dialog)
         self.dialog.show()
@@ -749,29 +750,17 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.assertIs(self.window.favorites_dialog, self.dialog)
         self.assertEqual(self.dialog.tabs.currentIndex(), 1)
 
-    def test_store_is_unowned_and_preview_restores_and_activates_main_window(self):
+    def test_store_is_embedded_and_preview_returns_to_workspace(self):
         self.window.show()
         self.search_ready()
-        self.assertIsNone(self.dialog.parentWidget())
+        self.assertIs(self.dialog.window(), self.window)
+        self.assertFalse(self.dialog.isWindow())
         self.assertEqual(self.dialog.windowModality(), Qt.NonModal)
-        self.assertFalse(self.dialog.windowFlags() & Qt.WindowStaysOnTopHint)
-        get_owner = ctypes.windll.user32.GetWindow
-        get_owner.argtypes = [ctypes.c_void_p, ctypes.c_uint]
-        get_owner.restype = ctypes.c_void_p
-        self.assertFalse(get_owner(int(self.dialog.winId()), 4))
-        if not desktop_input_available():
-            self.skipTest('Native owner checks passed; foreground mouse input needs an interactive Windows desktop')
-        self.window.showMinimized()
-        self.dialog.raise_()
-        self.dialog.activateWindow()
-        foreground = ctypes.windll.user32.GetForegroundWindow
-        foreground.restype = ctypes.c_void_p
-        activate_test_window(self.dialog)
-        native_click(self.dialog.preview_button)
-        self.wait_until(lambda: not self.window.isMinimized() and self.window.isActiveWindow()
-                        and foreground() == int(self.window.winId()))
+        self.dialog.preview_button.click()
+        self.assertIs(self.window._page_host.current_page(), self.window.content_scroll)
+        self.assertFalse(self.dialog.isVisible())
+        self.window.market_button.click()
         self.assertTrue(self.dialog.isVisible())
-        self.assertEqual(foreground(), int(self.window.winId()))
 
     def test_header_and_store_account_entries_share_login_with_settings_in_navigation(self):
         self.window.show()
@@ -780,7 +769,8 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.assertFalse(self.window.navigation.isAncestorOf(self.window.account_button))
         self.window.account_button.click()
         self.wait_until(lambda: self.dialog.login_dialog and self.dialog.login_dialog.token)
-        self.assertIs(self.dialog.login_dialog.parentWidget(), self.window)
+        self.assertIs(self.dialog.login_dialog._page_owner, self.dialog)
+        self.assertIs(self.dialog.login_dialog.window(), self.window)
         self.service.scan_state = 'SUCCESS'
         self.dialog.login_dialog.poll_status()
         self.wait_until(lambda: self.dialog.client.account and not self.dialog.has_jobs())
@@ -900,9 +890,12 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.dialog.preview_requested.connect(preview.append)
         before = self.dialog.selected_product()['part']
         self.dialog.preview_button.click()
-        self.assertTrue(self.dialog.isVisible())
+        self.assertFalse(self.dialog.isVisible())
+        self.assertFalse(self.dialog._page_finished)
         self.assertEqual(preview, [before])
         self.assertEqual(self.dialog.selected_product()['part'], before)
+        self.window.market_button.click()
+        self.assertTrue(self.dialog.isVisible())
 
     def test_pagination_preserves_cross_page_choices_and_only_displays_one_page(self):
         rows = [(f'C{1000+i}', f'MCU{i}') for i in range(75)]

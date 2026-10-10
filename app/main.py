@@ -13,12 +13,13 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal, QRectF
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPixmap, QPainter
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QHeaderView, QProgressBar, QScrollArea, QSizePolicy, QSplitter, QSplitterHandle, QStackedWidget, QVBoxLayout, QWidget, QAbstractItemView)
-from localized_widgets import (QCheckBox, QComboBox, QFileDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem)
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPixmap
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QHeaderView, QProgressBar, QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QVBoxLayout, QWidget, QAbstractItemView)
+from localized_widgets import (QCheckBox, QComboBox, QLabel, QLineEdit, QMainWindow, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem)
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from shiboken6 import isValid
 
 from backend import (Cancelled, DownloadError, NetworkApi, Options, Result, download_batch,
                      get_component_metadata, parse_part_numbers, import_existing_libraries)
@@ -36,7 +37,8 @@ from app_logging import (configure_logging, log_event, set_log_level, record_err
 from settings_ui import SettingsDialog
 from export_targets import ExportTargetsDialog
 from product_preview import ProductPreview
-from ui_components import IconButton, title_block, surface, HelpDialog
+from ui_components import IconButton, title_block, surface, HelpDialog, ColumnSplitter
+from shell_ui import PageHost, NotificationCenter, AccountPanel, choose_path, notify
 from international_store import storefront_url
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
@@ -243,39 +245,6 @@ class ModelPreviewWorker(QThread):
                 self.failed.emit(self.part, self.revision, str(exc))
 
 
-class ColumnHandle(QSplitterHandle):
-    def __init__(self, orientation, parent):
-        super().__init__(orientation, parent)
-        self.setCursor(Qt.SplitHCursor)
-        self.setToolTip(ui_text('拖动以调整左右区域宽度'))
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor(theme_manager().tokens['bg']))
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(theme_manager().tokens['accent_ink' if self.underMouse() else 'border']))
-        grip = QRectF((self.width() - 4) / 2, (self.height() - 42) / 2, 4, 42)
-        painter.drawRoundedRect(grip, 2, 2)
-
-    def enterEvent(self, event):
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        self.update()
-        super().leaveEvent(event)
-
-
-class ColumnSplitter(QSplitter):
-    def __init__(self):
-        super().__init__(Qt.Horizontal)
-        self.setHandleWidth(24)
-
-    def createHandle(self):
-        return ColumnHandle(self.orientation(), self)
-
-
 class MainWindow(QMainWindow):
     batch_done = Signal()
     preview_changed = Signal(str)
@@ -373,7 +342,7 @@ class MainWindow(QMainWindow):
         self.workspace_button = IconButton(ui_text('工作台'), 'workspace', role='navButton')
         self.workspace_button.setCheckable(True)
         self.workspace_button.setChecked(True)
-        self.workspace_button.clicked.connect(lambda: self.workspace_button.setChecked(True))
+        self.workspace_button.clicked.connect(lambda: self._page_host.present(self.content_scroll, navigation=True))
         self.market_button = IconButton(ui_text('立创商城'), 'store', role='navButton')
         self.market_button.setToolTip(ui_text('搜索商品、查看原图、登录及管理账号收藏'))
         self.market_button.clicked.connect(self.open_favorites)
@@ -391,17 +360,36 @@ class MainWindow(QMainWindow):
         nav.addSpacing(12)
         nav.addWidget(version)
         shell_layout.addWidget(self.navigation)
-        shell_layout.addWidget(self.content_scroll, 1)
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        global_header = QHBoxLayout()
+        global_header.setContentsMargins(24, 12, 24, 0)
+        self.back_button = QPushButton(ui_text('返回'))
+        self.back_button.setProperty('variant', 'text')
+        global_header.addWidget(self.back_button)
+        self.page_caption = label('', 'muted')
+        global_header.addWidget(self.page_caption, 1)
+        self.account_button = IconButton(ui_text('账号登录'), 'user')
+        self.account_button.clicked.connect(self.open_account)
+        global_header.addWidget(self.account_button)
+        right_layout.addLayout(global_header)
+        self._page_host = PageHost(self, self.content_scroll)
+        self.back_button.clicked.connect(self._page_host.back)
+        self._page_host.changed.connect(self.page_changed)
+        right_layout.addWidget(self._page_host, 1)
+        shell_layout.addWidget(right, 1)
         self.setCentralWidget(shell)
+        self.notifications = NotificationCenter(shell)
+        for button in (self.workspace_button, self.market_button, self.settings_button, self.help_button):
+            button.setCheckable(True)
+        self.page_changed(self.content_scroll)
         layout = QVBoxLayout(canvas)
         layout.setContentsMargins(24, 20, 24, 10)
         layout.setSpacing(12)
         heading = QHBoxLayout()
         heading.addWidget(title_block(ui_text('元件工作台'), ui_text('从器件编号到 3D 模型与 AD 元件库'), large=True), 1)
-        self.account_button = IconButton(ui_text('账号登录'), 'user')
-        self.account_button.setToolTip(ui_text('登录立创商城账号，支持记住登录'))
-        self.account_button.clicked.connect(self.open_account)
-        heading.addWidget(self.account_button)
         layout.addLayout(heading)
 
         splitter = self.workspace_splitter = ColumnSplitter()
@@ -705,6 +693,28 @@ class MainWindow(QMainWindow):
         footer.addWidget(source)
         layout.addLayout(footer)
 
+    def page_changed(self, page):
+        key = 'workspace'
+        current = page
+        while current is not None and current is not self:
+            if isinstance(current, FavoritesDialog):
+                key = 'store'
+                break
+            if isinstance(current, (SettingsDialog, UpdateDialog)):
+                key = 'settings'
+                break
+            if isinstance(current, HelpDialog):
+                key = 'help'
+                break
+            current = getattr(current, '_page_owner', None)
+        for name, button in (('workspace', self.workspace_button), ('store', self.market_button),
+                             ('settings', self.settings_button), ('help', self.help_button)):
+            button.setChecked(name == key)
+        self.back_button.setVisible(page is not self.content_scroll)
+        self.page_caption.setText(page.windowTitle() if page is not self.content_scroll else 'LCSC3D')
+        if self.account_menu is not None:
+            self.account_menu.close()
+
     def _restore_settings(self):
         default = str(data_directory() / 'downloads')
         self.path_input.setText(default)
@@ -809,6 +819,7 @@ class MainWindow(QMainWindow):
             self.web.page().setBackgroundColor(QColor(tokens['field']))
             self.update_viewer_appearance()
         self.export_layout_timer.start(0)
+        self.page_changed(self._page_host.current_page())
         self.update()
 
     def update_viewer_appearance(self):
@@ -818,12 +829,14 @@ class MainWindow(QMainWindow):
 
     @traced('settings.open')
     def open_settings(self):
-        if self.settings_dialog is not None and self.settings_dialog.isVisible():
+        if self.settings_dialog is not None and not self.settings_dialog._page_finished:
             self.settings_dialog.raise_()
             self.settings_dialog.activateWindow()
             return
         if self.settings_dialog is not None:
-            if self.update_dialog is not None and self.update_dialog.parent() is self.settings_dialog:
+            if (self.update_dialog is not None and self.update_dialog._page_owner is self.settings_dialog
+                    and self.update_dialog._page_finished and self.update_dialog.worker is None):
+                self.update_dialog.deleteLater()
                 self.update_dialog = None
             self.settings_dialog.deleteLater()
         self.settings_dialog = SettingsDialog(self.preferences, self.apply_preferences, self)
@@ -924,7 +937,12 @@ class MainWindow(QMainWindow):
     def open_account(self):
         dialog = self.ensure_store()
         if dialog.client.account:
-            self.account_menu = QMenu(self)
+            if self.account_menu is not None:
+                if self.account_menu.isVisible():
+                    self.account_menu.close()
+                    return
+                self.account_menu.deleteLater()
+            self.account_menu = AccountPanel(self.account_button)
             self.account_menu.addAction(ui_text('已登录：') + dialog.client.account['name']).setEnabled(False)
             self.account_menu.addAction(ui_text('退出登录'), dialog.clear_session)
             self.account_menu.popup(self.account_button.mapToGlobal(self.account_button.rect().bottomLeft()))
@@ -933,18 +951,7 @@ class MainWindow(QMainWindow):
 
     def preview_store_product(self, part):
         self.show_preview(part)
-        if self.isMinimized():
-            self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        if sys.platform == 'win32':
-            # Preview is an explicit user action in another window of this app.
-            # Ask Windows to activate the restored native main window as well.
-            import ctypes
-            activate = ctypes.windll.user32.SetForegroundWindow
-            activate.argtypes, activate.restype = [ctypes.c_void_p], ctypes.c_int
-            activate(int(self.winId()))
+        self._page_host.present(self.content_scroll, navigation=True)
 
     @traced('store.open')
     def open_favorites(self, mode=None):
@@ -1184,13 +1191,11 @@ class MainWindow(QMainWindow):
 
     @traced('settings.choose_export_folder')
     def choose_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, ui_text('选择模型保存目录'), self.path_input.text())
-        if folder:
+        def selected(folder):
             self.path_input.setText(folder)
             self.save_settings()
             log_event('INFO', 'settings.export_folder_changed')
-        else:
-            log_event('DEBUG', 'settings.export_folder_cancelled')
+        self.folder_page = choose_path(self, ui_text('选择模型保存目录'), self.path_input.text(), selected, directory=True)
 
     def open_output(self):
         try:
@@ -1288,21 +1293,29 @@ class MainWindow(QMainWindow):
         self.workspace_splitter.setMinimumHeight(0)
         self.workspace_splitter.setMinimumHeight(self.workspace_splitter.minimumSizeHint().height())
         self.content_scroll.widget().layout().activate()
-        self.setMinimumHeight(max(740, self.minimumSizeHint().height()))
+        self.setMinimumHeight(740)
 
     def configure_export_targets(self):
-        dialog = ExportTargetsDialog(self.export_targets, self)
-        if dialog.exec() == dialog.DialogCode.Accepted:
-            self.export_targets = dialog.values
-            if not any(self.export_targets[key] for key in ('schlib_target', 'pcblib_target')) and not any(
-                    box.isChecked() for box in (self.schlib_box, self.pcblib_box)):
-                self.schlib_box.setChecked(True)
-                self.pcblib_box.setChecked(True)
-            self.update_merge_controls()
-            self.save_settings()
-        elif not any(self.export_targets.get(key) for key in ('schlib_target', 'pcblib_target', 'project_path')):
-            self.lib_append_box.setChecked(False)
-        dialog.deleteLater()
+        current = getattr(self, 'export_dialog', None)
+        if current is not None and not current._page_finished:
+            current.show()
+            return
+        if current is not None:
+            current.deleteLater()
+        dialog = self.export_dialog = ExportTargetsDialog(self.export_targets, self)
+        def completed(result):
+            if result == dialog.DialogCode.Accepted:
+                self.export_targets = dialog.values
+                if not any(self.export_targets[key] for key in ('schlib_target', 'pcblib_target')) and not any(
+                        box.isChecked() for box in (self.schlib_box, self.pcblib_box)):
+                    self.schlib_box.setChecked(True)
+                    self.pcblib_box.setChecked(True)
+                self.update_merge_controls()
+                self.save_settings()
+            elif not any(self.export_targets.get(key) for key in ('schlib_target', 'pcblib_target', 'project_path')):
+                self.lib_append_box.setChecked(False)
+        dialog.finished.connect(completed)
+        dialog.show()
 
     def export_options(self):
         formats = tuple(name for name, box in [('STEP', self.step_box), ('OBJ', self.obj_box),
@@ -1774,6 +1787,12 @@ class MainWindow(QMainWindow):
             log_event('INFO' if opened else 'WARNING', 'navigation.export_folder_result', opened=opened)
 
     def show_help(self):
+        previous = getattr(self, 'help_page', None)
+        if previous is not None and not previous._page_finished:
+            previous.show()
+            return
+        if previous is not None:
+            previous.deleteLater()
         message = HelpDialog(self)
         message.setWindowTitle(ui_text('使用说明与来源'))
         message.setText(ui_text('<b>LCSC3D</b><br>版本：') + VERSION + ui_text('<br><br>'
@@ -1787,7 +1806,7 @@ class MainWindow(QMainWindow):
             '顶部「账号登录」支持微信扫码、账号密码和手机验证码；服务端图片验证也在原生界面完成。<br>'
             '账号收藏：登录后获取收藏，搜索商品可收藏到账号，也可取消当前元件的收藏。'
             '搜索结果和账号收藏均可勾选加入下载列表，保留已有勾选与下载结果。'
-            '商城元件默认不勾选；预览当前高亮行会将主窗口置于前台，商城窗口保持打开。'
+            '商城元件默认不勾选；预览当前高亮行会切换到工作台，返回商城后保留当前页和选择。'
             '默认记住登录，重启后自动恢复；取消勾选时只保留本次登录。「退出登录」可清除已保存会话。<br><br>'
             '左侧「设置」可分别选择商城与检查更新是否使用系统代理，并调整日志等级；默认 Debug。「打开日志」可打开日志目录。<br><br>'
             '可保存官方 STEP、OBJ，并导出原生 AD SchLib 符号库、PcbLib 封装库；不导出 JSON 或 SVG。<br>'
@@ -1806,7 +1825,8 @@ class MainWindow(QMainWindow):
             '模型来源：<a href="https://lceda.cn/">JLCEDA</a> / <a href="https://easyeda.com/">EasyEDA 官方库</a>。<br>'
             '资源下载与本地 3D 预览由本项目实现，软件采用 AGPL-3.0-or-later。<br>'
             '对应源码、构建脚本与第三方说明随交付提供。'))
-        message.exec()
+        self.help_page = message
+        message.show()
 
     def schedule_startup_update_check(self):
         if not self.startup_update_attempted and not self.close_when_finished:
@@ -1825,6 +1845,10 @@ class MainWindow(QMainWindow):
     def cancel_startup_update(self):
         self.startup_update_timer.stop()
         self.startup_update_attempted = True
+        notice = getattr(self, 'update_notice', None)
+        if notice is not None and isValid(notice):
+            notice.close()
+        self.update_notice = None
         check, self.startup_update_check = self.startup_update_check, None
         if check is not None:
             check.cancel()
@@ -1842,17 +1866,22 @@ class MainWindow(QMainWindow):
             return
         if self.update_dialog is not None and self.update_dialog.isVisible():
             return
-        owner = self.settings_dialog if self.settings_dialog is not None and self.settings_dialog.isVisible() else self
-        self.update_dialog = UpdateDialog(VERSION, owner, source=self.update_source, release=result['release'], controller=self)
-        self.update_dialog.show()
-        log_event('INFO', 'update.startup_notification_shown', target_version=result['release'].version)
+        release = result['release']
+        def show_update():
+            self.update_dialog = UpdateDialog(VERSION, self, source=self.update_source, release=release, controller=self)
+            self.update_dialog.show()
+        self.update_notice = notify(self, ui_text('软件更新'), ui_message('发现新版本 {0}', release.version),
+                                    actions=((ui_text('查看更新'), show_update),), persistent=True)
+        log_event('INFO', 'update.startup_notification_shown', target_version=release.version)
 
     def check_updates(self):
         self.cancel_startup_update()
-        if self.update_dialog is not None and self.update_dialog.isVisible():
+        if self.update_dialog is not None and not self.update_dialog._page_finished:
             self.update_dialog.raise_()
             self.update_dialog.activateWindow()
             return
+        if self.update_dialog is not None:
+            self.update_dialog.deleteLater()
         owner = self.settings_dialog if self.settings_dialog is not None and self.settings_dialog.isVisible() else self
         self.update_dialog = UpdateDialog(VERSION, owner, source=self.update_source, controller=self)
         self.update_dialog.show()

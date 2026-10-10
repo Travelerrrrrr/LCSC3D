@@ -371,29 +371,29 @@ class ExportWindowTests(ExportFixture):
         w = self.window
         targets = self.targets(self.root, ('SCHLIB',))
         def confirm():
-            dialog = self.app.activeModalWidget()
+            dialog = w.export_dialog
             self.assertIsInstance(dialog, ExportTargetsDialog)
             dialog.inputs['schlib_target'].setText(targets['schlib_target'])
             dialog.keep_box.setChecked(True)
             dialog.save()
-        QTimer.singleShot(0, confirm)
         w.lib_append_box.click()
+        confirm()
         self.assertTrue(w.lib_append_box.isChecked())
         self.assertTrue(w.export_targets['keep_individual'])
         self.assertEqual(w.export_targets['schlib_target'], targets['schlib_target'])
         before = w.export_targets.copy()
         def cancel():
-            dialog = self.app.activeModalWidget()
+            dialog = w.export_dialog
             dialog.inputs['schlib_target'].clear()
             dialog.keep_box.setChecked(False)
             dialog.reject()
-        QTimer.singleShot(0, cancel)
         w.append_configure_button.click()
+        cancel()
         self.assertEqual(w.export_targets, before)
         w.lib_append_box.setChecked(False)
         w.export_targets = dict(schlib_target='', pcblib_target='', project_path='')
-        QTimer.singleShot(0, cancel)
         w.lib_append_box.click()
+        cancel()
         self.assertFalse(w.lib_append_box.isChecked())
         self.assertTrue(w.path_input.isEnabled())
 

@@ -2,13 +2,14 @@
 from i18n import text as ui_text, message as ui_message
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QWidget)
-from localized_widgets import (QCheckBox, QDialog, QFileDialog, QFormLayout, QLabel, QLineEdit, QPushButton)
+from localized_widgets import (QCheckBox, QDialog, QFormLayout, QLabel, QLineEdit, QPushButton)
 
 from altium_project import read_project
 from library_merge import read_library
 from app_logging import log_event, record_error, traced
 from errors import DownloadError
 from ui_components import title_block, surface, scroll_page
+from shell_ui import choose_path
 
 
 class ExportTargetsDialog(QDialog):
@@ -93,9 +94,8 @@ class ExportTargetsDialog(QDialog):
             self.project_box.setChecked(False)
 
     def choose(self, edit, suffix):
-        path, _ = QFileDialog.getOpenFileName(self, ui_text('选择 .') + suffix, edit.text(), ui_message('AD 文件 (*.{0})', suffix))
-        if path:
-            edit.setText(path)
+        self.file_page = choose_path(self, ui_text('选择 .') + suffix, edit.text(), edit.setText,
+                                     filter=ui_message('AD 文件 (*.{0})', suffix))
 
     @traced('export.append_settings')
     def save(self):

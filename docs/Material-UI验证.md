@@ -1,42 +1,56 @@
-# Material UI 重构验证
+# Material UI 与单窗口布局验证
 
-日期：2026-10-10。源码版本：2.2.1。本地 Windows x64，Python 3.12.10、PySide6 6.11.1、qt-material 2.17；桌面缩放 150%。本次没有推送、打标签或发布 Release。
+日期：2026-10-10。源码版本：2.2.1。本地 Windows x64，Python 3.12.10、PySide6 6.11.1、qt-material 2.17；截图桌面缩放 150%。本次为本地构建，未推送、打标签或发布 Release。
 
-## 界面与实现
+## 本次界面调整
 
-- 应用级样式使用 [UN-GCPDS/qt-material](https://github.com/UN-GCPDS/qt-material) 的模板及 SVG 控件资源；统一的应用覆盖样式、图标和容器分别在 `app/assets/material-overrides.qss`、`app/ui_components.py` 中。
-- 工作台改为左侧导航、列表与预览并排、底部导出设置；设置按四个类别切换，商城、登录、图片浏览、库追加、更新、帮助和支持窗口统一样式。
-- 主题图标按配置生成到 `%LOCALAPPDATA%/LCSC3D/cache/qt-material-2.17/`，生成时使用独立暂存目录再提交，缓存复用不改写已有图标。打包仅包含实际使用的模板和 SVG，不携带上游示例窗口、字体或 Python 缓存。
-- 明暗主题、自定义文字颜色、字体/字号、语言、原有队列与导出配置保持兼容。官方符号、封装图形保持原色。
+| 用户反馈 | 实现 |
+| --- | --- |
+| 保持一个界面 | 设置、商城、登录、图库、赞助、库追加、更新、帮助、颜色与文件选择均作为主窗口内页面；侧栏和账号入口持续可用。 |
+| 提醒从右上角滑入 | 导入结果、启动更新提醒、清除日志确认使用主窗口内通知，从右侧向左滑入；确认操作须点击对应按钮。 |
+| 勾选框黑框与边缘不平滑 | 以完整圆角 SVG 绘制各状态，避免原生边框与勾号图片叠加；覆盖表格、选择行、普通复选框及禁用状态。 |
+| 账号菜单宽度不一 | 菜单贴齐账号按钮，每行使用相同宽度；账号名称变化后重新定位。 |
+| 分组标题需嵌入边框 | 设置中的主题、更新、赞助等标题嵌入分组框上边缘。 |
+| 商城左右比例调节样式不一致 | 商城与工作台共用圆角拖动分隔条。 |
+| 下拉框随机位置 | 下拉列表从控件下方展开，与控件等宽，最多八项，支持滚动、键盘选择与 Esc 取消；文件选择页内的下拉框也在主窗口内显示。 |
+| 商城顶部白条 | 关闭原生页签基线，使用统一的 Material 选中下划线。 |
+| 支持按钮文案被修改 | 恢复“⭐点个Star⭐”与“🍔赞助作者🍔”。 |
+
+界面继续使用 [UN-GCPDS/qt-material](https://github.com/UN-GCPDS/qt-material) 的模板及 SVG 控件资源。页面与通知组件位于 `app/shell_ui.py`，共用分隔条位于 `app/ui_components.py`，覆盖样式位于 `app/assets/material-overrides.qss`。主题和勾选框缓存仅生成在 `%LOCALAPPDATA%/LCSC3D/cache/`。
+
+侧栏切换保留下载队列、勾选、商城搜索与未保存设置；设置中的保存、取消和返回遵守原有保存语义。预览商城元件切回工作台，重新进入商城保留选择。后台更新检查仅发送通知，点击通知后进入更新页；重复打开复用当前更新任务。
 
 ## 验证结果
 
-- `app/build.ps1`：417 项回归通过。测试在 `work/build-verification/` 的隔离 `LOCALAPPDATA` 和临时目录中运行。最后的缩略图栏宽度调整另通过图片预览 6 项、画廊加载与导航 2 项定向回归。
-- `--self-test-material`：真实 EXE 离线运行，15 张窗口截图；默认 1380×880 不需滚动即可看到导出区，1060×740 和 24px 英文字号下按钮可滚动访问。设置分类切换、明暗/中英文切换保留勾选，官方 C2040 样本的符号与封装画布达到 ready。
-- `--self-test-settings`：真实 EXE 验证字体弹出框、配色选择器、保存/恢复/取消、日志过滤、打包诊断 ZIP，以及清除后继续记录和崩溃捕获。字体列表 293 项、弹出高度 194 个逻辑像素。分类导航后操作支持及日志按钮。
-- `--self-test-favorites`：真实 EXE 使用本机模拟服务验证搜索、50 条分页、跨页勾选、价格梯度、长文字与参数、三张原图及缩放、三种登录、图片验证码、会话保存/恢复/退出、收藏操作、导入提示及队列删除。
-- `--self-test-export`：真实 EXE 执行 13 个离线导出流程，覆盖合并、追加、单/双库、独立导出、PCB 工程、空列表导入和共享封装。
-- 四组 EXE 自检均退出 0，报告 `success=true`，仅保留 Windows 系统 PATH 运行；启动工作目录没有新生成文件。未读取用户真实登录凭据，未发送真实短信或账号登录请求。
+- `app/build.ps1`：425 项回归全部通过，包括新增的八项单窗口与控件回归。测试使用隔离的 `LOCALAPPDATA` 和临时目录。实际渲染检查覆盖紫色勾选框、明暗配色、不同字号与选中/禁用状态。
+- `--self-test-material`：正式 EXE 生成 24 张截图，每次捕获前均确认只有一个可见主窗口、没有活动模态窗口。检查设置、登录、图库入口、支持、颜色/文件选择、库追加、帮助、下拉框、账号菜单和通知。默认 1380×880 工作台完整显示常用操作；1060×740 与 24px 英文字号下操作可滚动访问，符号与封装达到 ready。
+- `--self-test-settings`：正式 EXE 验证字体下拉、嵌入式颜色选择、保存/恢复/取消、语言与主题切换、赞助图片、日志过滤和打包；清除通知的取消/确认分支以及清除后继续记录和崩溃捕获均通过。字体列表最多八项，行高随字体增大。
+- `--self-test-favorites`：正式 EXE 使用本机模拟服务验证搜索、50 条分页、跨页勾选、价格梯度、长文字、三张原图和缩放、三种登录、图片验证码、会话保存/恢复/退出、收藏与导入通知。商城预览切换工作台后，返回仍保留当前商品与选择。
+- `--self-test-export`：正式 EXE 执行 13 个离线导出流程，覆盖合并、追加、单/双库、独立导出、PCB 工程、空列表导入和共享封装。
+- 四组 EXE 自检均退出 0、`success=true`；仅保留 Windows 系统 PATH 运行，启动工作目录没有新文件。未读取用户真实登录凭据，登录和短信仅使用本机模拟服务。
+- 本机更新服务验证：启动通知 → 查看更新 → 下载并重启 → 替换副本并确认新进程，通过；手动检查更新遇到错误 SHA-256 时，在更新页显示失败并保留原 EXE。使用隔离副本，未修改正式发布或根目录交付文件。
 - `scripts/verify_app_data.py`：全新配置和旧配置迁移两个普通启动场景均退出 0；EXE 目录清洁，配置、日志及运行时解压均在隔离 AppData 下。
-- `scripts/verify_bundle.py`：逐个比较 38 个应用模块及 24 个本地资源/许可证与工作区源码，核对 Qt Material、Jinja2、MarkupSafe、模板及 SVG 均已打包；源码 ZIP 逐文件比较，校验和随成品生成。
+- `scripts/verify_bundle.py`：逐个比较全部应用模块及本地资源/许可证与工作区源码；检查 Qt Material 依赖、模板与 SVG 已打包，并逐文件比较源码 ZIP。
 
-本次联网业务由本机模拟服务和已有官方离线样本覆盖；没有把它当作真实商城账号、实时价格或 Altium Designer 实机操作验证。旧版联网与 AD 验证记录继续保留在 [验证记录](验证记录.md) 中。
+过程材料保存在已忽略的 `work/single-window/`，全量构建记录为 `work/single-window-build.txt`。本次使用本机模拟服务和已有官方离线样本，没有把它当作真实商城账号、实时价格或 Altium Designer 实机操作验证；旧版业务验证记录保留在 [验证记录](验证记录.md)。
 
-## 界面截图
+## 正式 EXE 截图
 
-以下截图来自本次构建的实际 EXE，符号使用公开官方样本，登录表单为空。完整过程材料保存在已忽略的 `work/material-validation/`。
+![单窗口工作台与符号预览](images/material/workspace-symbol-light.png)
 
-![工作台与符号预览](images/material/workspace-symbol-light.png)
+![商城、圆角勾选框与共用分隔条](images/material/store-dark.png)
 
-![设置分类](images/material/settings-appearance.png)
+![右上角滑入通知](images/material/notification.png)
 
-![账号登录](images/material/login-password.png)
+![控件下方等宽下拉列表](images/material/color-dropdown.png)
 
-![追加配置](images/material/append-targets.png)
+![嵌入式分组标题与恢复的支持文案](images/material/settings-about.png)
+
+![等宽账号菜单，使用离线示例账号](images/material/account-menu.png)
 
 ## 本地交付
 
-根目录交付入口为 `outputs/LCSC3D.exe`，与 `outputs/v2.2.1/` 同步 EXE、`LCSC3D.zip`、使用说明、验证记录及 SHA-256 校验和。可重复核验：
+固定入口为 `outputs/LCSC3D.exe`，与 `outputs/v2.2.1/` 同步 EXE、源码 ZIP、使用说明、验证记录及 SHA-256 校验和。可重复核验：
 
 ```powershell
 app/.venv/Scripts/python.exe scripts/verify_bundle.py --exe outputs/LCSC3D.exe --source-zip outputs/LCSC3D.zip

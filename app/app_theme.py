@@ -97,30 +97,61 @@ def effective_font_family(requested):
 def typography(size=DEFAULT_FONT_SIZE):
     return dict(font_size=size, small_font_size=round(size * 12 / 13),
                 section_font_size=round(size * 16 / 13), title_font_size=round(size * 25 / 13),
-                indicator_size=max(16, round(size * 16 / 13)))
+                indicator_size=max(18, round(size * 20 / 13)))
+
+
+def indicator_images(c):
+    """One antialiased SVG per state; never stack a Qt border around the tick."""
+    palette = {key: c[key] for key in ('accent', 'accent_ink', 'control_border', 'disabled', 'field', 'bg')}
+    key = hashlib.sha256(json.dumps(palette, sort_keys=True).encode()).hexdigest()[:20]
+    folder = data_directory() / 'cache' / 'indicators-v2' / key
+    folder.mkdir(parents=True, exist_ok=True)
+    result = {}
+    for enabled in ('enabled', 'disabled'):
+        for state in ('unchecked', 'checked', 'indeterminate'):
+            fill = c['accent'] if enabled == 'enabled' else c['disabled']
+            stroke = c['accent_ink'] if enabled == 'enabled' else c['disabled']
+            mark = foreground(fill)
+            if state == 'unchecked':
+                fill = c['field'] if enabled == 'enabled' else c['bg']
+                stroke = c['control_border'] if enabled == 'enabled' else c['disabled']
+            path = 'M6 12l4 4 8-9' if state == 'checked' else 'M7 12h10'
+            svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
+                   f'<rect x="2" y="2" width="20" height="20" rx="4" fill="{fill}" stroke="{stroke}" stroke-width="1.6"/>')
+            if state != 'unchecked':
+                svg += f'<path d="{path}" fill="none" stroke="{mark}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+            svg += '</svg>'
+            name = enabled + '-' + state
+            target = folder / (name + '.svg')
+            if not target.is_file():
+                with tempfile.NamedTemporaryFile(dir=folder, suffix='.tmp', delete=False) as stream:
+                    stream.write(svg.encode())
+                    pending = Path(stream.name)
+                pending.replace(target)
+            result[name] = target.as_posix()
+    return result
 
 
 def stylesheet(c):
+    if QApplication.instance() is None:
+        return ''  # Importing application modules does not generate user files.
     c = dict(typography(), **c)
     assets = Path(__file__).resolve().parent / 'assets'
-    for state, background in (('check', c['accent']), ('disabled_check', c['disabled'])):
-        mark = 'white' if foreground(background) == '#ffffff' else 'black'
-        c[state + '_color'] = foreground(background)
-        c[state + '_image'] = (assets / ('check-' + mark + '.svg')).as_posix()
-        c[state + '_partial_image'] = (assets / ('partial-' + mark + '.svg')).as_posix()
     c['control_height'] = max(20, round(c['font_size'] * 1.5))
+    c['legend_offset'] = c['control_height'] // 2
     result = (assets / 'material-overrides.qss').read_text(encoding='utf-8') % c
     # Upstream supplies selected/focused table indicators with more specific
     # selectors. Cover those combinations so high contrast ticks also survive
     # a selected row, keyboard focus and disabled download controls.
-    for state, image_key in (('unchecked', None), ('checked', 'image'), ('indeterminate', 'partial_image')):
+    images = indicator_images(c)
+    for state in ('unchecked', 'checked', 'indeterminate'):
         for enabled in ('enabled', 'disabled'):
-            prefix = 'disabled_check' if enabled == 'disabled' else 'check'
-            image = 'none' if image_key is None else 'url("' + c[prefix + '_' + image_key] + '")'
+            image = 'url("' + images[enabled + '-' + state] + '")'
             selectors = [f'{widget}::indicator:{state}:{enabled}{selected}{focus}{active}'
                          for widget in ('QCheckBox', 'QTableView', 'QTableWidget', 'QListView')
                          for selected in ('', ':selected') for focus in ('', ':focus') for active in ('', ':active')]
-            result += '\n' + ', '.join(selectors) + ' { image:' + image + '; }'
+            result += '\n' + ', '.join(selectors) + (' { border:0; background:transparent; padding:0; '
+                      f'width:{c["indicator_size"]}px; height:{c["indicator_size"]}px; image:{image}; }}')
     return result
 
 

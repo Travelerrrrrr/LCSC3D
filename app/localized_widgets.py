@@ -6,6 +6,7 @@ Only explicit Message values and exact catalog messages are rendered.
 from PySide6 import QtWidgets as W
 from PySide6.QtCore import QSignalBlocker
 from i18n import register, render
+from shell_ui import PageDialog, AnchoredComboBox
 
 
 class Localized:
@@ -74,7 +75,7 @@ class QGroupBox(Localized, W.QGroupBox):
         self._set('setTitle', value)
 
 
-class QDialog(Localized, W.QDialog):
+class QDialog(Localized, PageDialog):
     pass
 
 
@@ -106,7 +107,7 @@ class QTableWidget(W.QTableWidget):
             self.setHorizontalHeaderItem(index, QTableWidgetItem(title))
 
 
-class QComboBox(Localized, W.QComboBox):
+class QComboBox(Localized, AnchoredComboBox):
     def __init__(self, *args, **kwargs):
         self._item_messages = []
         super().__init__(*args, **kwargs)
@@ -142,6 +143,11 @@ class QTabWidget(Localized, W.QTabWidget):
     def __init__(self, *args, **kwargs):
         self._tab_messages = []
         super().__init__(*args, **kwargs)
+        self.tabBar().setDrawBase(False)
+
+    def setDocumentMode(self, enabled):
+        super().setDocumentMode(enabled)
+        self.tabBar().setDrawBase(False)
 
     def addTab(self, widget, title):
         self._tab_messages.append(title)

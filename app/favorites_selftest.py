@@ -408,24 +408,19 @@ def start(window, destination):
                 assert dialog.parameters.rowCount() >= 2
                 report['search_part'] = dialog.current_product['part']
                 report['search_parameters'] = dialog.parameters.rowCount()
-                native_click(dialog.preview_button)
+                dialog.preview_button.click()
                 state['phase'] = 'preview'
             elif state['phase'] == 'preview':
-                assert dialog.isVisible(), 'Preview closed the store window'
-                import ctypes
-                owner = ctypes.windll.user32.GetWindow
-                owner.argtypes, owner.restype = [ctypes.c_void_p, ctypes.c_uint], ctypes.c_void_p
-                foreground = ctypes.windll.user32.GetForegroundWindow
-                foreground.restype = ctypes.c_void_p
-                assert not owner(int(dialog.winId()), 4), 'Store has a native owner'
-                if foreground() != int(window.winId()):
-                    return
-                assert window.isActiveWindow(), 'Main window is not active'
+                assert window._page_host.current_page() is window.content_scroll
+                assert not dialog.isVisible() and not dialog._page_finished
+                assert dialog.window() is window and not dialog.isWindow()
                 assert not dialog.selected_items()
-                report['independent_store_window'] = True
-                report['preview_activates_main'] = True
+                report['embedded_store_page'] = True
+                report['preview_returns_to_workspace'] = True
                 report['default_unchecked'] = True
-                report['preview_keeps_store_open'] = True
+                window.market_button.click()
+                assert dialog.isVisible() and dialog.current_product['part'] == 'C2040'
+                report['preview_preserves_store_state'] = True
                 assert window.market_button.text() == '立创商城'
                 report['single_store_entry'] = True
                 dialog.grab().save(str(destination / '原生搜索-离线验证.png'))

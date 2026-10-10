@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import time
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QPoint
 from PySide6.QtWidgets import QApplication
 from app_settings import Preferences
 from app_theme import theme_manager
@@ -13,6 +13,7 @@ from favorites import LoginDialog
 from library_preview import build_library_preview
 from settings_ui import SettingsDialog
 from ui_components import HelpDialog
+from shell_ui import notify
 
 
 def start(window, folder):
@@ -44,6 +45,9 @@ def start(window, folder):
 
     def capture(widget, name):
         settle()
+        visible = [item for item in app.topLevelWidgets() if item.isVisible() and item.windowType() != Qt.ToolTip]
+        assert visible == [window], 'An extra native window was opened'
+        assert app.activeModalWidget() is None
         assert widget.grab().save(str(destination / (name + '.png')))
         report['screenshots'].append(name + '.png')
 
@@ -80,23 +84,72 @@ def start(window, folder):
             settings.show()
             for index, name in enumerate(('appearance', 'network', 'diagnostics', 'about')):
                 settings.section_buttons[index].click()
-                capture(settings, 'settings-' + name)
+                capture(window, 'settings-' + name)
+            assert settings.star_button.text() == '⭐点个Star⭐'
+            assert settings.sponsor_button.text() == '🍔赞助作者🍔'
+            settings.section_buttons[0].click()
+            for combo, name in ((settings.text_color_combo, 'color'), (settings.font_combo, 'font')):
+                combo.showPopup()
+                settle()
+                panel = combo.popup_frame
+                assert panel.width() == combo.width()
+                assert panel.pos() == combo.mapTo(window, QPoint(0, combo.height() + 4))
+                capture(window, name + '-dropdown')
+                combo.hidePopup()
+            settings.color_button.click()
+            capture(window, 'color-picker')
+            settings.color_page.reject()
+            settings.section_buttons[3].click()
+            settings.sponsor_button.click()
+            capture(window, 'sponsorship')
+            settings.sponsorship_dialog.reject()
             settings.reject()
+            window.choose_folder()
+            capture(window, 'folder-picker')
+            window.folder_page.reject()
             login = LoginDialog(window)
             login.show()  # Do not call begin(): no QR or account requests.
             for index, name in enumerate(('qr', 'password', 'sms')):
                 login.login_tabs.setCurrentIndex(index)
-                capture(login, 'login-' + name)
+                capture(window, 'login-' + name)
             login.reject()
             targets = ExportTargetsDialog({}, window)
             targets.show()
-            capture(targets, 'append-targets')
+            capture(window, 'append-targets')
             targets.reject()
             help_window = HelpDialog(window)
             help_window.setText('<h2>LCSC3D</h2><p>Material UI verification</p>')
             help_window.show()
-            capture(help_window, 'help')
+            capture(window, 'help')
             help_window.reject()
+            window.open_favorites()
+            store = window.favorites_dialog
+            assert not store.tabs.tabBar().drawBase()
+            assert store.product_splitter.handleWidth() == window.workspace_splitter.handleWidth()
+            for part, title in (('C2040', 'RP2040'), ('C20197', '4D03WGJ0102T5E')):
+                store.append_row(store.search_table, {'part': part, 'title': title})
+            store.search_table.item(0, 0).setCheckState(Qt.Checked)
+            capture(window, 'store-light')
+            window.apply_preferences(Preferences(theme_mode='dark', accent_color='#7c3aed'))
+            capture(window, 'store-dark')
+            store.client.account = {'name': 'Demo account'}
+            window.refresh_store_account()
+            window.open_account()
+            settle()
+            assert window.account_menu.width() == window.account_button.width()
+            assert len({button.width() for button in window.account_menu.buttons}) == 1
+            capture(window, 'account-menu')
+            window.account_menu.close()
+            store.client.account = None
+            window.refresh_store_account()
+            notice = notify(window, '加入下载列表成功', '元件已加入下载列表，可返回工作台继续操作。', persistent=True)
+            notice.animation.setCurrentTime(notice.animation.duration())
+            capture(window, 'notification')
+            notice.close()
+            report['single_native_window'] = report['anchored_equal_width_dropdowns'] = True
+            report['shared_splitter_and_tab_base'] = report['original_support_labels'] = True
+            window.workspace_button.click()
+            window.apply_preferences(Preferences(theme_mode='light'))
             window.set_preview_mode('footprint')
             QTimer.singleShot(200, footprint)
         except Exception as exc:

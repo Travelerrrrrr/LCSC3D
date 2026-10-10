@@ -8,7 +8,7 @@ import time
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot, QEvent
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget)
-from localized_widgets import (QCheckBox, QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QMessageBox)
+from localized_widgets import (QCheckBox, QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget)
 
 from errors import Cancelled
 from store import (FAVORITES_URL, SEARCH_PAGE_SIZE, StoreClient, StoreError, SessionExpired,
@@ -16,7 +16,9 @@ from store import (FAVORITES_URL, SEARCH_PAGE_SIZE, StoreClient, StoreError, Ses
 from store_session import SessionVault, MemoryOnlyVault
 from international_store import catalog_client, HOME
 from app_theme import theme_manager
-from ui_components import IconButton, title_block, scroll_page, surface
+from ui_components import IconButton, title_block, scroll_page, surface, ColumnSplitter
+from shell_ui import notify
+from shiboken6 import isValid
 from store_images import ImageGallery, ProductImage
 from store_diagnostics import record_request_error
 from app_logging import (log_event, new_context, log_context, contextual, record_error, traced, safe_part)
@@ -587,19 +589,16 @@ class LoginDialog(QDialog):
 
 
 class FavoritesDialog(QDialog):
-    """One native window for public search and authenticated account favorites."""
+    """Persistent in-app page for public search and account favorites."""
     import_requested = Signal(object)
     preview_requested = Signal(str)
     activity_finished = Signal()
     account_changed = Signal()
 
     def __init__(self, parent=None, *, client_factory=None, vault=None):
-        # A native owner relationship keeps a dialog above its owner on Windows.
-        # This is a separate ordinary window; the main window manages its lifetime.
-        super().__init__(None, Qt.Window)
+        super().__init__(parent)
         self.app_window = parent
         if parent is not None:
-            parent.destroyed.connect(self.deleteLater)
             self.setWindowIcon(parent.windowIcon())
         self.setWindowModality(Qt.NonModal)
         self.setWindowFlag(Qt.WindowStaysOnTopHint, False)
@@ -639,15 +638,21 @@ class FavoritesDialog(QDialog):
         account_row.addWidget(title_block(ui_text('立创商城'), ui_text('发现元件 · 查看资料 · 同步收藏'), large=True), 1)
         self.account_label = plain_label(ui_text('未登录'), 'muted')
         self.account_label.setObjectName('badge')
-        account_row.addWidget(self.account_label)
+        if self._page_host is None:
+            account_row.addWidget(self.account_label)
+        else:
+            self.account_label.setParent(self)
+            self.account_label.hide()
         self.login_button = IconButton(ui_text('账号登录'), 'user')
         self.login_button.clicked.connect(lambda: self.clear_session() if self.client.account else self.open_login())
         self.account_changed.connect(self.refresh_account_action)
-        account_row.addWidget(self.login_button)
+        if self._page_host is None:
+            account_row.addWidget(self.login_button)
+        else:
+            self.login_button.setParent(self)
+            self.login_button.hide()
         layout.addLayout(account_row)
-        splitter = self.product_splitter = QSplitter(Qt.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(16)
+        splitter = self.product_splitter = ColumnSplitter()
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.currentChanged.connect(self.tab_changed)
@@ -1023,7 +1028,7 @@ class FavoritesDialog(QDialog):
             self.restore_session()
             return
         if self.login_dialog is None:
-            self.login_dialog = LoginDialog(self.app_window or self, self.factory)
+            self.login_dialog = LoginDialog(self, self.factory)
             self.login_dialog.logged_in.connect(self.logged_in)
             self.login_dialog.activity_finished.connect(self.activity_finished)
         self.login_dialog.show()
@@ -1241,15 +1246,11 @@ class FavoritesDialog(QDialog):
 
     def show_import_result(self, success, message):
         previous = getattr(self, 'import_notice', None)
-        if previous is not None:
+        if previous is not None and isValid(previous):
             previous.close()
             previous.deleteLater()
-        self.import_notice = QMessageBox(QMessageBox.Information if success else QMessageBox.Warning,
-                                        ui_text('加入下载列表成功') if success else ui_text('加入下载列表失败'),
-                                        message, QMessageBox.Ok, self)
-        self.import_notice.setTextFormat(Qt.PlainText)
-        self.import_notice.setWindowModality(Qt.WindowModal)
-        self.import_notice.open()
+        self.import_notice = notify(self, ui_text('加入下载列表成功') if success else ui_text('加入下载列表失败'),
+                                    message, severity='success' if success else 'warning')
 
     def selected_product(self):
         row = self.table.currentRow()
@@ -1374,7 +1375,7 @@ class FavoritesDialog(QDialog):
         product = self.selected_product()
         if product:
             self.preview_requested.emit(product['part'])
-            self.status.setText(ui_text('已在主窗口预览 ') + product['part'] + ui_text('，商城窗口保持打开。'))
+            self.status.setText(ui_text('已在主窗口预览 ') + product['part'] + ui_text('，返回商城后可继续选择。'))
 
     def update_collect_button(self):
         if not hasattr(self, 'collect_button'):
@@ -1467,7 +1468,7 @@ class FavoritesDialog(QDialog):
                 self.request_detail(product)
             self.detail_hint.setText(ui_text('正在读取完整商品图库，加载完成后打开原图…'))
             return
-        existing = next((g for g in self.galleries if g.part == product['part'] and g.isVisible()), None)
+        existing = next((g for g in self.galleries if g.part == product['part'] and not g._page_finished), None)
         if existing:
             existing.raise_()
             existing.activateWindow()
@@ -1479,8 +1480,13 @@ class FavoritesDialog(QDialog):
         gallery.show()
 
     def gallery_finished(self):
+        if not isValid(self):
+            return
         for gallery in self.galleries[:]:
-            if not gallery.isVisible() and not gallery.jobs.workers:
+            if not isValid(gallery):
+                self.galleries.remove(gallery)
+                continue
+            if gallery._page_finished and not gallery.jobs.workers:
                 self.galleries.remove(gallery)
                 gallery.deleteLater()
         self.activity_finished.emit()

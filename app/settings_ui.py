@@ -5,15 +5,16 @@ import sys
 
 from PySide6.QtCore import Qt, QUrl, QThread
 from PySide6.QtGui import QColor, QDesktopServices, QPixmap, QIcon, QFont, QFontDatabase
-from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QColorDialog, QSpinBox, QAbstractSpinBox, QStackedWidget, QButtonGroup, QFrame,
-                               QComboBox as NativeComboBox)
-from localized_widgets import (QComboBox, QDialog, QFormLayout, QGroupBox, QLabel, QPushButton, QMessageBox)
+from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QSpinBox, QAbstractSpinBox, QStackedWidget, QButtonGroup, QFrame)
+from localized_widgets import (QComboBox, QDialog, QFormLayout, QGroupBox, QLabel, QPushButton)
 
 from app_settings import (LOG_LEVELS, PROXY_OPTIONS, Preferences, LANGUAGES,
                           THEME_MODES, ACCENT_COLORS, DEFAULT_ACCENT, DEFAULT_FONT_FAMILY,
                           DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE)
 from app_theme import effective_font_family, foreground
 from ui_components import IconButton, title_block, scroll_page
+from shell_ui import AnchoredComboBox as NativeComboBox, choose_color, notify
+from shiboken6 import isValid
 from app_logging import (get_log_directory, log_event, record_error, logging_health,
                          contextual, new_context)
 from log_support import package_logs, clear_logs
@@ -306,10 +307,10 @@ class SettingsDialog(QDialog):
         support_layout = QHBoxLayout(support_group)
         support_layout.setContentsMargins(16, 22, 16, 16)
         support_layout.setSpacing(12)
-        self.star_button = IconButton(ui_text('项目主页'), 'store')
+        self.star_button = QPushButton(ui_text('⭐点个Star⭐'))
         self.star_button.setToolTip(ui_text('在浏览器中打开 LCSC3D 仓库首页'))
         self.star_button.clicked.connect(self.open_repository)
-        self.sponsor_button = IconButton(ui_text('赞助作者'), 'user')
+        self.sponsor_button = QPushButton(ui_text('🍔赞助作者🍔'))
         self.sponsor_button.setToolTip(ui_text('查看支付宝与微信收款码'))
         self.sponsor_button.clicked.connect(self.show_sponsorship)
         for button in (self.star_button, self.sponsor_button):
@@ -345,26 +346,22 @@ class SettingsDialog(QDialog):
         layout.addLayout(buttons)
 
     def choose_accent(self):
-        from i18n import render
-        value = QColorDialog.getColor(QColor(self.accent_combo.currentData()), self,
-                                     render(ui_text('选择 APP 配色')), QColorDialog.DontUseNativeDialog)
-        if value.isValid():
+        def selected(value):
             index = len(ACCENT_COLORS)
             self.accent_combo.setItemData(index, value.name())
             self.accent_combo.setCurrentIndex(index)
             self.update_color_preview()
+        self.color_page = choose_color(self, QColor(self.accent_combo.currentData()), ui_text('选择 APP 配色'), selected)
 
     def choose_text_color(self):
-        from i18n import render
         current = self.text_color_combo.currentData()
         if current == 'auto':
             current = foreground(self.accent_combo.currentData())
-        value = QColorDialog.getColor(QColor(current), self,
-                                     render(ui_text('选择按钮文字颜色')), QColorDialog.DontUseNativeDialog)
-        if value.isValid():
+        def selected(value):
             self.text_color_combo.setItemData(3, value.name())
             self.text_color_combo.setCurrentIndex(3)
             self.update_color_preview()
+        self.color_page = choose_color(self, QColor(current), ui_text('选择按钮文字颜色'), selected)
 
     def update_color_preview(self, *_):
         value = self.accent_combo.currentData() or DEFAULT_ACCENT
@@ -478,11 +475,16 @@ class SettingsDialog(QDialog):
     def confirm_clear_logs(self):
         if self.worker is not None:
             return
-        choice = QMessageBox.question(self, ui_text('清除日志'),
+        previous = getattr(self, 'confirmation_notice', None)
+        if previous is not None and isValid(previous):
+            previous.close()
+        self.confirmation_notice = notify(self, ui_text('清除日志'),
             ui_text('将清除当前及历史日志（包括更新、崩溃日志），无法恢复。\n'
             '清除后会继续记录，已打包的 ZIP 会保留。建议先打包需要反馈的日志。'),
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if choice != QMessageBox.Yes:
+            severity='warning', actions=((ui_text('取消'), None), (ui_text('清除日志'), self.clear_confirmed)), persistent=True)
+
+    def clear_confirmed(self):
+        if self.worker is not None:
             return
         try:
             result = clear_logs()

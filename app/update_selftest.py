@@ -55,6 +55,11 @@ def start(window, destination, *, startup=False):
                     stop('no_update_silent' if window.startup_update_outcome == 'latest' else 'check_failed_silent')
                     return
                 assert window.startup_update_outcome == 'available'
+                if dialog is None:
+                    notice = window.notifications.toasts[-1]
+                    assert notice.isVisible() and not notice.isWindow()
+                    notice.action_buttons[0].click()
+                    dialog = window.update_dialog
                 assert dialog is not None and dialog.isVisible()
                 report['notification_shown'] = True
             if dialog.worker is not None:
@@ -84,7 +89,8 @@ def start(window, destination, *, startup=False):
             window.settings_button.click()
             assert window.settings_dialog.isVisible()
             window.settings_dialog.update_button.click()
-            assert window.update_dialog.parent() is window.settings_dialog
+            assert window.update_dialog._page_owner is window.settings_dialog
+            assert window.update_dialog.window() is window
             report['settings_entry'] = True
             report['check_clicked'] = True
         timer.timeout.connect(poll)

@@ -83,8 +83,9 @@ def start(window, folder):
 
     def configure_dialog():
         try:
-            dialog = QApplication.activeModalWidget()
+            dialog = window.export_dialog
             assert isinstance(dialog, ExportTargetsDialog)
+            assert dialog.window() is window and not dialog.isWindow()
             for key in dialog.inputs:
                 dialog.inputs[key].setText(state['targets'].get(key, ''))
             dialog.keep_box.setChecked(state['keep'])
@@ -95,8 +96,8 @@ def start(window, folder):
             dialog.save()
             assert dialog.result() == dialog.DialogCode.Accepted, dialog.status.text()
         except Exception as exc:
-            if isinstance(QApplication.activeModalWidget(), ExportTargetsDialog):
-                QApplication.activeModalWidget().reject()
+            if getattr(window, 'export_dialog', None):
+                window.export_dialog.reject()
             finish(str(exc) or type(exc).__name__)
 
     def next_case():
@@ -149,8 +150,8 @@ def start(window, folder):
             project = root / '验证工程.PrjPcb'
             project.write_bytes(b'[Design]\r\nCustom=preserved\r\n')
             state['targets']['project_path'] = str(project)
-            QTimer.singleShot(0, configure_dialog)
             window.lib_append_box.click()
+            configure_dialog()
             if state['done']:
                 return
             assert not window.lib_merge_box.isChecked() and not window.merge_options.isVisible()

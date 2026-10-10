@@ -1,11 +1,45 @@
 """Shared Material surfaces, navigation and scalable line icons."""
-from PySide6.QtCore import QByteArray, QSize, Qt
-from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtCore import QByteArray, QSize, Qt, QRectF
+from PySide6.QtGui import QIcon, QPainter, QPixmap, QColor
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QTextBrowser
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QTextBrowser, QSplitter, QSplitterHandle
 from localized_widgets import QLabel, QPushButton, QDialog
 from app_theme import theme_manager
 from i18n import text as ui_text, render
+
+
+class ColumnHandle(QSplitterHandle):
+    def __init__(self, orientation, parent):
+        super().__init__(orientation, parent)
+        self.setCursor(Qt.SplitHCursor)
+        self.setMouseTracking(True)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(theme_manager().tokens['bg']))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(theme_manager().tokens['accent_ink' if self.underMouse() else 'border']))
+        grip = QRectF((self.width() - 4) / 2, (self.height() - 42) / 2, 4, 42)
+        painter.drawRoundedRect(grip, 2, 2)
+
+    def enterEvent(self, event):
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.update()
+        super().leaveEvent(event)
+
+
+class ColumnSplitter(QSplitter):
+    def __init__(self):
+        super().__init__(Qt.Horizontal)
+        self.setHandleWidth(24)
+        self.setChildrenCollapsible(False)
+
+    def createHandle(self):
+        return ColumnHandle(self.orientation(), self)
 
 
 ICON_PATHS = {

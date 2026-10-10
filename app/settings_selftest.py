@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from PySide6.QtCore import QTimer, QObject, Slot, QUrl, Qt, QEvent
 from PySide6.QtGui import QDesktopServices, QColor, QPalette, QKeyEvent
-from PySide6.QtWidgets import QApplication, QMessageBox, QColorDialog
+from PySide6.QtWidgets import QApplication, QColorDialog
 
 from app_settings import Preferences, get_preferences, set_preferences
 from app_logging import get_log_directory, log_event, set_log_level, configure_logging
@@ -61,11 +61,13 @@ def start(window, destination):
         combo.showPopup()
         QApplication.processEvents()
         view = combo.view()
-        popup = view.window()
+        popup = combo.popup_frame
         try:
             assert popup.isVisible()
+            assert popup.window() is window and not popup.isWindow()
             assert popup.width() <= combo.width() + 2, 'Font popup wider than its field'
-            assert popup.height() <= 250, 'Font popup exceeds compact list height'
+            assert popup.height() <= 8 * view.sizeHintForRow(0) + 4, 'Font popup exceeds eight rows'
+            assert view.sizeHintForRow(0) >= view.fontMetrics().height(), 'Font row clips its text'
             assert view.verticalScrollBar().isVisible()
             assert view.verticalScrollBar().maximum() > 0
             assert view.viewport().rect().contains(view.visualRect(view.currentIndex()).center())
@@ -179,15 +181,11 @@ def start(window, destination):
             folder = get_log_directory()
             markers = list(folder.glob('run-*.json'))
             assert markers
-            def answer_clear(choice):
-                message = QApplication.activeModalWidget()
-                if isinstance(message, QMessageBox):
-                    message.button(choice).click()
-            QTimer.singleShot(25, lambda: answer_clear(QMessageBox.No))
             dialog.clear_log_button.click()
+            dialog.confirmation_notice.action_buttons[0].click()
             assert 'settings.self_test_before_clear' in (folder / 'LCSC3D.log').read_text(encoding='utf-8')
-            QTimer.singleShot(25, lambda: answer_clear(QMessageBox.Yes))
             dialog.clear_log_button.click()
+            dialog.confirmation_notice.action_buttons[1].click()
             assert '日志已清除' in dialog.status.text()
             assert archive_path.exists() and all(path.exists() for path in markers)
             assert not (folder / 'LCSC3D.log.1').exists()
@@ -222,7 +220,8 @@ def start(window, destination):
             dialog.sponsor_button.click()
             QApplication.processEvents()
             sponsorship = dialog.sponsorship_dialog
-            assert sponsorship.isVisible() and sponsorship.parent() is dialog
+            assert sponsorship.isVisible() and sponsorship._page_owner is dialog
+            assert sponsorship.window() is window and not sponsorship.isWindow()
             assert len(sponsorship.code_labels) == 2
             assert all(label.isVisible() and not label.pixmap().isNull()
                        for label in sponsorship.code_labels)
@@ -241,22 +240,17 @@ def start(window, destination):
             manager = theme_manager()
             dialog.section_buttons[0].click()
             original_path_text = window.path_input.text()
-            def choose_custom_color():
-                picker = QApplication.activeModalWidget()
-                assert isinstance(picker, QColorDialog)
-                picker.setCurrentColor(QColor('#334455'))
-                picker.accept()
-            QTimer.singleShot(50, choose_custom_color)
             dialog.color_button.click()
+            picker = dialog.color_page
+            assert isinstance(picker, QColorDialog) and picker.window() is window
+            picker.setCurrentColor(QColor('#334455'))
+            picker.accept()
             assert dialog.accent_combo.currentData() == '#334455'
             report['custom_color_picker_verified'] = True
-            def choose_custom_text_color():
-                picker = QApplication.activeModalWidget()
-                assert isinstance(picker, QColorDialog)
-                picker.setCurrentColor(QColor('#fff1d6'))
-                picker.accept()
-            QTimer.singleShot(50, choose_custom_text_color)
             dialog.text_color_button.click()
+            picker = dialog.color_page
+            picker.setCurrentColor(QColor('#fff1d6'))
+            picker.accept()
             assert dialog.text_color_combo.currentData() == '#fff1d6'
             dialog.font_combo.setCurrentText('Segoe UI')
             dialog.font_size_spin.setValue(18)

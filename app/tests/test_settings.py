@@ -419,8 +419,9 @@ class SettingsWindowTests(PreferencesTestCase):
         from app_settings import DEFAULT_FONT_FAMILY
         self.window.open_settings()
         dialog = self.window.settings_dialog
-        with patch('settings_ui.QColorDialog.getColor', return_value=QColor('#fff1d6')):
-            dialog.text_color_button.click()
+        dialog.text_color_button.click()
+        dialog.color_page.setCurrentColor(QColor('#fff1d6'))
+        dialog.color_page.accept()
         dialog.font_combo.setCurrentText('Segoe UI')
         dialog.font_size_spin.setValue(18)
         dialog.larger_font_button.click()
@@ -460,8 +461,8 @@ class SettingsWindowTests(PreferencesTestCase):
         before = dict(theme_manager().tokens)
         self.window.open_settings()
         dialog = self.window.settings_dialog
-        with patch('settings_ui.QColorDialog.getColor', return_value=QColor()):
-            dialog.text_color_button.click()
+        dialog.text_color_button.click()
+        dialog.color_page.reject()
         self.assertEqual(dialog.text_color_combo.currentData(), 'auto')
         dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('#ffffff'))
         dialog.font_combo.setCurrentText('Segoe UI')
@@ -482,8 +483,9 @@ class SettingsWindowTests(PreferencesTestCase):
         combo.showPopup()
         self.app.processEvents()
         view = combo.view()
-        popup = view.window()
-        self.assertTrue(QTest.qWaitForWindowExposed(popup))
+        popup = combo.popup_frame
+        self.assertTrue(popup.isVisible())
+        self.assertIs(popup.window(), self.window)
         self.assertLessEqual(popup.width(), combo.width() + 2)
         self.assertLessEqual(popup.height(), 250)
         self.assertTrue(view.verticalScrollBar().isVisible())
@@ -495,7 +497,7 @@ class SettingsWindowTests(PreferencesTestCase):
         self.assertEqual(dialog.color_preview.font().family(), family)
         self.assertFalse(popup.isVisible())
         combo.showPopup()
-        self.assertTrue(QTest.qWaitForWindowExposed(popup))
+        self.assertTrue(popup.isVisible())
         QTest.keyClick(view, Qt.Key_Home)
         QTest.keyClick(view, Qt.Key_Escape)
         self.assertFalse(popup.isVisible())
@@ -585,11 +587,11 @@ class SettingsWindowTests(PreferencesTestCase):
         self.window.settings_button.click()
         dialog = self.window.settings_dialog
         app_logging.log_event('ERROR', 'test.before_clear')
-        with patch('settings_ui.QMessageBox.question', return_value=QMessageBox.No):
-            dialog.clear_log_button.click()
+        dialog.clear_log_button.click()
+        dialog.confirmation_notice.action_buttons[0].click()
         self.assertIn('test.before_clear', [row['event'] for row in self.log_entries()])
-        with patch('settings_ui.QMessageBox.question', return_value=QMessageBox.Yes):
-            dialog.clear_log_button.click()
+        dialog.clear_log_button.click()
+        dialog.confirmation_notice.action_buttons[1].click()
         self.assertNotIn('test.before_clear', [row['event'] for row in self.log_entries()])
         self.assertTrue(app_logging.log_event('ERROR', 'test.after_clear'))
         self.assertIn('日志已清除', dialog.status.text())
