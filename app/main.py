@@ -39,7 +39,7 @@ from export_targets import ExportTargetsDialog
 from product_preview import ProductPreview
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
-VERSION = '2.2.0'
+VERSION = '2.2.1'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent

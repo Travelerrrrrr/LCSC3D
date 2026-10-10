@@ -33,8 +33,17 @@ def start(window, destination):
     receiver = DirectoryReceiver(window)
     QDesktopServices.setUrlHandler('file', receiver, 'opened')
 
+    class RepositoryReceiver(QObject):
+        @Slot(QUrl)
+        def opened(self, url):
+            report['opened_repository'] = url.toString()
+
+    repository_receiver = RepositoryReceiver(window)
+    QDesktopServices.setUrlHandler('https', repository_receiver, 'opened')
+
     def finish(error=''):
         QDesktopServices.unsetUrlHandler('file')
+        QDesktopServices.unsetUrlHandler('https')
         report.update(success=not error, error=error)
         (destination / 'settings-verification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
         window.settings_enabled = False
@@ -104,6 +113,27 @@ def start(window, destination):
             assert dialog.log_level_combo.currentData() == 'DEBUG'
             assert dialog.grab().save(str(destination / '设置.png'))
             assert window.grab().save(str(destination / '主窗口.png'))
+            dialog.star_button.click()
+            assert report['opened_repository'] == 'https://github.com/Travelerrrrrr/LCSC3D'
+            dialog.store_proxy_combo.setCurrentIndex(1)
+            dialog.sponsor_button.click()
+            QApplication.processEvents()
+            sponsorship = dialog.sponsorship_dialog
+            assert sponsorship.isVisible() and sponsorship.parent() is dialog
+            assert len(sponsorship.code_labels) == 2
+            assert all(label.isVisible() and not label.pixmap().isNull()
+                       for label in sponsorship.code_labels)
+            assert sponsorship.grab().save(str(destination / '赞助与支持.png'))
+            sponsorship.close_button.click()
+            assert not sponsorship.isVisible() and dialog.isVisible()
+            assert dialog.store_proxy_combo.currentData() == 'direct'
+            assert get_preferences() == Preferences()
+            dialog.sponsor_button.click()
+            assert dialog.sponsorship_dialog is sponsorship and sponsorship.isVisible()
+            sponsorship.reject()
+            dialog.store_proxy_combo.setCurrentIndex(0)
+            report['support_buttons_verified'] = report['bundled_payment_codes_verified'] = True
+            report['support_preserves_unsaved_preferences'] = True
             report['default_system_proxies'] = report['default_debug'] = True
             window.schlib_box.setChecked(True)
             window.merge_schlib_box.setChecked(True)

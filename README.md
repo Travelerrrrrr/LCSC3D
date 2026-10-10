@@ -11,7 +11,9 @@
 
 LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。它把商城选型、账号收藏、模型下载、Altium Designer 元件库导出和四类预览放在一起。下载 `LCSC3D.exe` 即可运行，无须安装 Python；导出 AD 库也无须在电脑上安装 Altium Designer。
 
-**当前版本：2.2.0** · **[下载 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.2.0.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**当前源码版本：2.2.1** · **[下载已发布的 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [已发布的源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.2.1.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
+
+**2.2.1 新增设置窗口底部的“赞助与支持”栏。** 点击 **⭐点个Star⭐** 打开本仓库首页；点击 **🍔赞助作者🍔** 同时查看支付宝和微信收款码，离线也可显示。
 
 **2.2.0 将 AD 元件库的批量合并、追加和 PCB 工程联动集中到 Lib 区域，并加入相同 footprint 复用、独立导出和更清晰的文件组织。** 主页也可直接预览商品图片，商城加入下载列表后会显示导入结果。
 
@@ -62,7 +64,9 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 配置、日志、会话、缓存、临时文件及更新数据统一存放在 `%LOCALAPPDATA%/LCSC3D/`，不在 EXE 旁生成配置文件。旧配置自动迁移，默认导出目录为其中的 `downloads/`，可主动选择其他目录。
 
-![LCSC3D 2.2.0 设置：软件更新、独立代理选项与日志等级](docs/images/2.2.0/settings.png)
+设置窗口底部的 **赞助与支持** 提供仓库首页和作者收款码入口，点击即可使用，无须保存设置。赞助自愿，金额随意。
+
+![LCSC3D 2.2.1 设置：软件更新、代理、日志与赞助支持](docs/images/2.2.1/settings.png)
 
 ## 商城搜索、价格与商品详情
 

@@ -1,13 +1,82 @@
-"""Proxy and logging preferences in the native settings window."""
+"""Preferences, diagnostics and project support in the settings window."""
+from pathlib import Path
+import sys
+
 from PySide6.QtCore import Qt, QUrl, QThread
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout,
-                               QLabel, QPushButton, QVBoxLayout, QMessageBox)
+                               QLabel, QPushButton, QVBoxLayout, QMessageBox,
+                               QScrollArea, QWidget)
 
 from app_settings import LOG_LEVELS, PROXY_OPTIONS, Preferences
 from app_logging import (get_log_directory, log_event, record_error, logging_health,
                          contextual, new_context)
 from log_support import package_logs, clear_logs
+
+
+REPOSITORY_URL = 'https://github.com/Travelerrrrrr/LCSC3D'
+SPONSORSHIP_DIRECTORY = (Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
+                         / 'docs' / 'images' / 'sponsorship')
+
+
+class SponsorshipDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle('赞助作者')
+        self.setWindowModality(Qt.WindowModal)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(14)
+        heading = QLabel('感谢你支持 LCSC3D 的开发与维护！')
+        heading.setObjectName('section')
+        heading.setWordWrap(True)
+        layout.addWidget(heading)
+        hint = QLabel('使用支付宝或微信扫描对应收款码。自愿赞助，金额随意。')
+        hint.setObjectName('muted')
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        content = QWidget()
+        codes = QHBoxLayout(content)
+        codes.setContentsMargins(0, 0, 0, 0)
+        codes.setSpacing(16)
+        self.code_labels = []
+        for title, filename in (('支付宝', 'alipay.png'), ('微信支付', 'wechat.png')):
+            card = QGroupBox(title)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(12, 22, 12, 12)
+            code = QLabel()
+            code.setAlignment(Qt.AlignCenter)
+            code.setAccessibleName(title + '赞助收款码')
+            pixmap = QPixmap(str(SPONSORSHIP_DIRECTORY / filename))
+            if pixmap.isNull():
+                code.setText('收款码加载失败，请重新下载完整程序。')
+                code.setWordWrap(True)
+                code.setMinimumSize(280, 420)
+            else:
+                ratio = self.devicePixelRatioF()
+                preview = pixmap.scaled(round(280 * ratio), round(420 * ratio),
+                                        Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                preview.setDevicePixelRatio(ratio)
+                code.setPixmap(preview)
+            self.code_labels.append(code)
+            card_layout.addWidget(code)
+            codes.addWidget(card)
+        scroll = QScrollArea()
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        self.close_button = QPushButton('关闭')
+        self.close_button.setDefault(True)
+        self.close_button.clicked.connect(self.accept)
+        buttons.addWidget(self.close_button)
+        layout.addLayout(buttons)
+        available = self.screen().availableGeometry()
+        self.resize(min(680, available.width() - 40), min(620, available.height() - 40))
 
 
 class LogPackageWorker(QThread):
@@ -31,6 +100,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.save = save
         self.worker = None
+        self.sponsorship_dialog = None
         self.setWindowTitle('设置')
         self.setWindowModality(Qt.WindowModal)
         self.setMinimumWidth(510)
@@ -90,6 +160,21 @@ class SettingsDialog(QDialog):
         log_form.addRow(log_buttons)
         layout.addWidget(log_group)
 
+        support_group = QGroupBox('赞助与支持')
+        support_layout = QHBoxLayout(support_group)
+        support_layout.setContentsMargins(16, 22, 16, 16)
+        support_layout.setSpacing(12)
+        self.star_button = QPushButton('⭐点个Star⭐')
+        self.star_button.setToolTip('在浏览器中打开 LCSC3D 仓库首页')
+        self.star_button.clicked.connect(self.open_repository)
+        self.sponsor_button = QPushButton('🍔赞助作者🍔')
+        self.sponsor_button.setToolTip('查看支付宝与微信收款码')
+        self.sponsor_button.clicked.connect(self.show_sponsorship)
+        for button in (self.star_button, self.sponsor_button):
+            button.setAutoDefault(False)
+            support_layout.addWidget(button)
+        layout.addWidget(support_group)
+
         self.status = QLabel('')
         self.status.setTextFormat(Qt.PlainText)
         self.status.setWordWrap(True)
@@ -109,6 +194,22 @@ class SettingsDialog(QDialog):
         self.save_button.clicked.connect(self.save_preferences)
         buttons.addWidget(self.save_button)
         layout.addLayout(buttons)
+
+    def open_repository(self):
+        if QDesktopServices.openUrl(QUrl(REPOSITORY_URL)):
+            log_event('INFO', 'navigation.repository_opened')
+            return
+        log_event('WARNING', 'navigation.repository_open_failed')
+        self.status.setText('无法打开浏览器，请手动访问：' + REPOSITORY_URL)
+        self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.status.show()
+
+    def show_sponsorship(self):
+        if self.sponsorship_dialog is None:
+            self.sponsorship_dialog = SponsorshipDialog(self)
+        self.sponsorship_dialog.show()
+        self.sponsorship_dialog.raise_()
+        self.sponsorship_dialog.activateWindow()
 
     @staticmethod
     def proxy_combo(value):

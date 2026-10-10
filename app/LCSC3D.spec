@@ -10,7 +10,9 @@ a = Analysis(
     pathex=[str(root)],
     binaries=[],
     datas=[(str(root / 'viewer.html'), '.'), (str(root / 'vector_viewer.html'), '.'),
-           (str(root / 'assets'), 'assets'), (str(root / 'licenses'), 'licenses')],
+           (str(root / 'assets'), 'assets'), (str(root / 'licenses'), 'licenses')]
+          + [(str(root.parent / 'docs/images/sponsorship' / filename), 'docs/images/sponsorship')
+             for filename in ('alipay.png', 'wechat.png')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
