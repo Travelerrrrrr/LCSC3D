@@ -20,6 +20,11 @@ THEME_MODES = (('跟随系统', 'system'), ('浅色', 'light'), ('深色', 'dark
 ACCENT_COLORS = (('青绿', '#168878'), ('蓝色', '#2563eb'), ('紫色', '#7c3aed'),
                  ('玫红', '#be185d'), ('橙色', '#c2410c'))
 DEFAULT_ACCENT = '#168878'
+DEFAULT_FONT_FAMILY = 'Microsoft YaHei UI'
+
+
+def color_value(value, default):
+    return value.lower() if isinstance(value, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', value) else default
 
 
 @dataclass(frozen=True)
@@ -30,6 +35,8 @@ class Preferences:
     language: str = 'zh_CN'
     theme_mode: str = 'system'
     accent_color: str = DEFAULT_ACCENT
+    accent_text_color: str = 'auto'
+    font_family: str = DEFAULT_FONT_FAMILY
 
     @classmethod
     def from_mapping(cls, values):
@@ -39,8 +46,11 @@ class Preferences:
                    log_level=values.get('log_level') if values.get('log_level') in LOG_LEVELS else 'DEBUG',
                    language=values.get('language') if values.get('language') in ('zh_CN', 'en_US') else 'zh_CN',
                    theme_mode=values.get('theme_mode') if values.get('theme_mode') in ('system', 'light', 'dark') else 'system',
-                   accent_color=values['accent_color'].lower() if isinstance(values.get('accent_color'), str)
-                   and re.fullmatch(r'#[0-9a-fA-F]{6}', values['accent_color']) else DEFAULT_ACCENT)
+                   accent_color=color_value(values.get('accent_color'), DEFAULT_ACCENT),
+                   accent_text_color=color_value(values.get('accent_text_color'), 'auto'),
+                   font_family=values['font_family'].strip() if isinstance(values.get('font_family'), str)
+                   and 0 < len(values['font_family'].strip()) <= 128
+                   and not any(ord(c) < 32 for c in values['font_family']) else DEFAULT_FONT_FAMILY)
 
     def to_mapping(self):
         return asdict(self)

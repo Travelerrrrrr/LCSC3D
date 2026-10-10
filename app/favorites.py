@@ -5,7 +5,7 @@ from i18n import text as ui_text, message as ui_message
 import threading
 import time
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot, QEvent
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget)
 from localized_widgets import (QCheckBox, QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QMessageBox)
@@ -157,6 +157,11 @@ class DetailLabel(QLabel):
         if event.size().width() != event.oldSize().width():
             self.reflow.start(0)
 
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.FontChange, QEvent.ApplicationFontChange, QEvent.StyleChange) and hasattr(self, 'reflow'):
+            self.reflow.start(0)
+
     def fit_text(self):
         height = max(0, self.heightForWidth(self.width())) if self.text() else 0
         if self.minimumHeight() != height or self.maximumHeight() != height:
@@ -183,6 +188,11 @@ class ParameterTable(QTableWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if event.size().width() != event.oldSize().width():
+            self.reflow.start(0)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.FontChange, QEvent.ApplicationFontChange, QEvent.StyleChange) and hasattr(self, 'reflow'):
             self.reflow.start(0)
 
     def fit_rows(self):

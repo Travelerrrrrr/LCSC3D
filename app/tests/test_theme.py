@@ -9,14 +9,15 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app_settings import Preferences, ACCENT_COLORS, set_preferences, get_preferences
-from app_theme import colors, contrast, theme_manager
+from app_settings import Preferences, ACCENT_COLORS, set_preferences, get_preferences, DEFAULT_FONT_FAMILY
+from app_theme import colors, contrast, theme_manager, effective_font_family
 from i18n import text, message, render, set_language, language
-from localized_widgets import QLabel, QLineEdit, QTableWidget, QTableWidgetItem, QMessageBox
+from localized_widgets import QLabel, QLineEdit, QTableWidget, QTableWidgetItem, QMessageBox, QPushButton
 from international_store import (InternationalStoreClient, international_product, catalog_client,
                                  storefront_url, HOME, API)
 from store import StoreClient, StoreError
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontDatabase, QPalette
 from PySide6.QtWidgets import QApplication
 
 FIXTURE = json.loads((Path(__file__).parent / 'fixtures/international_catalog.json').read_text('utf-8'))
@@ -38,11 +39,17 @@ class AppearanceTests(unittest.TestCase):
 
     def test_new_preferences_validate_and_old_configs_keep_compatible_defaults(self):
         for value in ({}, {'language': [], 'theme_mode': {}, 'accent_color': '#fff'},
-                      {'language': 'bad', 'theme_mode': 'bad', 'accent_color': 'red; color:white'}):
+                      {'language': 'bad', 'theme_mode': 'bad', 'accent_color': 'red; color:white'},
+                      {'accent_text_color': '#fff', 'font_family': []},
+                      {'accent_text_color': None, 'font_family': '\nArial'},
+                      {'accent_text_color': {}, 'font_family': ' '},
+                      {'accent_text_color': [], 'font_family': 'f' * 129}):
             self.assertEqual(Preferences.from_mapping(value), Preferences())
-        expected = Preferences(language='en_US', theme_mode='dark', accent_color='#123abc', store_proxy='direct')
+        expected = Preferences(language='en_US', theme_mode='dark', accent_color='#123abc', store_proxy='direct',
+                               accent_text_color='#fff1d6', font_family='Segoe UI')
         values = expected.to_mapping()
         values['accent_color'] = '#123ABC'
+        values['accent_text_color'] = '#FFF1D6'
         self.assertEqual(Preferences.from_mapping(values), expected)
 
     def test_explicit_ui_messages_have_english_catalog_entries(self):
@@ -118,6 +125,83 @@ class AppearanceTests(unittest.TestCase):
                     self.assertGreaterEqual(contrast(c['accent'], c['on_accent']), 4.5)
                     self.assertGreaterEqual(contrast(c['accent_ink'], c['surface']), 4.5)
                     self.assertGreaterEqual(contrast(c['text'], c['surface']), 4.5)
+
+    def test_manual_text_color_reaches_buttons_selection_and_hover_without_being_overridden(self):
+        manager = theme_manager()
+        button, selected = QPushButton('Download'), QPushButton('3D')
+        button.setObjectName('primary')
+        selected.setObjectName('previewMode')
+        selected.setCheckable(True)
+        selected.setChecked(True)
+        for widget in (button, selected):
+            widget.resize(140, 42)
+        for mode, accent in (('light', '#168878'), ('dark', '#ffffff'), ('light', '#000000')):
+            manager.apply(Preferences(theme_mode=mode, accent_color=accent, accent_text_color='#fff1d6'))
+            for widget in (button, selected):
+                widget.ensurePolished()
+                # A :checked QSS color is resolved during painting; QWidget's
+                # ordinary palette still describes the unchecked state.
+                image = widget.grab().toImage()
+                matching = sum(max(abs(channel - wanted) for channel, wanted in
+                                   zip(image.pixelColor(x, y).getRgb()[:3], (255, 241, 214))) < 18
+                               for y in range(image.height()) for x in range(image.width()))
+                self.assertGreater(matching, 5, (mode, accent, widget.objectName()))
+            self.assertEqual(manager.tokens['on_accent_hover'], '#fff1d6')
+            self.assertEqual(self.app.palette().color(QPalette.HighlightedText).name(), '#fff1d6')
+        manager.apply(Preferences())
+        self.assertEqual(manager.tokens['on_accent'], '#000000')
+        for widget in (button, selected):
+            widget.deleteLater()
+
+    def test_font_change_updates_existing_widgets_even_when_colors_are_unchanged(self):
+        manager = theme_manager()
+        first = effective_font_family(DEFAULT_FONT_FAMILY)
+        second = next(f for f in QFontDatabase.families() if f != first and not f.startswith('@'))
+        button = QPushButton('Download')
+        label = QLabel('LCSC3D Aa 123')
+        manager.apply(Preferences(font_family=first))
+        manager.apply(Preferences(font_family=second))
+        for widget in (button, label):
+            widget.ensurePolished()
+            self.assertEqual(widget.font().family(), second)
+        self.assertEqual(manager.tokens['font_family'], second)
+        manager.apply(Preferences())
+        self.assertEqual(label.font().family(), first)
+        self.assertEqual(label.font().pixelSize(), 13)
+        for widget in (button, label):
+            widget.deleteLater()
+
+    def test_font_missing_on_another_computer_falls_back_to_an_installed_font(self):
+        value = Preferences(font_family='LCSC3D missing font 7b972d9')
+        theme_manager().apply(value)
+        expected = effective_font_family(DEFAULT_FONT_FAMILY)
+        self.assertEqual(theme_manager().tokens['font_family'], expected)
+        self.assertEqual(self.app.font().family(), expected)
+
+    def test_font_change_reflows_open_product_descriptions_and_parameter_rows(self):
+        from favorites import DetailLabel, ParameterTable
+        label = DetailLabel('LCSC3D component parameter with long text. ' * 24)
+        label.resize(210, 30)
+        table = ParameterTable()
+        table.setRowCount(1)
+        table.setItem(0, 0, QTableWidgetItem('Long parameter'))
+        table.setItem(0, 1, QTableWidgetItem('Long parameter details abcdef0123456789 ' * 10))
+        table.resize(320, 240)
+        label.show()
+        table.show()
+        try:
+            for family in ('Segoe UI', 'Consolas'):
+                theme_manager().apply(Preferences(font_family=family))
+                for _ in range(10):
+                    self.app.processEvents()
+                self.assertGreaterEqual(label.height(), label.heightForWidth(label.width()))
+                before = table.rowHeight(0)
+                table.resizeRowsToContents()
+                self.assertEqual(before, table.rowHeight(0))
+        finally:
+            for widget in (label, table):
+                widget.close()
+                widget.deleteLater()
 
     def test_language_routes_links_and_clients_without_reusing_mainland_urls(self):
         set_preferences(Preferences(language='en_US'))

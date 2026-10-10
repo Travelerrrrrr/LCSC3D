@@ -1,9 +1,9 @@
 """Application palette, accent colors and live system appearance updates."""
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtGui import QColor, QPalette, QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
-from app_settings import Preferences
+from app_settings import Preferences, DEFAULT_FONT_FAMILY
 
 
 def luminance(color):
@@ -21,7 +21,7 @@ def foreground(background):
     return '#ffffff' if contrast(background, '#ffffff') >= contrast(background, '#000000') else '#000000'
 
 
-def colors(dark=False, accent='#168878'):
+def colors(dark=False, accent='#168878', accent_text='auto'):
     result = (dict(bg='#171e28', surface='#222c39', field='#1b2531', text='#e5edf5',
                    muted='#a5b6c8', border='#435368', hover='#303e50', disabled='#7f90a3',
                    success='#6cddbc', warning='#f2c47a', error='#ff9c9c') if dark else
@@ -36,15 +36,21 @@ def colors(dark=False, accent='#168878'):
         ink = ink.lighter(110) if dark else ink.darker(110)
         if dark and ink.lightness() < 8:
             ink = QColor('#222222')
-    result.update(accent=accent, on_accent=foreground(accent), accent_ink=ink.name(),
+    result.update(accent=accent, on_accent=foreground(accent) if accent_text == 'auto' else accent_text, accent_ink=ink.name(),
                   accent_hover=QColor(accent).lighter(115).name() if dark else QColor(accent).darker(112).name())
-    result['on_accent_hover'] = foreground(result['accent_hover'])
+    result['on_accent_hover'] = foreground(result['accent_hover']) if accent_text == 'auto' else accent_text
     return result
+
+
+def effective_font_family(requested):
+    """Portable preferences may name a font not installed on this computer."""
+    families = {family.casefold(): family for family in QFontDatabase.families()}
+    return families.get(requested.casefold()) or families.get(DEFAULT_FONT_FAMILY.casefold()) or QFontDatabase.systemFont(QFontDatabase.GeneralFont).family()
 
 
 def stylesheet(c):
     return '''
-QWidget { font-family:"Microsoft YaHei UI"; font-size:13px; color:%(text)s; }
+QWidget { font-size:13px; color:%(text)s; }
 QMainWindow, QDialog, QWidget#canvas, QScrollArea, QScrollArea > QWidget > QWidget { background:%(bg)s; }
 QFrame#card { background:%(surface)s; border:1px solid %(border)s; border-radius:12px; }
 QLabel#title { font-size:25px; font-weight:700; }
@@ -115,12 +121,16 @@ class ThemeManager(QObject):
         self.preferences = preferences
         scheme = self.app.styleHints().colorScheme() if system_scheme is None else system_scheme
         self.dark = preferences.theme_mode == 'dark' or (preferences.theme_mode == 'system' and scheme == Qt.ColorScheme.Dark)
-        c = colors(self.dark, preferences.accent_color)
+        c = colors(self.dark, preferences.accent_color, preferences.accent_text_color)
+        c['font_family'] = effective_font_family(preferences.font_family)
         if self.applied and c == self.tokens:
             self.changed.emit()
             return
         self.tokens = c
         self.applied = True
+        font = QFont(c['font_family'])
+        font.setPixelSize(13)
+        self.app.setFont(font)
         palette = QPalette()
         roles = {'Window': 'bg', 'WindowText': 'text', 'Base': 'field', 'AlternateBase': 'surface',
                  'ToolTipBase': 'surface', 'ToolTipText': 'text', 'Text': 'text', 'Button': 'surface',

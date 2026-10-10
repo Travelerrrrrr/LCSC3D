@@ -4,12 +4,13 @@ from pathlib import Path
 import sys
 
 from PySide6.QtCore import Qt, QUrl, QThread
-from PySide6.QtGui import QColor, QDesktopServices, QPixmap, QIcon
-from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QColorDialog)
+from PySide6.QtGui import QColor, QDesktopServices, QPixmap, QIcon, QFont
+from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QColorDialog, QFontComboBox)
 from localized_widgets import (QComboBox, QDialog, QFormLayout, QGroupBox, QLabel, QPushButton, QMessageBox)
 
 from app_settings import (LOG_LEVELS, PROXY_OPTIONS, Preferences, LANGUAGES,
-                          THEME_MODES, ACCENT_COLORS, DEFAULT_ACCENT)
+                          THEME_MODES, ACCENT_COLORS, DEFAULT_ACCENT, DEFAULT_FONT_FAMILY)
+from app_theme import effective_font_family, foreground
 from app_logging import (get_log_directory, log_event, record_error, logging_health,
                          contextual, new_context)
 from log_support import package_logs, clear_logs
@@ -147,9 +148,42 @@ class SettingsDialog(QDialog):
         accent_row.addWidget(self.accent_combo, 1)
         accent_row.addWidget(self.color_button)
         theme_form.addRow(ui_text('APP 配色'), accent_row)
+
+        text_color_row = QHBoxLayout()
+        self.text_color_combo = QComboBox()
+        for title, value in ((ui_text('自动'), 'auto'), (ui_text('白色'), '#ffffff'), (ui_text('黑色'), '#000000')):
+            self.text_color_combo.addItem(title, value)
+        self.text_color_combo.addItem(ui_text('自定义'), preferences.accent_text_color if preferences.accent_text_color != 'auto' else '#ffffff')
+        selected = self.text_color_combo.findData(preferences.accent_text_color)
+        self.text_color_combo.setCurrentIndex(selected if selected >= 0 else 3)
+        self.text_color_button = QPushButton(ui_text('选择文字颜色…'))
+        self.text_color_button.setAutoDefault(False)
+        self.text_color_button.clicked.connect(self.choose_text_color)
+        text_color_row.addWidget(self.text_color_combo, 1)
+        text_color_row.addWidget(self.text_color_button)
+        theme_form.addRow(ui_text('按钮文字颜色'), text_color_row)
+        text_hint = QLabel(ui_text('用于彩色按钮和选中项；自动模式按配色选择黑字或白字。'))
+        text_hint.setObjectName('muted')
+        text_hint.setWordWrap(True)
+        theme_form.addRow(text_hint)
+
+        font_row = QHBoxLayout()
+        self.font_combo = QFontComboBox()
+        self.font_combo.setEditable(False)
+        self.font_combo.setCurrentFont(QFont(effective_font_family(preferences.font_family)))
+        self.reset_font_button = QPushButton(ui_text('恢复默认'))
+        self.reset_font_button.setAutoDefault(False)
+        self.reset_font_button.clicked.connect(lambda: self.font_combo.setCurrentFont(QFont(effective_font_family(DEFAULT_FONT_FAMILY))))
+        font_row.addWidget(self.font_combo, 1)
+        font_row.addWidget(self.reset_font_button)
+        theme_form.addRow(ui_text('界面字体'), font_row)
+
         self.color_preview = QLabel()
         self.color_preview.setAlignment(Qt.AlignCenter)
+        self.color_preview.setWordWrap(True)
         self.accent_combo.currentIndexChanged.connect(self.update_color_preview)
+        self.text_color_combo.currentIndexChanged.connect(self.update_color_preview)
+        self.font_combo.currentFontChanged.connect(self.update_color_preview)
         self.update_color_preview()
         theme_form.addRow(self.color_preview)
         theme_hint = QLabel(ui_text('保存后立即生效。English 使用 LCSC 国际商城。'))
@@ -255,11 +289,26 @@ class SettingsDialog(QDialog):
             self.accent_combo.setCurrentIndex(index)
             self.update_color_preview()
 
-    def update_color_preview(self):
-        from app_theme import foreground
+    def choose_text_color(self):
+        from i18n import render
+        current = self.text_color_combo.currentData()
+        if current == 'auto':
+            current = foreground(self.accent_combo.currentData())
+        value = QColorDialog.getColor(QColor(current), self,
+                                     render(ui_text('选择按钮文字颜色')), QColorDialog.DontUseNativeDialog)
+        if value.isValid():
+            self.text_color_combo.setItemData(3, value.name())
+            self.text_color_combo.setCurrentIndex(3)
+            self.update_color_preview()
+
+    def update_color_preview(self, *_):
         value = self.accent_combo.currentData() or DEFAULT_ACCENT
-        self.color_preview.setText(ui_text('配色预览 · ') + value.upper())
-        self.color_preview.setStyleSheet(ui_message('background:{0};color:{1};padding:7px;border-radius:6px;', value, foreground(value)))
+        text_color = self.text_color_combo.currentData()
+        if text_color == 'auto':
+            text_color = foreground(value)
+        self.color_preview.setFont(self.font_combo.currentFont())
+        self.color_preview.setText(ui_text('配色与字体预览 · ') + 'LCSC3D Aa 123 · ' + value.upper())
+        self.color_preview.setStyleSheet(ui_message('background:{0};color:{1};padding:7px;border-radius:6px;', value, text_color))
 
     def open_repository(self):
         if QDesktopServices.openUrl(QUrl(REPOSITORY_URL)):
@@ -291,7 +340,9 @@ class SettingsDialog(QDialog):
                                   log_level=self.log_level_combo.currentData(),
                                   language=self.language_combo.currentData(),
                                   theme_mode=self.theme_mode_combo.currentData(),
-                                  accent_color=self.accent_combo.currentData())
+                                  accent_color=self.accent_combo.currentData(),
+                                  accent_text_color=self.text_color_combo.currentData(),
+                                  font_family=self.font_combo.currentFont().family())
         if self.save(preferences):
             self.accept()
         else:
@@ -325,7 +376,8 @@ class SettingsDialog(QDialog):
         for widget in (self.package_log_button, self.clear_log_button, self.open_log_button,
                        self.save_button, self.cancel_button, self.store_proxy_combo,
                        self.update_proxy_combo, self.log_level_combo, self.language_combo,
-                       self.theme_mode_combo, self.accent_combo, self.color_button):
+                       self.theme_mode_combo, self.accent_combo, self.color_button,
+                       self.text_color_combo, self.text_color_button, self.font_combo, self.reset_font_button):
             widget.setEnabled(not busy)
 
     def finish_log_package(self):

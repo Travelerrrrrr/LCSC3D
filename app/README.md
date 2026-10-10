@@ -10,13 +10,17 @@ Windows 10/11 x64 便携软件，用嘉立创商城 C 编号下载官方 STEP/OB
 
 - **语言 / Language**：简体中文、English，保存后切换现有界面，无须重启。English 模式在软件内搜索 LCSC 国际商城，读取英文商品资料、美元价格、库存和原图；商品页按钮打开 `www.lcsc.com`。宽泛关键词按商品分类显示结果，可用分类选择框切换，并逐页读取最多 50 项结果。
 - **明暗模式 / Appearance**：跟随系统、浅色、深色。默认跟随系统，软件运行期间也会响应系统主题变化；手动指定浅色或深色后保持所选模式。
-- **APP 配色 / Accent color**：青绿、蓝色、紫色、玫红、橙色，或点击 **选择颜色… / Choose color…** 自定义颜色。配色预览在设置中显示；保存后应用于按钮、选中状态、进度条等区域。按钮文字根据颜色明暗选择黑色或白色。
+- **APP 配色 / Accent color**：青绿、蓝色、紫色、玫红、橙色，或点击 **选择颜色… / Choose color…** 自定义颜色。配色预览在设置中显示；保存后应用于按钮、选中状态、进度条等区域。
+- **按钮文字颜色 / Button text color**：自动、白色、黑色、自定义。点击 **选择文字颜色… / Choose text color…** 可选任意文字颜色；作用于彩色按钮和选中项，包括“开始下载”与选中的“3D 模型”。手动颜色在切换明暗模式和 APP 配色后保留；选择“自动”恢复按背景对比度选黑字或白字。想使用青绿配白字时，选择“青绿”及“白色”后保存。
+- **界面字体 / Interface font**：选择本机已安装的字体，设置内显示配色与字体预览。保存后应用于主窗口、弹窗、菜单、表格及 3D 预览操作提示。**恢复默认 / Reset to default** 选回默认字体，点击保存生效；换电脑后找不到原字体时使用默认可用字体。此设置修改界面字体，不更改导出库或官方符号/封装中的文字。
 
-主题与语言的切换保留下载列表、勾选状态、导出路径及当前模型。取消设置或保存失败时保持原设置。设置内容较多时可滚动，底部“保存 / 取消”始终可见。符号与封装的官方 SVG 颜色保持不变。
+主题、文字颜色、字体与语言的切换保留下载列表、勾选状态、导出路径及当前模型。选择过程中只更新设置内的预览，保存后应用并记忆；取消设置或保存失败时保持原设置。设置内容较多时可滚动，底部“保存 / 取消”始终可见。符号与封装的官方 SVG 颜色保持不变。
 
 **国际站账号**：English 模式的账号登录、收藏管理按钮打开 LCSC.com 网页；国际站的搜索、分类、翻页、商品详情、原图和加入下载列表均在软件内操作。国际站不读取或发送国内站保存的登录会话。切回简体中文后，国内站原有的原生登录和账号收藏流程继续可用。
 
 **English quick start:** Open **Settings → Theme settings**, select **English**, choose **Follow system / Light / Dark** and an accent color, then click **Save**. Open **LCSC International** to search by C-number, MPN or keyword. Broad searches include a category selector. Check products and click **Add to download list**. Prices use USD. International sign-in and account favorites are managed on LCSC.com.
+
+For white text on teal buttons, set **Button text color → White**. **Choose text color…** opens a custom color picker. Select an installed font under **Interface font**, or click **Reset to default**. Preview changes in Settings, then click **Save** to apply and remember them.
 
 程序内部文件统一存放在 `%LOCALAPPDATA%/LCSC3D/`：配置和加密会话位于根目录，日志位于 `logs/`，诊断 ZIP 位于 `diagnostics/`，缓存位于 `cache/`，临时文件位于 `temp/`，单文件 EXE 的运行时解压位于 `runtime/`，更新下载、计划和备份位于 `updates/`。正常启动和关闭不在 EXE 目录生成配置或日志。模型和元件库默认保存到 `downloads/`，也可主动选择其他导出目录。
 
@@ -29,7 +33,7 @@ Windows 10/11 x64 便携软件，用嘉立创商城 C 编号下载官方 STEP/OB
 
 **日志** 可选择 **Debug / Info / Warning / Error / Critical**，默认 **Debug**。所选等级及更严重的信息会写入日志，保存后立即生效，启动阶段也遵守已保存的等级。点击 **打开日志** 打开 `%LOCALAPPDATA%/LCSC3D/logs`。主程序写入 `LCSC3D.log`，独立更新助手写入 `LCSC3D-update.log`，各自单个文件最多约 2 MiB，保留最近 3 份轮转备份。
 
-**打包日志** 在后台生成 ZIP，包含主程序、更新助手、轮转、崩溃日志及运行状态标记，另附 `diagnostics.json`（软件/系统/Python/Qt 版本、当前生效的代理模式与日志等级、日志写入状态、收集清单）和反馈说明。ZIP 保存在 `%LOCALAPPDATA%/LCSC3D/diagnostics/`，完成后打开该目录。它不读取会话文件、完整配置、代理地址、环境变量或模型；异常大文件保留最近内容，读取失败或截短会在界面和收集清单中说明。
+**打包日志** 在后台生成 ZIP，包含主程序、更新助手、轮转、崩溃日志及运行状态标记，另附 `diagnostics.json`（软件/系统/Python/Qt 版本、当前生效的代理模式、日志等级、主题、按钮文字颜色、界面字体、日志写入状态及收集清单）和反馈说明。ZIP 保存在 `%LOCALAPPDATA%/LCSC3D/diagnostics/`，完成后打开该目录。它不读取会话文件、完整配置、代理地址、环境变量或模型；异常大文件保留最近内容，读取失败或截短会在界面和收集清单中说明。
 
 **清除日志** 会先确认，清除当前和历史日志后继续记录。设置、登录状态、下载文件、运行状态标记和已打包的 ZIP 保留。其他进程正在使用或无权限的文件可能无法清除，界面会显示未清除数量。
 

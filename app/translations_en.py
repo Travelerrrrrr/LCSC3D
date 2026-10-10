@@ -417,6 +417,16 @@ ENGLISH = {
 
 # Messages crossing worker-thread string signals and local browser canvases.
 ENGLISH.update({
+    '自动': 'Auto',
+    '白色': 'White',
+    '黑色': 'Black',
+    '选择文字颜色…': 'Choose text color…',
+    '按钮文字颜色': 'Button text color',
+    '选择按钮文字颜色': 'Choose button text color',
+    '用于彩色按钮和选中项；自动模式按配色选择黑字或白字。': 'Used on colored buttons and selected items. Auto chooses black or white.',
+    '恢复默认': 'Reset to default',
+    '界面字体': 'Interface font',
+    '配色与字体预览 · ': 'Color and font preview · ',
     '查询器件': 'Looking up part',
     '下载 {0}': 'Downloading {0}',
     '导出 AD 封装库': 'Exporting PcbLib',

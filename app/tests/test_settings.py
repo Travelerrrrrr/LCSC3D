@@ -402,6 +402,9 @@ class SettingsWindowTests(PreferencesTestCase):
         dialog.language_combo.setCurrentIndex(dialog.language_combo.findData('en_US'))
         dialog.theme_mode_combo.setCurrentIndex(dialog.theme_mode_combo.findData('dark'))
         dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('#7c3aed'))
+        dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('#ffffff'))
+        from PySide6.QtGui import QFont
+        dialog.font_combo.setCurrentFont(QFont('Segoe UI'))
         with patch('main.write_settings', side_effect=PermissionError()):
             dialog.save_button.click()
         self.assertTrue(dialog.isVisible())
@@ -409,6 +412,52 @@ class SettingsWindowTests(PreferencesTestCase):
         self.assertEqual(theme_manager().tokens, before)
         self.assertEqual(self.window.input.toPlainText(), 'C2040\nC20197')
         self.assertEqual(self.window.path_input.text(), 'F:/用户选择/模型')
+
+    def test_text_color_and_font_save_restore_and_reset_without_affecting_other_preferences(self):
+        from PySide6.QtGui import QFont, QColor
+        from app_theme import theme_manager, effective_font_family
+        from app_settings import DEFAULT_FONT_FAMILY
+        self.window.open_settings()
+        dialog = self.window.settings_dialog
+        with patch('settings_ui.QColorDialog.getColor', return_value=QColor('#fff1d6')):
+            dialog.text_color_button.click()
+        dialog.font_combo.setCurrentFont(QFont('Segoe UI'))
+        family = dialog.font_combo.currentFont().family()
+        self.assertIn('color:#fff1d6;', dialog.color_preview.styleSheet())
+        self.assertEqual(dialog.color_preview.font().family(), family)
+        self.assertEqual(get_preferences(), Preferences())
+        dialog.save_button.click()
+        saved = json.loads(self.settings_path.read_text(encoding='utf-8'))
+        self.assertEqual(saved['accent_text_color'], '#fff1d6')
+        self.assertEqual(saved['font_family'], family)
+        self.assertEqual(saved['store_proxy'], 'system')
+        self.assertEqual(theme_manager().tokens['on_accent'], '#fff1d6')
+        self.window._restore_settings()
+        self.window.open_settings()
+        dialog = self.window.settings_dialog
+        self.assertEqual(dialog.text_color_combo.currentData(), '#fff1d6')
+        self.assertEqual(dialog.font_combo.currentFont().family(), family)
+        dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('auto'))
+        dialog.reset_font_button.click()
+        dialog.save_button.click()
+        self.assertEqual(get_preferences().accent_text_color, 'auto')
+        self.assertEqual(get_preferences().font_family, effective_font_family(DEFAULT_FONT_FAMILY))
+
+    def test_cancelled_text_picker_and_settings_do_not_change_live_font_or_color(self):
+        from PySide6.QtGui import QFont, QColor
+        from app_theme import theme_manager
+        before = dict(theme_manager().tokens)
+        self.window.open_settings()
+        dialog = self.window.settings_dialog
+        with patch('settings_ui.QColorDialog.getColor', return_value=QColor()):
+            dialog.text_color_button.click()
+        self.assertEqual(dialog.text_color_combo.currentData(), 'auto')
+        dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('#ffffff'))
+        dialog.font_combo.setCurrentFont(QFont('Segoe UI'))
+        dialog.cancel_button.click()
+        self.assertEqual(get_preferences(), Preferences())
+        self.assertEqual(theme_manager().tokens, before)
+        self.assertFalse(self.settings_path.exists())
 
     def test_language_roundtrip_keeps_queue_checks_and_does_not_read_mainland_session_in_english(self):
         from dataclasses import replace

@@ -7,7 +7,7 @@ import zipfile
 from dataclasses import replace
 
 from PySide6.QtCore import QTimer, QObject, Slot, QUrl
-from PySide6.QtGui import QDesktopServices, QColor
+from PySide6.QtGui import QDesktopServices, QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication, QMessageBox, QColorDialog
 
 from app_settings import Preferences, get_preferences, set_preferences
@@ -149,23 +149,47 @@ def start(window, destination):
             dialog.color_button.click()
             assert dialog.accent_combo.currentData() == '#334455'
             report['custom_color_picker_verified'] = True
+            def choose_custom_text_color():
+                picker = QApplication.activeModalWidget()
+                assert isinstance(picker, QColorDialog)
+                picker.setCurrentColor(QColor('#fff1d6'))
+                picker.accept()
+            QTimer.singleShot(50, choose_custom_text_color)
+            dialog.text_color_button.click()
+            assert dialog.text_color_combo.currentData() == '#fff1d6'
+            dialog.font_combo.setCurrentFont(QFont('Segoe UI'))
+            assert dialog.color_preview.font().family() == dialog.font_combo.currentFont().family()
+            report['custom_text_color_picker_verified'] = True
             dialog.language_combo.setCurrentIndex(dialog.language_combo.findData('en_US'))
             dialog.theme_mode_combo.setCurrentIndex(dialog.theme_mode_combo.findData('dark'))
             dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('#7c3aed'))
             dialog.cancel_button.click()
             assert get_preferences() == Preferences()
+            assert manager.tokens['on_accent'] == '#000000'
             window.settings_button.click()
             dialog = window.settings_dialog
             dialog.language_combo.setCurrentIndex(dialog.language_combo.findData('en_US'))
             dialog.theme_mode_combo.setCurrentIndex(dialog.theme_mode_combo.findData('dark'))
             dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('#7c3aed'))
+            dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('#ffffff'))
+            dialog.font_combo.setCurrentFont(QFont('Segoe UI'))
+            chosen_font = dialog.font_combo.currentFont().family()
             dialog.save_button.click()
             assert manager.dark and manager.tokens['accent'] == '#7c3aed'
+            assert manager.tokens['on_accent'] == manager.tokens['on_accent_hover'] == '#ffffff'
+            assert window.start_button.palette().color(QPalette.ButtonText).name() == '#ffffff'
+            assert window.settings_button.font().family() == chosen_font
             assert window.settings_button.text() == 'Settings'
             assert window.path_input.text() == original_path_text
             saved_theme = Preferences.from_mapping(json.loads(main.SETTINGS_PATH.read_text(encoding='utf-8')))
             assert saved_theme.language == 'en_US' and saved_theme.theme_mode == 'dark'
             assert saved_theme.accent_color == '#7c3aed'
+            assert saved_theme.accent_text_color == '#ffffff' and saved_theme.font_family == chosen_font
+            manager.apply(Preferences())
+            window._restore_settings()
+            assert manager.tokens['on_accent'] == '#ffffff'
+            assert window.settings_button.font().family() == chosen_font
+            report['font_and_text_color_persisted'] = True
             window.current_preview = 'C2040'
             window.open_store()
             assert report['opened_storefront'] == 'https://www.lcsc.com/product-detail/C2040.html'
@@ -184,15 +208,25 @@ def start(window, destination):
             dialog.cancel_button.click()
             window.apply_preferences(replace(saved_theme, theme_mode='light', accent_color='#2563eb'))
             assert not manager.dark and manager.tokens['accent'] == '#2563eb'
+            assert manager.tokens['on_accent'] == '#ffffff'
             window.settings_button.click()
             QApplication.processEvents()
             assert window.settings_dialog.grab().save(str(destination / 'settings-English-light.png'))
+            window.settings_dialog.cancel_button.click()
+            window.apply_preferences(replace(saved_theme, language='zh_CN', theme_mode='light', accent_color='#168878'))
+            assert manager.tokens['on_accent'] == '#ffffff'
+            window.settings_button.click()
+            QApplication.processEvents()
+            assert window.settings_dialog.grab().save(str(destination / 'settings-text-font.png'))
+            assert window.grab().save(str(destination / 'main-text-font.png'))
             window.settings_dialog.cancel_button.click()
             window.apply_preferences(replace(saved_theme, theme_mode='system'))
             manager.system_changed(Qt.ColorScheme.Dark)
             assert manager.dark
             manager.system_changed(Qt.ColorScheme.Light)
             assert not manager.dark
+            assert manager.tokens['on_accent'] == '#ffffff'
+            report['manual_text_color_preserved'] = True
             window.apply_preferences(Preferences())
             assert window.settings_button.text() == '设置'
             assert QApplication.instance()._qt_ui_translator is not None

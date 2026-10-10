@@ -45,6 +45,7 @@
       document.documentElement.lang = value.language === 'en_US' ? 'en' : 'zh-CN';
       document.title = value.language === 'en_US' ? 'LCSC3D model preview' : 'LCSC3D 模型预览';
       document.body.style.background = value.field;
+      if (value.font_family) document.body.style.fontFamily = JSON.stringify(value.font_family) + ', sans-serif';
       document.getElementById('notice').style.color = value.muted;
       document.getElementById('hint').style.color = value.muted;
       document.getElementById('hint').textContent = value.language === 'en_US'
