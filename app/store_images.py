@@ -1,12 +1,11 @@
 """Native storefront photo gallery with original pixels, thumbnails and zoom."""
 from __future__ import annotations
 
+from i18n import text as ui_text, message as ui_message
 from PySide6.QtCore import Qt, QTimer, QSize, Signal
 from PySide6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut
-from PySide6.QtWidgets import (
-    QDialog, QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QPushButton, QVBoxLayout,
-)
+from PySide6.QtWidgets import (QGraphicsScene, QGraphicsView, QHBoxLayout, QListWidget, QListWidgetItem, QVBoxLayout)
+from localized_widgets import (QDialog, QLabel, QPushButton)
 
 from errors import Cancelled
 from store import StoreError, check_cancelled
@@ -63,7 +62,7 @@ class PhotoView(QGraphicsView):
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
-        self.setStyleSheet('background:#f4f7fa;border:1px solid #dce4eb;border-radius:8px;')
+        self.setObjectName('photoCanvas')
         self.photo = None
         self.fitted = True
 
@@ -127,31 +126,31 @@ class ImageGallery(QDialog):
         self.jobs = jobs_factory(self)
         self.jobs.idle.connect(self.activity_finished)
         self.cache = {}
-        self.setWindowTitle(f"商品原图 · {self.part} · {product.get('title', '')}")
+        self.setWindowTitle(ui_message('商品原图 · {0} · {1}', self.part, product.get('title', '')))
         self.resize(960, 790)
         self.setMinimumSize(600, 460)
         layout = QVBoxLayout(self)
         controls = QHBoxLayout()
-        self.previous = QPushButton('上一张')
+        self.previous = QPushButton(ui_text('上一张'))
         self.previous.clicked.connect(lambda: self.select_offset(-1))
         controls.addWidget(self.previous)
         self.position = QLabel('')
         controls.addWidget(self.position)
-        self.next = QPushButton('下一张')
+        self.next = QPushButton(ui_text('下一张'))
         self.next.clicked.connect(lambda: self.select_offset(1))
         controls.addWidget(self.next)
         controls.addStretch()
-        self.minus = QPushButton('缩小')
-        self.plus = QPushButton('放大')
-        self.actual = QPushButton('原始大小')
-        self.fit = QPushButton('适应窗口')
+        self.minus = QPushButton(ui_text('缩小'))
+        self.plus = QPushButton(ui_text('放大'))
+        self.actual = QPushButton(ui_text('原始大小'))
+        self.fit = QPushButton(ui_text('适应窗口'))
         for button in (self.minus, self.plus, self.actual, self.fit):
             controls.addWidget(button)
         self.scale_label = QLabel('')
         controls.addWidget(self.scale_label)
         layout.addLayout(controls)
         self.view = PhotoView()
-        self.view.zoom_changed.connect(lambda value: self.scale_label.setText(f'{value * 100:.0f}%'))
+        self.view.zoom_changed.connect(lambda value: self.scale_label.setText(ui_message('{0:.0f}%', value * 100)))
         self.minus.clicked.connect(lambda: self.view.set_zoom(self.view.zoom / 1.25))
         self.plus.clicked.connect(lambda: self.view.set_zoom(self.view.zoom * 1.25))
         self.actual.clicked.connect(lambda: self.view.set_zoom(1))
@@ -163,13 +162,13 @@ class ImageGallery(QDialog):
         self.thumbnails.setIconSize(QSize(76, 76))
         self.thumbnails.setFixedHeight(112)
         for index, _ in enumerate(self.urls):
-            item = QListWidgetItem(f'{index + 1}')
+            item = QListWidgetItem(ui_message('{0}', index + 1))
             item.setTextAlignment(Qt.AlignCenter)
             item.setSizeHint(QSize(96, 92))
             self.thumbnails.addItem(item)
         self.thumbnails.currentRowChanged.connect(self.load_image)
         layout.addWidget(self.thumbnails)
-        self.status = QLabel('点击缩略图切换 · 滚轮缩放 · 拖动平移 · 双击适应窗口')
+        self.status = QLabel(ui_text('点击缩略图切换 · 滚轮缩放 · 拖动平移 · 双击适应窗口'))
         self.status.setTextFormat(Qt.PlainText)
         layout.addWidget(self.status)
         self.shortcuts = []
@@ -217,11 +216,11 @@ class ImageGallery(QDialog):
             return
         self.jobs.cancel('original')
         self.view.clear_photo()
-        self.position.setText(f'{index + 1} / {len(self.urls)}')
+        self.position.setText(ui_message('{0} / {1}', index + 1, len(self.urls)))
         self.previous.setEnabled(index > 0)
         self.next.setEnabled(index + 1 < len(self.urls))
         self.scale_label.clear()
-        self.status.setText('正在加载商品原图…')
+        self.status.setText(ui_text('正在加载商品原图…'))
         if index in self.cache:
             log_event('DEBUG', 'image.cache_hit', index=index)
             self.show_photo(index, self.cache[index])
@@ -233,7 +232,7 @@ class ImageGallery(QDialog):
         pixmap = QPixmap()
         if not data or not pixmap.loadFromData(data):
             log_event('ERROR', 'image.decode_failed', index=index, part=safe_part(self.part), bytes=len(data or b''))
-            self.image_failed(StoreError('商品原图加载失败，请重新选择图片重试。'))
+            self.image_failed(StoreError(ui_text('商品原图加载失败，请重新选择图片重试。')))
             return
         self.cache[index] = pixmap
         self.show_photo(index, pixmap)
@@ -243,7 +242,7 @@ class ImageGallery(QDialog):
                   width=pixmap.width(), height=pixmap.height())
         if index == self.thumbnails.currentRow():
             self.view.set_photo(pixmap)
-            self.status.setText(f'原图 {pixmap.width()} × {pixmap.height()} · 滚轮缩放 · 拖动平移 · 双击适应窗口')
+            self.status.setText(ui_message('原图 {0} × {1} · 滚轮缩放 · 拖动平移 · 双击适应窗口', pixmap.width(), pixmap.height()))
 
     def image_failed(self, error):
         record_error(error, 'image.display_failed', part=safe_part(self.part))

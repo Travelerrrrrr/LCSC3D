@@ -392,6 +392,60 @@ class SettingsWindowTests(PreferencesTestCase):
         self.assertEqual(get_preferences(), Preferences())
         self.assertFalse(self.settings_path.exists())
 
+    def test_theme_save_failure_keeps_language_palette_and_download_inputs(self):
+        from app_theme import theme_manager
+        self.window.input.setPlainText('C2040\nC20197')
+        self.window.path_input.setText('F:/用户选择/模型')
+        before = dict(theme_manager().tokens)
+        self.window.open_settings()
+        dialog = self.window.settings_dialog
+        dialog.language_combo.setCurrentIndex(dialog.language_combo.findData('en_US'))
+        dialog.theme_mode_combo.setCurrentIndex(dialog.theme_mode_combo.findData('dark'))
+        dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('#7c3aed'))
+        with patch('main.write_settings', side_effect=PermissionError()):
+            dialog.save_button.click()
+        self.assertTrue(dialog.isVisible())
+        self.assertEqual(self.window.settings_button.text(), '设置')
+        self.assertEqual(theme_manager().tokens, before)
+        self.assertEqual(self.window.input.toPlainText(), 'C2040\nC20197')
+        self.assertEqual(self.window.path_input.text(), 'F:/用户选择/模型')
+
+    def test_language_roundtrip_keeps_queue_checks_and_does_not_read_mainland_session_in_english(self):
+        from dataclasses import replace
+        from i18n import set_language
+        self.addCleanup(set_language, 'zh_CN')
+        self.window.input.setPlainText('C2040\nC20197')
+        self.window.load_queue()
+        self.window.table.item(1, main.DOWNLOAD_COLUMN).setCheckState(Qt.Unchecked)
+        self.window.apply_preferences(replace(self.window.preferences, language='en_US', theme_mode='dark'))
+        self.assertEqual(self.window.settings_button.text(), 'Settings')
+        with patch('favorites.SessionVault', side_effect=AssertionError('Mainland session must not be opened')):
+            store = self.window.ensure_store()
+            self.assertTrue(store.international)
+        self.assertEqual(self.window.ids, ['C2040', 'C20197'])
+        self.assertEqual(self.window.table.item(1, main.DOWNLOAD_COLUMN).checkState(), Qt.Unchecked)
+        self.window.apply_preferences(Preferences())
+        self.assertEqual(self.window.settings_button.text(), '设置')
+        self.assertEqual(self.window.ids, ['C2040', 'C20197'])
+        self.assertEqual(self.window.table.item(1, main.DOWNLOAD_COLUMN).checkState(), Qt.Unchecked)
+
+    def test_english_import_notices_use_operation_result_including_duplicate_and_invalid_input(self):
+        from dataclasses import replace
+        from i18n import set_language
+        self.addCleanup(set_language, 'zh_CN')
+        self.window.apply_preferences(replace(self.window.preferences, language='en_US'))
+        dialog = self.window.ensure_store()
+        self.window.import_store_selection([{'part': 'C2040', 'title': 'RP2040'}])
+        self.assertEqual(dialog.import_notice.icon(), QMessageBox.Information)
+        self.assertEqual(dialog.import_notice.windowTitle(), 'Added to download list')
+        self.window.import_store_selection([{'part': 'C2040', 'title': 'RP2040'}])
+        self.assertEqual(dialog.import_notice.icon(), QMessageBox.Information)
+        self.assertIn('skipped 1', dialog.import_notice.text())
+        self.window.input.setPlainText('invalid-input')
+        self.window.import_store_selection([{'part': 'C20197'}])
+        self.assertEqual(dialog.import_notice.icon(), QMessageBox.Warning)
+        self.assertEqual(self.window.ids, ['C2040'])
+
     def test_open_log_button_opens_the_log_directory(self):
         self.window.settings_button.click()
         with patch('settings_ui.QDesktopServices.openUrl', return_value=True) as opened:

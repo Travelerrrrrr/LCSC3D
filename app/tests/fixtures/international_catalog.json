@@ -1,0 +1,651 @@
+{
+  "product": {
+    "productId": 2392,
+    "productCode": "C2040",
+    "productModel": "RP2040",
+    "productNameEn": "A microcontroller",
+    "productIntroEn": "ARM Cortex-M0+ 32 Bit 133MHz LQFN-56(7x7) Microcontrollers ",
+    "brandNameEn": "Raspberry Pi",
+    "encapStandard": "LQFN-56(7x7)",
+    "wmCatalogNameEn": "Microcontrollers",
+    "productUnit": "Piece",
+    "stockNumber": 50831,
+    "minBuyNumber": 1,
+    "productPriceList": [
+      {
+        "ladder": 1,
+        "productPrice": "0.9975",
+        "usdPrice": 0.9975,
+        "cnyProductPriceList": null,
+        "discountRate": "1",
+        "currencyPrice": 0.9975,
+        "currencySymbol": "$",
+        "isForeignDiscount": null,
+        "ladderLevel": null,
+        "discountPrice": "0.9975",
+        "extPrice": "1.00",
+        "isRealOff": false
+      },
+      {
+        "ladder": 10,
+        "productPrice": "0.9089",
+        "usdPrice": 0.9089,
+        "cnyProductPriceList": null,
+        "discountRate": "1",
+        "currencyPrice": 0.9089,
+        "currencySymbol": "$",
+        "isForeignDiscount": null,
+        "ladderLevel": null,
+        "discountPrice": "0.9089",
+        "extPrice": "9.09",
+        "isRealOff": false
+      },
+      {
+        "ladder": 30,
+        "productPrice": "0.8252",
+        "usdPrice": 0.8252,
+        "cnyProductPriceList": null,
+        "discountRate": "1",
+        "currencyPrice": 0.8252,
+        "currencySymbol": "$",
+        "isForeignDiscount": null,
+        "ladderLevel": null,
+        "discountPrice": "0.8252",
+        "extPrice": "24.76",
+        "isRealOff": false
+      },
+      {
+        "ladder": 100,
+        "productPrice": "0.7645",
+        "usdPrice": 0.7645,
+        "cnyProductPriceList": null,
+        "discountRate": "1",
+        "currencyPrice": 0.7645,
+        "currencySymbol": "$",
+        "isForeignDiscount": null,
+        "ladderLevel": null,
+        "discountPrice": "0.7645",
+        "extPrice": "76.45",
+        "isRealOff": false
+      },
+      {
+        "ladder": 500,
+        "productPrice": "0.7383",
+        "usdPrice": 0.7383,
+        "cnyProductPriceList": null,
+        "discountRate": "1",
+        "currencyPrice": 0.7383,
+        "currencySymbol": "$",
+        "isForeignDiscount": null,
+        "ladderLevel": null,
+        "discountPrice": "0.7383",
+        "extPrice": "369.15",
+        "isRealOff": false
+      },
+      {
+        "ladder": 1000,
+        "productPrice": "0.7268",
+        "usdPrice": 0.7268,
+        "cnyProductPriceList": null,
+        "discountRate": "1",
+        "currencyPrice": 0.7268,
+        "currencySymbol": "$",
+        "isForeignDiscount": null,
+        "ladderLevel": null,
+        "discountPrice": "0.7268",
+        "extPrice": "726.80",
+        "isRealOff": false
+      }
+    ],
+    "productImages": [
+      "https://assets.lcsc.com/images/lcsc/900x900/20230217_Raspberry-Pi-RP2040_C2040_front.jpg",
+      "https://assets.lcsc.com/images/lcsc/900x900/20230217_Raspberry-Pi-RP2040_C2040_back.jpg",
+      "https://assets.lcsc.com/images/lcsc/900x900/20230217_Raspberry-Pi-RP2040_C2040_blank.jpg"
+    ],
+    "paramVOList": [
+      {
+        "paramCode": "param_31018_n",
+        "paramName": "ADC(位数)",
+        "paramNameEn": "ADC (Bit)",
+        "paramValue": "12bit",
+        "paramValueEn": "12bit",
+        "paramValueEnForSearch": 12,
+        "isMain": false,
+        "sortNumber": 1,
+        "sort": 42
+      },
+      {
+        "paramCode": "param_31017_n",
+        "paramName": "I/O数量",
+        "paramNameEn": "Number of I/O",
+        "paramValue": "30",
+        "paramValueEn": "30",
+        "paramValueEnForSearch": 30,
+        "isMain": false,
+        "sortNumber": 1,
+        "sort": 39
+      },
+      {
+        "paramCode": "param_31030_st",
+        "paramName": "工作温度",
+        "paramNameEn": "Operating Temperature",
+        "paramValue": "-20℃~+85℃",
+        "paramValueEn": "-20℃~+85℃",
+        "paramValueEnForSearch": null,
+        "isMain": false,
+        "sortNumber": 1,
+        "sort": 18
+      },
+      {
+        "paramCode": "param_14378_s",
+        "paramName": "工作电压",
+        "paramNameEn": "Voltage - Supply",
+        "paramValue": "1.8V~3.3V",
+        "paramValueEn": "1.8V~3.3V",
+        "paramValueEnForSearch": null,
+        "isMain": false,
+        "sortNumber": 1,
+        "sort": 13
+      },
+      {
+        "paramCode": "param_31014",
+        "paramName": "程序存储器类型",
+        "paramNameEn": "Program Memory Type",
+        "paramValue": "外接",
+        "paramValueEn": "External",
+        "paramValueEnForSearch": -1,
+        "isMain": false,
+        "sortNumber": 1,
+        "sort": 24
+      },
+      {
+        "paramCode": "param_13056",
+        "paramName": "CPU内核",
+        "paramNameEn": "CPU Core",
+        "paramValue": "ARM Cortex-M0+",
+        "paramValueEn": "ARM Cortex-M0+",
+        "paramValueEnForSearch": -1,
+        "isMain": true,
+        "sortNumber": 1,
+        "sort": 2
+      },
+      {
+        "paramCode": "param_31012",
+        "paramName": "CPU位数",
+        "paramNameEn": "Core Size",
+        "paramValue": "32 Bit",
+        "paramValueEn": "32 Bit",
+        "paramValueEnForSearch": -1,
+        "isMain": true,
+        "sortNumber": 1,
+        "sort": 5
+      },
+      {
+        "paramCode": "param_31011_n",
+        "paramName": "CPU最大主频",
+        "paramNameEn": "CPU Maximum Speed",
+        "paramValue": "133MHz",
+        "paramValueEn": "133MHz",
+        "paramValueEnForSearch": 133000000,
+        "isMain": true,
+        "sortNumber": 1,
+        "sort": 9
+      },
+      {
+        "paramCode": "param_33087",
+        "paramName": "振荡器类型",
+        "paramNameEn": "Oscillator Type",
+        "paramValue": "内置+外置",
+        "paramValueEn": "Built-in+External",
+        "paramValueEnForSearch": -1,
+        "isMain": false,
+        "sortNumber": 1,
+        "sort": 15
+      }
+    ],
+    "pdfUrl": "https://datasheet.lcsc.com/datasheet/pdf/3dad1d8f987a4e00bfc677055df1f959.pdf?productCode=C2040",
+    "currencyType": "USD",
+    "isShowForeignPrice": true
+  },
+  "search_rows": [
+    {
+      "productId": 8796,
+      "productCode": "C8304",
+      "productModel": "STM32F103CBT6",
+      "productNameEn": "Medium-density performance line ARM-based 32-bit MCU with 64 or 128 KB Flash, USB, CAN, 7 timers, 2 ADCs, 9 com. interfaces",
+      "productIntroEn": "ARM Cortex-M3 32 Bit 72MHz LQFP-48(7x7) Microcontrollers RoHS",
+      "brandNameEn": "ST",
+      "encapStandard": "LQFP-48(7x7)",
+      "wmCatalogNameEn": "Microcontrollers",
+      "productUnit": "Piece",
+      "stockNumber": 20992,
+      "minBuyNumber": 1,
+      "productPriceList": [
+        {
+          "ladder": 1,
+          "productPrice": "2.4945",
+          "usdPrice": 2.4945,
+          "cnyProductPriceList": null,
+          "discountRate": "1",
+          "currencyPrice": 2.4945,
+          "currencySymbol": "$",
+          "isForeignDiscount": null,
+          "ladderLevel": null
+        },
+        {
+          "ladder": 10,
+          "productPrice": "2.1670",
+          "usdPrice": 2.167,
+          "cnyProductPriceList": null,
+          "discountRate": "1",
+          "currencyPrice": 2.167,
+          "currencySymbol": "$",
+          "isForeignDiscount": null,
+          "ladderLevel": null
+        },
+        {
+          "ladder": 30,
+          "productPrice": "1.9367",
+          "usdPrice": 1.9367,
+          "cnyProductPriceList": null,
+          "discountRate": "1",
+          "currencyPrice": 1.9367,
+          "currencySymbol": "$",
+          "isForeignDiscount": null,
+          "ladderLevel": null
+        },
+        {
+          "ladder": 250,
+          "productPrice": "1.7261",
+          "usdPrice": 1.7261,
+          "cnyProductPriceList": null,
+          "discountRate": "1",
+          "currencyPrice": 1.7261,
+          "currencySymbol": "$",
+          "isForeignDiscount": null,
+          "ladderLevel": null
+        },
+        {
+          "ladder": 500,
+          "productPrice": "1.6274",
+          "usdPrice": 1.6274,
+          "cnyProductPriceList": null,
+          "discountRate": "1",
+          "currencyPrice": 1.6274,
+          "currencySymbol": "$",
+          "isForeignDiscount": null,
+          "ladderLevel": null
+        },
+        {
+          "ladder": 1000,
+          "productPrice": "1.5879",
+          "usdPrice": 1.5879,
+          "cnyProductPriceList": null,
+          "discountRate": "1",
+          "currencyPrice": 1.5879,
+          "currencySymbol": "$",
+          "isForeignDiscount": null,
+          "ladderLevel": null
+        }
+      ],
+      "productImages": [
+        "https://assets.lcsc.com/images/lcsc/900x900/20221228_STMicroelectronics-STM32F103CBT6_C8304_front.jpg",
+        "https://assets.lcsc.com/images/lcsc/900x900/20221228_STMicroelectronics-STM32F103CBT6_C8304_back.jpg",
+        "https://assets.lcsc.com/images/lcsc/900x900/20221228_STMicroelectronics-STM32F103CBT6_C8304_blank.jpg"
+      ],
+      "paramVOList": [
+        {
+          "paramCode": "param_31018_n",
+          "paramName": "ADC(位数)",
+          "paramNameEn": "ADC (Bit)",
+          "paramValue": "12bit",
+          "paramValueEn": "12bit",
+          "paramValueEnForSearch": 12.0,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 42
+        },
+        {
+          "paramCode": "param_31017_n",
+          "paramName": "I/O数量",
+          "paramNameEn": "Number of I/O",
+          "paramValue": "37",
+          "paramValueEn": "37",
+          "paramValueEnForSearch": 37.0,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 39
+        },
+        {
+          "paramCode": "param_31030_st",
+          "paramName": "工作温度",
+          "paramNameEn": "Operating Temperature",
+          "paramValue": "-40℃~+85℃",
+          "paramValueEn": "-40℃~+85℃",
+          "paramValueEnForSearch": null,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 18
+        },
+        {
+          "paramCode": "param_14378_s",
+          "paramName": "工作电压",
+          "paramNameEn": "Voltage - Supply",
+          "paramValue": "2V~3.6V",
+          "paramValueEn": "2V~3.6V",
+          "paramValueEnForSearch": null,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 13
+        },
+        {
+          "paramCode": "param_31014",
+          "paramName": "程序存储器类型",
+          "paramNameEn": "Program Memory Type",
+          "paramValue": "FLASH",
+          "paramValueEn": "FLASH",
+          "paramValueEnForSearch": -1.0,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 24
+        },
+        {
+          "paramCode": "param_31021_n",
+          "paramName": "EEPROM容量",
+          "paramNameEn": "EEPROM",
+          "paramValue": "-",
+          "paramValueEn": "-",
+          "paramValueEnForSearch": null,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 34
+        },
+        {
+          "paramCode": "param_31013_n",
+          "paramName": "程序存储容量",
+          "paramNameEn": "Program Storage Size",
+          "paramValue": "128KB",
+          "paramValueEn": "128KB",
+          "paramValueEnForSearch": 131072.0,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 21
+        },
+        {
+          "paramCode": "param_13056",
+          "paramName": "CPU内核",
+          "paramNameEn": "CPU Core",
+          "paramValue": "ARM Cortex-M3",
+          "paramValueEn": "ARM Cortex-M3",
+          "paramValueEnForSearch": -1.0,
+          "isMain": true,
+          "sortNumber": 1,
+          "sort": 2
+        },
+        {
+          "paramCode": "param_31012",
+          "paramName": "CPU位数",
+          "paramNameEn": "Core Size",
+          "paramValue": "32 Bit",
+          "paramValueEn": "32 Bit",
+          "paramValueEnForSearch": -1.0,
+          "isMain": true,
+          "sortNumber": 1,
+          "sort": 5
+        },
+        {
+          "paramCode": "param_31011_n",
+          "paramName": "CPU最大主频",
+          "paramNameEn": "CPU Maximum Speed",
+          "paramValue": "72MHz",
+          "paramValueEn": "72MHz",
+          "paramValueEnForSearch": 72000000.0,
+          "isMain": true,
+          "sortNumber": 1,
+          "sort": 9
+        },
+        {
+          "paramCode": "param_33087",
+          "paramName": "振荡器类型",
+          "paramNameEn": "Oscillator Type",
+          "paramValue": "内置",
+          "paramValueEn": "Built-in",
+          "paramValueEnForSearch": -1.0,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 15
+        }
+      ],
+      "pdfUrl": "https://datasheet.lcsc.com/datasheet/pdf/4dd7e79f094d41768073483d41a1fcd2.pdf?productCode=C8304",
+      "isShowForeignPrice": true
+    },
+    {
+      "productId": 115649,
+      "productCode": "C114409",
+      "productModel": "STM32H743VIT6",
+      "productNameEn": "32-bit Arm Cortex-M7 480MHz MCUs, up to 2MB Flash, up to 1MB RAM, 46 com. and analog interfaces",
+      "productIntroEn": "ARM Cortex-M7 32 Bit 480MHz LQFP-100(14x14) Microcontrollers RoHS",
+      "brandNameEn": "ST",
+      "encapStandard": "LQFP-100(14x14)",
+      "wmCatalogNameEn": "Microcontrollers",
+      "productUnit": "Piece",
+      "stockNumber": 2389,
+      "minBuyNumber": 1,
+      "productPriceList": [
+        {
+          "ladder": 1,
+          "productPrice": "11.4877",
+          "usdPrice": 11.4877,
+          "cnyProductPriceList": null,
+          "discountRate": "1",
+          "currencyPrice": 11.4877,
+          "currencySymbol": "$",
+          "isForeignDiscount": null,
+          "ladderLevel": null
+        },
+        {
+          "ladder": 10,
+          "productPrice": "10.1121",
+          "usdPrice": 10.1121,
+          "cnyProductPriceList": null,
+          "discountRate": "1",
+          "currencyPrice": 10.1121,
+          "currencySymbol": "$",
+          "isForeignDiscount": null,
+          "ladderLevel": null
+        },
+        {
+          "ladder": 30,
+          "productPrice": "9.2329",
+          "usdPrice": 9.2329,
+          "cnyProductPriceList": null,
+          "discountRate": "1",
+          "currencyPrice": 9.2329,
+          "currencySymbol": "$",
+          "isForeignDiscount": null,
+          "ladderLevel": null
+        },
+        {
+          "ladder": 100,
+          "productPrice": "8.3816",
+          "usdPrice": 8.3816,
+          "cnyProductPriceList": null,
+          "discountRate": "1",
+          "currencyPrice": 8.3816,
+          "currencySymbol": "$",
+          "isForeignDiscount": null,
+          "ladderLevel": null
+        }
+      ],
+      "productImages": [
+        "https://assets.lcsc.com/images/lcsc/900x900/20230330_STMicroelectronics-STM32H743VIT6_C114409_front.jpg",
+        "https://assets.lcsc.com/images/lcsc/900x900/20230330_STMicroelectronics-STM32H743VIT6_C114409_back.jpg",
+        "https://assets.lcsc.com/images/lcsc/900x900/20230330_STMicroelectronics-STM32H743VIT6_C114409_blank.jpg"
+      ],
+      "paramVOList": [
+        {
+          "paramCode": "param_31019_n",
+          "paramName": "DAC(位数)",
+          "paramNameEn": "DAC (Bit)",
+          "paramValue": "12bit",
+          "paramValueEn": "12bit",
+          "paramValueEnForSearch": 12.0,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 46
+        },
+        {
+          "paramCode": "param_31018_n",
+          "paramName": "ADC(位数)",
+          "paramNameEn": "ADC (Bit)",
+          "paramValue": "16bit",
+          "paramValueEn": "16bit",
+          "paramValueEnForSearch": 16.0,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 42
+        },
+        {
+          "paramCode": "param_31017_n",
+          "paramName": "I/O数量",
+          "paramNameEn": "Number of I/O",
+          "paramValue": "82",
+          "paramValueEn": "82",
+          "paramValueEnForSearch": 82.0,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 39
+        },
+        {
+          "paramCode": "param_31030_st",
+          "paramName": "工作温度",
+          "paramNameEn": "Operating Temperature",
+          "paramValue": "-40℃~+85℃",
+          "paramValueEn": "-40℃~+85℃",
+          "paramValueEnForSearch": null,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 18
+        },
+        {
+          "paramCode": "param_31014",
+          "paramName": "程序存储器类型",
+          "paramNameEn": "Program Memory Type",
+          "paramValue": "FLASH",
+          "paramValueEn": "FLASH",
+          "paramValueEnForSearch": -1.0,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 24
+        },
+        {
+          "paramCode": "param_14378_s",
+          "paramName": "工作电压",
+          "paramNameEn": "Voltage - Supply",
+          "paramValue": "1.71V~3.6V",
+          "paramValueEn": "1.71V~3.6V",
+          "paramValueEnForSearch": null,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 13
+        },
+        {
+          "paramCode": "param_31021_n",
+          "paramName": "EEPROM容量",
+          "paramNameEn": "EEPROM",
+          "paramValue": "-",
+          "paramValueEn": "-",
+          "paramValueEnForSearch": null,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 34
+        },
+        {
+          "paramCode": "param_31013_n",
+          "paramName": "程序存储容量",
+          "paramNameEn": "Program Storage Size",
+          "paramValue": "2MB",
+          "paramValueEn": "2MB",
+          "paramValueEnForSearch": 2097152.0,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 21
+        },
+        {
+          "paramCode": "param_13056",
+          "paramName": "CPU内核",
+          "paramNameEn": "CPU Core",
+          "paramValue": "ARM Cortex-M7",
+          "paramValueEn": "ARM Cortex-M7",
+          "paramValueEnForSearch": -1.0,
+          "isMain": true,
+          "sortNumber": 1,
+          "sort": 2
+        },
+        {
+          "paramCode": "param_31012",
+          "paramName": "CPU位数",
+          "paramNameEn": "Core Size",
+          "paramValue": "32 Bit",
+          "paramValueEn": "32 Bit",
+          "paramValueEnForSearch": -1.0,
+          "isMain": true,
+          "sortNumber": 1,
+          "sort": 5
+        },
+        {
+          "paramCode": "param_31011_n",
+          "paramName": "CPU最大主频",
+          "paramNameEn": "CPU Maximum Speed",
+          "paramValue": "480MHz",
+          "paramValueEn": "480MHz",
+          "paramValueEnForSearch": 480000000.0,
+          "isMain": true,
+          "sortNumber": 1,
+          "sort": 9
+        },
+        {
+          "paramCode": "param_33087",
+          "paramName": "振荡器类型",
+          "paramNameEn": "Oscillator Type",
+          "paramValue": "内置",
+          "paramValueEn": "Built-in",
+          "paramValueEnForSearch": -1.0,
+          "isMain": false,
+          "sortNumber": 1,
+          "sort": 15
+        }
+      ],
+      "pdfUrl": "https://datasheet.lcsc.com/datasheet/pdf/880ee2974c46763ce43da1468b8b0b74.pdf?productCode=C114409",
+      "isShowForeignPrice": true
+    }
+  ],
+  "redirect": {
+    "code": 200,
+    "msg": null,
+    "result": {
+      "brandHomeVO": null,
+      "wmCatalogVOS": null,
+      "brandVOS": null,
+      "catalogVOS": null,
+      "productSearchResultVO": null,
+      "productTotalPage": null,
+      "isToDetail": true,
+      "isToBrand": null,
+      "isToCategory": false,
+      "tipProductDetailUrlVO": {
+        "productCode": "C2040",
+        "productModel": "RP2040",
+        "brandNameEn": "Raspberry Pi",
+        "catalogName": "Microcontrollers (MCU/MPU/SOC)"
+      },
+      "brandUrlMap": null,
+      "searchEngineProcess": null,
+      "scene": "REDIRECT_PRODUCT_DETAIL",
+      "totalCount": null,
+      "exactMatchResult": null,
+      "topResults": null
+    },
+    "ok": true
+  }
+}

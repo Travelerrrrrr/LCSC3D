@@ -4,10 +4,11 @@ from pathlib import Path
 import sys
 import time
 import zipfile
+from dataclasses import replace
 
 from PySide6.QtCore import QTimer, QObject, Slot, QUrl
-from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtGui import QDesktopServices, QColor
+from PySide6.QtWidgets import QApplication, QMessageBox, QColorDialog
 
 from app_settings import Preferences, get_preferences, set_preferences
 from app_logging import get_log_directory, log_event, set_log_level, configure_logging
@@ -36,7 +37,8 @@ def start(window, destination):
     class RepositoryReceiver(QObject):
         @Slot(QUrl)
         def opened(self, url):
-            report['opened_repository'] = url.toString()
+            address = url.toString()
+            report['opened_repository' if address.startswith('https://github.com/') else 'opened_storefront'] = address
 
     repository_receiver = RepositoryReceiver(window)
     QDesktopServices.setUrlHandler('https', repository_receiver, 'opened')
@@ -62,7 +64,7 @@ def start(window, destination):
             return
         try:
             from app_paths import data_directory
-            archive_path = next((data_directory() / 'diagnostics').glob('*.zip'))
+            archive_path = max((data_directory() / 'diagnostics').glob('*.zip'), key=lambda path: path.stat().st_mtime_ns)
             assert Path(report['opened_bundle_directory']) == archive_path.parent
             with zipfile.ZipFile(archive_path) as archive:
                 assert archive.testzip() is None
@@ -134,6 +136,72 @@ def start(window, destination):
             dialog.store_proxy_combo.setCurrentIndex(0)
             report['support_buttons_verified'] = report['bundled_payment_codes_verified'] = True
             report['support_preserves_unsaved_preferences'] = True
+            from app_theme import theme_manager
+            from PySide6.QtCore import Qt
+            manager = theme_manager()
+            original_path_text = window.path_input.text()
+            def choose_custom_color():
+                picker = QApplication.activeModalWidget()
+                assert isinstance(picker, QColorDialog)
+                picker.setCurrentColor(QColor('#334455'))
+                picker.accept()
+            QTimer.singleShot(50, choose_custom_color)
+            dialog.color_button.click()
+            assert dialog.accent_combo.currentData() == '#334455'
+            report['custom_color_picker_verified'] = True
+            dialog.language_combo.setCurrentIndex(dialog.language_combo.findData('en_US'))
+            dialog.theme_mode_combo.setCurrentIndex(dialog.theme_mode_combo.findData('dark'))
+            dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('#7c3aed'))
+            dialog.cancel_button.click()
+            assert get_preferences() == Preferences()
+            window.settings_button.click()
+            dialog = window.settings_dialog
+            dialog.language_combo.setCurrentIndex(dialog.language_combo.findData('en_US'))
+            dialog.theme_mode_combo.setCurrentIndex(dialog.theme_mode_combo.findData('dark'))
+            dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('#7c3aed'))
+            dialog.save_button.click()
+            assert manager.dark and manager.tokens['accent'] == '#7c3aed'
+            assert window.settings_button.text() == 'Settings'
+            assert window.path_input.text() == original_path_text
+            saved_theme = Preferences.from_mapping(json.loads(main.SETTINGS_PATH.read_text(encoding='utf-8')))
+            assert saved_theme.language == 'en_US' and saved_theme.theme_mode == 'dark'
+            assert saved_theme.accent_color == '#7c3aed'
+            window.current_preview = 'C2040'
+            window.open_store()
+            assert report['opened_storefront'] == 'https://www.lcsc.com/product-detail/C2040.html'
+            window.current_preview = ''
+            from international_store import InternationalStoreClient
+            assert isinstance(window.product_preview.factory(), InternationalStoreClient)
+            store = window.ensure_store()
+            assert store.international
+            from store_session import MemoryOnlyVault
+            assert isinstance(store.vault, MemoryOnlyVault)
+            window.settings_button.click()
+            dialog = window.settings_dialog
+            QApplication.processEvents()
+            assert dialog.grab().save(str(destination / 'settings-English-dark.png'))
+            assert window.grab().save(str(destination / 'main-English-dark.png'))
+            dialog.cancel_button.click()
+            window.apply_preferences(replace(saved_theme, theme_mode='light', accent_color='#2563eb'))
+            assert not manager.dark and manager.tokens['accent'] == '#2563eb'
+            window.settings_button.click()
+            QApplication.processEvents()
+            assert window.settings_dialog.grab().save(str(destination / 'settings-English-light.png'))
+            window.settings_dialog.cancel_button.click()
+            window.apply_preferences(replace(saved_theme, theme_mode='system'))
+            manager.system_changed(Qt.ColorScheme.Dark)
+            assert manager.dark
+            manager.system_changed(Qt.ColorScheme.Light)
+            assert not manager.dark
+            window.apply_preferences(Preferences())
+            assert window.settings_button.text() == '设置'
+            assert QApplication.instance()._qt_ui_translator is not None
+            report['qt_dialog_translations_loaded'] = True
+            assert window.path_input.text() == original_path_text
+            report['theme_language_roundtrip'] = report['system_theme_changes'] = True
+            report['international_store_routing'] = report['theme_saved_and_cancelled'] = True
+            window.settings_button.click()
+            dialog = window.settings_dialog
             report['default_system_proxies'] = report['default_debug'] = True
             window.schlib_box.setChecked(True)
             window.merge_schlib_box.setChecked(True)

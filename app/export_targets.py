@@ -1,7 +1,8 @@
 """Library append destinations and Altium project integration controls."""
+from i18n import text as ui_text, message as ui_message
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout,
-                               QLabel, QLineEdit, QPushButton, QVBoxLayout)
+from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout)
+from localized_widgets import (QCheckBox, QDialog, QFileDialog, QFormLayout, QLabel, QLineEdit, QPushButton)
 
 from altium_project import read_project
 from library_merge import read_library
@@ -12,42 +13,42 @@ from errors import DownloadError
 class ExportTargetsDialog(QDialog):
     def __init__(self, values, parent):
         super().__init__(parent)
-        self.setWindowTitle('追加 · 已有库与 PCB 工程')
+        self.setWindowTitle(ui_text('追加 · 已有库与 PCB 工程'))
         self.setWindowModality(Qt.WindowModal)
         self.resize(660, 350)
         layout = QVBoxLayout(self)
-        hint = QLabel('已有库可只选 SchLib 或 PcbLib，只追加对应格式。\n只指定 PCB 工程时，在工程旁按工程名称生成配套库并加入工程；同名库存在时继续追加。\n相同封装自动复用，同名不同封装加序号；原有内容保留，修改前自动备份到应用数据目录。')
+        hint = QLabel(ui_text('已有库可只选 SchLib 或 PcbLib，只追加对应格式。\n只指定 PCB 工程时，在工程旁按工程名称生成配套库并加入工程；同名库存在时继续追加。\n相同封装自动复用，同名不同封装加序号；原有内容保留，修改前自动备份到应用数据目录。'))
         hint.setWordWrap(True)
         layout.addWidget(hint)
         form = QFormLayout()
         self.inputs = {}
-        for key, title, suffix in (('schlib_target', '已有符号库', 'SchLib'),
-                                    ('pcblib_target', '已有封装库', 'PcbLib'),
-                                    ('project_path', 'PCB 工程', 'PrjPcb')):
+        for key, title, suffix in (('schlib_target', ui_text('已有符号库'), 'SchLib'),
+                                    ('pcblib_target', ui_text('已有封装库'), 'PcbLib'),
+                                    ('project_path', ui_text('PCB 工程'), 'PrjPcb')):
             row = QHBoxLayout()
             edit = self.inputs[key] = QLineEdit(values.get(key, ''))
             edit.setAccessibleName(title)
-            edit.setPlaceholderText('选择 .' + suffix + ' 文件')
+            edit.setPlaceholderText(ui_text('选择 .') + suffix + ui_text(' 文件'))
             row.addWidget(edit)
-            browse = QPushButton('选择…')
+            browse = QPushButton(ui_text('选择…'))
             browse.clicked.connect(lambda checked=False, e=edit, ext=suffix: self.choose(e, ext))
             row.addWidget(browse)
-            clear = QPushButton('清除')
+            clear = QPushButton(ui_text('清除'))
             clear.clicked.connect(edit.clear)
             row.addWidget(clear)
             form.addRow(title, row)
         layout.addLayout(form)
-        self.keep_box = QCheckBox('独立导出器件')
+        self.keep_box = QCheckBox(ui_text('独立导出器件'))
         self.keep_box.setChecked(values.get('keep_individual') is True)
         layout.addWidget(self.keep_box)
-        model_hint = QLabel('不勾选时，所有 3D 文件集中到 SchLib 旁的“库名_3D”文件夹；仅选 PcbLib 时跟随其名称。\n勾选后，另按器件保存独立库与 3D 文件。')
+        model_hint = QLabel(ui_text('不勾选时，所有 3D 文件集中到 SchLib 旁的“库名_3D”文件夹；仅选 PcbLib 时跟随其名称。\n勾选后，另按器件保存独立库与 3D 文件。'))
         model_hint.setWordWrap(True)
         layout.addWidget(model_hint)
-        self.project_box = QCheckBox('将已选已有库导入PCB工程')
+        self.project_box = QCheckBox(ui_text('将已选已有库导入PCB工程'))
         self.project_box.setChecked(values.get('import_existing_to_project') is True)
-        self.project_box.setToolTip('同时指定已有库和 PCB 工程后可选；下载完成后将成功追加的库加入工程')
+        self.project_box.setToolTip(ui_text('同时指定已有库和 PCB 工程后可选；下载完成后将成功追加的库加入工程'))
         layout.addWidget(self.project_box)
-        project_hint = QLabel('工程中保存库的文件引用；已打开的 AD 工程需重新加载后查看。\n下载列表为空时，确定后点击主页“导入已有库”即可直接加入工程。')
+        project_hint = QLabel(ui_text('工程中保存库的文件引用；已打开的 AD 工程需重新加载后查看。\n下载列表为空时，确定后点击主页“导入已有库”即可直接加入工程。'))
         project_hint.setWordWrap(True)
         layout.addWidget(project_hint)
         self.status = QLabel('')
@@ -56,10 +57,10 @@ class ExportTargetsDialog(QDialog):
         layout.addWidget(self.status)
         buttons = QHBoxLayout()
         buttons.addStretch()
-        cancel = QPushButton('取消')
+        cancel = QPushButton(ui_text('取消'))
         cancel.clicked.connect(self.reject)
         buttons.addWidget(cancel)
-        save = QPushButton('确定')
+        save = QPushButton(ui_text('确定'))
         save.setObjectName('primary')
         save.clicked.connect(self.save)
         buttons.addWidget(save)
@@ -76,7 +77,7 @@ class ExportTargetsDialog(QDialog):
             self.project_box.setChecked(False)
 
     def choose(self, edit, suffix):
-        path, _ = QFileDialog.getOpenFileName(self, '选择 .' + suffix, edit.text(), f'AD 文件 (*.{suffix})')
+        path, _ = QFileDialog.getOpenFileName(self, ui_text('选择 .') + suffix, edit.text(), ui_message('AD 文件 (*.{0})', suffix))
         if path:
             edit.setText(path)
 
@@ -87,7 +88,7 @@ class ExportTargetsDialog(QDialog):
         self.values['import_existing_to_project'] = self.project_box.isEnabled() and self.project_box.isChecked()
         try:
             if not any(self.values[key] for key in self.inputs):
-                raise DownloadError('请至少选择一份已有库或一个 PCB 工程')
+                raise DownloadError(ui_text('请至少选择一份已有库或一个 PCB 工程'))
             for key, format in (('schlib_target', 'SCHLIB'), ('pcblib_target', 'PCBLIB')):
                 if self.values[key]:
                     read_library(self.values[key], format)
@@ -95,7 +96,7 @@ class ExportTargetsDialog(QDialog):
                 read_project(self.values['project_path'])
         except Exception as exc:
             record_error(exc, 'export.append_settings_invalid', stage='validate')
-            self.status.setText('无法使用所选文件：' + str(exc))
+            self.status.setText(ui_text('无法使用所选文件：') + str(exc))
             return
         log_event('INFO', 'export.append_settings_saved',
                   existing_formats=[fmt for key, fmt in (('schlib_target', 'SCHLIB'), ('pcblib_target', 'PCBLIB'))

@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import threading
@@ -14,6 +15,11 @@ from app_logging import traced, log_event, record_error
 
 PROXY_OPTIONS = (('使用系统代理', 'system'), ('不使用系统代理', 'direct'))
 LOG_LEVELS = ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
+LANGUAGES = (('简体中文', 'zh_CN'), ('English', 'en_US'))
+THEME_MODES = (('跟随系统', 'system'), ('浅色', 'light'), ('深色', 'dark'))
+ACCENT_COLORS = (('青绿', '#168878'), ('蓝色', '#2563eb'), ('紫色', '#7c3aed'),
+                 ('玫红', '#be185d'), ('橙色', '#c2410c'))
+DEFAULT_ACCENT = '#168878'
 
 
 @dataclass(frozen=True)
@@ -21,13 +27,20 @@ class Preferences:
     store_proxy: str = 'system'
     update_proxy: str = 'system'
     log_level: str = 'DEBUG'
+    language: str = 'zh_CN'
+    theme_mode: str = 'system'
+    accent_color: str = DEFAULT_ACCENT
 
     @classmethod
     def from_mapping(cls, values):
         values = values if isinstance(values, dict) else {}
         return cls(store_proxy=values.get('store_proxy') if values.get('store_proxy') in ('system', 'direct') else 'system',
                    update_proxy=values.get('update_proxy') if values.get('update_proxy') in ('system', 'direct') else 'system',
-                   log_level=values.get('log_level') if values.get('log_level') in LOG_LEVELS else 'DEBUG')
+                   log_level=values.get('log_level') if values.get('log_level') in LOG_LEVELS else 'DEBUG',
+                   language=values.get('language') if values.get('language') in ('zh_CN', 'en_US') else 'zh_CN',
+                   theme_mode=values.get('theme_mode') if values.get('theme_mode') in ('system', 'light', 'dark') else 'system',
+                   accent_color=values['accent_color'].lower() if isinstance(values.get('accent_color'), str)
+                   and re.fullmatch(r'#[0-9a-fA-F]{6}', values['accent_color']) else DEFAULT_ACCENT)
 
     def to_mapping(self):
         return asdict(self)

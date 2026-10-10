@@ -6,6 +6,18 @@ Windows 10/11 x64 便携软件，用嘉立创商城 C 编号下载官方 STEP/OB
 
 主窗口顶部点击 **设置** 打开设置窗口。更改后点击 **保存**，点击 **取消** 则保留原设置。设置随下载目录和格式选项一起保存在 `%LOCALAPPDATA%/LCSC3D/LCSC3D-settings.json`，重启和自更新后恢复；旧版本配置自动补充默认值。首次使用本版时，EXE 旁旧配置会迁移到应用数据目录，保存成功后清除旧文件；迁移失败时保留旧配置。
 
+### 主题设置 / Theme settings
+
+- **语言 / Language**：简体中文、English，保存后切换现有界面，无须重启。English 模式在软件内搜索 LCSC 国际商城，读取英文商品资料、美元价格、库存和原图；商品页按钮打开 `www.lcsc.com`。宽泛关键词按商品分类显示结果，可用分类选择框切换，并逐页读取最多 50 项结果。
+- **明暗模式 / Appearance**：跟随系统、浅色、深色。默认跟随系统，软件运行期间也会响应系统主题变化；手动指定浅色或深色后保持所选模式。
+- **APP 配色 / Accent color**：青绿、蓝色、紫色、玫红、橙色，或点击 **选择颜色… / Choose color…** 自定义颜色。配色预览在设置中显示；保存后应用于按钮、选中状态、进度条等区域。按钮文字根据颜色明暗选择黑色或白色。
+
+主题与语言的切换保留下载列表、勾选状态、导出路径及当前模型。取消设置或保存失败时保持原设置。设置内容较多时可滚动，底部“保存 / 取消”始终可见。符号与封装的官方 SVG 颜色保持不变。
+
+**国际站账号**：English 模式的账号登录、收藏管理按钮打开 LCSC.com 网页；国际站的搜索、分类、翻页、商品详情、原图和加入下载列表均在软件内操作。国际站不读取或发送国内站保存的登录会话。切回简体中文后，国内站原有的原生登录和账号收藏流程继续可用。
+
+**English quick start:** Open **Settings → Theme settings**, select **English**, choose **Follow system / Light / Dark** and an accent color, then click **Save**. Open **LCSC International** to search by C-number, MPN or keyword. Broad searches include a category selector. Check products and click **Add to download list**. Prices use USD. International sign-in and account favorites are managed on LCSC.com.
+
 程序内部文件统一存放在 `%LOCALAPPDATA%/LCSC3D/`：配置和加密会话位于根目录，日志位于 `logs/`，诊断 ZIP 位于 `diagnostics/`，缓存位于 `cache/`，临时文件位于 `temp/`，单文件 EXE 的运行时解压位于 `runtime/`，更新下载、计划和备份位于 `updates/`。正常启动和关闭不在 EXE 目录生成配置或日志。模型和元件库默认保存到 `downloads/`，也可主动选择其他导出目录。
 
 **代理设置** 包含两个独立下拉框，均默认 **使用系统代理**：
@@ -53,6 +65,8 @@ Windows 10/11 x64 便携软件，用嘉立创商城 C 编号下载官方 STEP/OB
 点击商品图片或 **查看全部原图** 打开软件自己的图片窗口，显示商品页的全部图片和缩略图。点击缩略图或「上一张 / 下一张」切换；滚轮或「放大 / 缩小」调整比例，拖动平移，「原始大小」按原始像素显示，双击或「适应窗口」恢复视野。左右方向键也可切换图片。关闭图片窗口后商城窗口保留。
 
 ## 登录、记住登录与账号收藏
+
+本节介绍简体中文模式的国内商城。English 模式的国际站账号操作见上方“国际站账号”。
 
 1. 点击主窗口顶部 **账号登录**，按钮位于 **设置** 之前；登录状态与商城窗口共享。
 2. 在原生登录框选择 **扫码登录 / 账号密码 / 手机验证码**。扫码用微信确认；账号密码直接在软件内输入；短信登录先获取验证码再提交。若商城要求图片验证，在同一登录框输入图中文字，支持 **换一张**。短信发送后有 60 秒重试倒计时。

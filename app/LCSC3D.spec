@@ -2,6 +2,7 @@
 # alongside the browser runtime; no external converter is needed.
 from pathlib import Path
 import sys
+from PySide6.QtCore import QLibraryInfo
 
 root = Path(SPECPATH)
 
@@ -10,6 +11,7 @@ a = Analysis(
     pathex=[str(root)],
     binaries=[],
     datas=[(str(root / 'viewer.html'), '.'), (str(root / 'vector_viewer.html'), '.'),
+           (str(Path(QLibraryInfo.path(QLibraryInfo.TranslationsPath)) / 'qtbase_zh_CN.qm'), 'assets'),
            (str(root / 'assets'), 'assets'), (str(root / 'licenses'), 'licenses')]
           + [(str(root.parent / 'docs/images/sponsorship' / filename), 'docs/images/sponsorship')
              for filename in ('alipay.png', 'wechat.png')],

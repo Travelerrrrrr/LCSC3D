@@ -24,13 +24,44 @@
     const canvas = document.getElementById('canvas');
     const gl = canvas.getContext('webgl', {antialias:true, alpha:false});
     let desired = {part:__PART_JSON__, token:__REVISION_JSON__};
+    let appearance = {language:'zh_CN', field:'#f3f6fa', muted:'#64748b'};
+    let lastState = null;
+    const translations = {
+      '正在获取 3D 模型…':'Loading 3D model…',
+      '3D 着色器初始化失败':'Could not initialize the 3D shader',
+      '显卡未能初始化 WebGL，请检查显卡驱动':'WebGL could not start. Check your graphics driver.',
+      '3D 渲染器初始化失败':'Could not initialize the 3D renderer',
+      '3D 渲染器不可用，请重新加载':'3D renderer unavailable. Reload to retry.',
+      '模型没有可显示的面':'The model has no renderable faces',
+      '3D 渲染器已停止，请重新加载':'3D renderer stopped. Reload to retry.'
+    };
+    function translated(message) {
+      if (appearance.language !== 'en_US') return message;
+      return translations[message] || message.replace(/^正在获取 (.+) 的 3D 模型…$/, 'Loading 3D model for $1…')
+        .replace(/^(.*) · (\d+) 个面 · 拖动旋转，滚轮缩放$/, '$1 · $2 faces · Drag to rotate, scroll to zoom');
+    }
+    window.setAppearance = value => {
+      appearance = value;
+      document.documentElement.lang = value.language === 'en_US' ? 'en' : 'zh-CN';
+      document.title = value.language === 'en_US' ? 'LCSC3D model preview' : 'LCSC3D 模型预览';
+      document.body.style.background = value.field;
+      document.getElementById('notice').style.color = value.muted;
+      document.getElementById('hint').style.color = value.muted;
+      document.getElementById('hint').textContent = value.language === 'en_US'
+        ? 'Drag to rotate · Scroll to zoom · Right-drag to pan · Double-click to fit'
+        : '拖动旋转 · 滚轮缩放 · 右键平移 · 双击适应窗口';
+      canvas.setAttribute('aria-label', value.language === 'en_US' ? '3D model preview' : '3D 模型预览');
+      if (lastState) state(...lastState);
+      draw();
+    };
     let program, buffer, count = 0, vertexCount = 0, faceCount = 0;
     const initialView = {yaw:-0.45, pitch:-0.85};
     let yaw = initialView.yaw, pitch = initialView.pitch, zoom = 1, pan = [0,0], dragging = null;
     function state(status, message, token = desired.token, diagnostic = '') {
+      lastState = [status, message, token, diagnostic];
       console.log('LCSC3D_STATE:' + JSON.stringify({token, status, message, diagnostic}));
       const notice = document.getElementById('notice');
-      notice.textContent = message;
+      notice.textContent = translated(message);
       notice.classList.toggle('hidden', status === 'ready');
     }
     function shader(type, source) {
@@ -89,7 +120,8 @@
       const height = Math.max(1, Math.round(canvas.clientHeight * devicePixelRatio));
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
       gl.viewport(0,0,width,height);
-      gl.clearColor(0.953,0.965,0.980,1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      const background = appearance.field.match(/\w\w/g).map(v => parseInt(v,16)/255);
+      gl.clearColor(...background,1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.uniformMatrix3fv(gl.getUniformLocation(program,'rotation'),false,rotation());
       gl.uniform2f(gl.getUniformLocation(program,'scale'),0.78*zoom*Math.min(1,height/width),0.78*zoom*Math.min(1,width/height));
       gl.uniform2f(gl.getUniformLocation(program,'pan'),pan[0],pan[1]);
