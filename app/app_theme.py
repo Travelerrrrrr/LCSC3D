@@ -1,9 +1,10 @@
 """Application palette, accent colors and live system appearance updates."""
+from pathlib import Path
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QColor, QPalette, QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
-from app_settings import Preferences, DEFAULT_FONT_FAMILY
+from app_settings import Preferences, DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 
 
 def luminance(color):
@@ -23,10 +24,10 @@ def foreground(background):
 
 def colors(dark=False, accent='#168878', accent_text='auto'):
     result = (dict(bg='#171e28', surface='#222c39', field='#1b2531', text='#e5edf5',
-                   muted='#a5b6c8', border='#435368', hover='#303e50', disabled='#7f90a3',
+                   muted='#a5b6c8', border='#435368', control_border='#9aacbf', hover='#303e50', disabled='#7f90a3',
                    success='#6cddbc', warning='#f2c47a', error='#ff9c9c') if dark else
               dict(bg='#f1f5f8', surface='#ffffff', field='#fafcfd', text='#23354a',
-                   muted='#586b80', border='#cfd9e2', hover='#eaf1f6', disabled='#718196',
+                   muted='#586b80', border='#cfd9e2', control_border='#66788a', hover='#eaf1f6', disabled='#718196',
                    success='#117767', warning='#9a620b', error='#b13d45'))
     ink = QColor(accent)
     # Small accent text remains legible even for custom near-white/black colors.
@@ -48,14 +49,27 @@ def effective_font_family(requested):
     return families.get(requested.casefold()) or families.get(DEFAULT_FONT_FAMILY.casefold()) or QFontDatabase.systemFont(QFontDatabase.GeneralFont).family()
 
 
+def typography(size=DEFAULT_FONT_SIZE):
+    return dict(font_size=size, small_font_size=round(size * 12 / 13),
+                section_font_size=round(size * 16 / 13), title_font_size=round(size * 25 / 13),
+                indicator_size=max(16, round(size * 16 / 13)))
+
+
 def stylesheet(c):
+    c = dict(typography(), **c)
+    assets = Path(__file__).resolve().parent / 'assets'
+    for state, background in (('check', c['accent']), ('disabled_check', c['disabled'])):
+        mark = 'white' if foreground(background) == '#ffffff' else 'black'
+        c[state + '_color'] = foreground(background)
+        c[state + '_image'] = (assets / ('check-' + mark + '.svg')).as_posix()
+        c[state + '_partial_image'] = (assets / ('partial-' + mark + '.svg')).as_posix()
     return '''
-QWidget { font-size:13px; color:%(text)s; }
+QWidget { font-size:%(font_size)spx; color:%(text)s; }
 QMainWindow, QDialog, QWidget#canvas, QScrollArea, QScrollArea > QWidget > QWidget { background:%(bg)s; }
 QFrame#card { background:%(surface)s; border:1px solid %(border)s; border-radius:12px; }
-QLabel#title { font-size:25px; font-weight:700; }
-QLabel#section { font-size:16px; font-weight:700; }
-QLabel#muted, QLabel#previewHint { color:%(muted)s; font-size:12px; }
+QLabel#title { font-size:%(title_font_size)spx; font-weight:700; }
+QLabel#section { font-size:%(section_font_size)spx; font-weight:700; }
+QLabel#muted, QLabel#previewHint { color:%(muted)s; font-size:%(small_font_size)spx; }
 QLabel#badge { color:%(accent_ink)s; background:%(surface)s; padding:5px 10px; border-radius:6px; font-weight:600; }
 QLineEdit, QPlainTextEdit { background:%(field)s; border:1px solid %(border)s; border-radius:7px; padding:9px; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
 QLineEdit:focus, QPlainTextEdit:focus { border:1px solid %(accent_ink)s; }
@@ -69,6 +83,7 @@ QPushButton#primary:hover { background:%(accent_hover)s; color:%(on_accent_hover
 QPushButton#primary:disabled { background:%(hover)s; color:%(disabled)s; border-color:%(border)s; }
 QPushButton#previewMode:checked { background:%(accent)s; color:%(on_accent)s; border-color:%(accent)s; font-weight:600; }
 QComboBox { border:1px solid %(border)s; border-radius:5px; padding:5px; background:%(surface)s; }
+QSpinBox { border:1px solid %(border)s; border-radius:5px; padding:5px; background:%(field)s; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
 QComboBox QAbstractItemView, QListWidget, QMenu { background:%(surface)s; color:%(text)s; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
 QMenu::item { padding:7px 18px; }
 QMenu::item:selected { background:%(accent)s; color:%(on_accent)s; }
@@ -78,7 +93,13 @@ QTabWidget::pane { background:%(surface)s; border:1px solid %(border)s; border-r
 QTabBar::tab { background:%(bg)s; padding:9px 18px; border:1px solid %(border)s; border-bottom:0; }
 QTabBar::tab:selected { background:%(accent)s; color:%(on_accent)s; font-weight:600; }
 QCheckBox { spacing:6px; }
-QCheckBox::indicator { width:16px; height:16px; }
+QCheckBox::indicator, QTableView::indicator, QListView::indicator { width:%(indicator_size)spx; height:%(indicator_size)spx; border:2px solid %(control_border)s; border-radius:3px; background:%(field)s; }
+QCheckBox::indicator:hover, QTableView::indicator:hover, QListView::indicator:hover { border-color:%(accent_ink)s; }
+QCheckBox::indicator:checked, QTableView::indicator:checked, QListView::indicator:checked { border-color:%(check_color)s; background:%(accent)s; image:url("%(check_image)s"); }
+QCheckBox::indicator:indeterminate, QTableView::indicator:indeterminate, QListView::indicator:indeterminate { border-color:%(check_color)s; background:%(accent)s; image:url("%(check_partial_image)s"); }
+QCheckBox::indicator:disabled, QTableView::indicator:disabled, QListView::indicator:disabled { border-color:%(disabled)s; background:%(bg)s; }
+QCheckBox::indicator:checked:disabled, QTableView::indicator:checked:disabled, QListView::indicator:checked:disabled { background:%(disabled)s; image:url("%(disabled_check_image)s"); }
+QCheckBox::indicator:indeterminate:disabled, QTableView::indicator:indeterminate:disabled, QListView::indicator:indeterminate:disabled { background:%(disabled)s; image:url("%(disabled_check_partial_image)s"); }
 QTableWidget { background:%(surface)s; alternate-background-color:%(field)s; border:1px solid %(border)s; border-radius:7px; gridline-color:%(border)s; outline:0; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
 QTableWidget::item { padding:5px; border-bottom:1px solid %(border)s; }
 QHeaderView::section { background:%(field)s; color:%(muted)s; border:0; border-bottom:1px solid %(border)s; padding:9px; font-weight:600; }
@@ -123,13 +144,14 @@ class ThemeManager(QObject):
         self.dark = preferences.theme_mode == 'dark' or (preferences.theme_mode == 'system' and scheme == Qt.ColorScheme.Dark)
         c = colors(self.dark, preferences.accent_color, preferences.accent_text_color)
         c['font_family'] = effective_font_family(preferences.font_family)
+        c.update(typography(preferences.font_size))
         if self.applied and c == self.tokens:
             self.changed.emit()
             return
         self.tokens = c
         self.applied = True
         font = QFont(c['font_family'])
-        font.setPixelSize(13)
+        font.setPixelSize(preferences.font_size)
         self.app.setFont(font)
         palette = QPalette()
         roles = {'Window': 'bg', 'WindowText': 'text', 'Base': 'field', 'AlternateBase': 'surface',

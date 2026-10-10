@@ -404,6 +404,7 @@ class SettingsWindowTests(PreferencesTestCase):
         dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('#7c3aed'))
         dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('#ffffff'))
         dialog.font_combo.setCurrentText('Segoe UI')
+        dialog.font_size_spin.setValue(24)
         with patch('main.write_settings', side_effect=PermissionError()):
             dialog.save_button.click()
         self.assertTrue(dialog.isVisible())
@@ -421,14 +422,22 @@ class SettingsWindowTests(PreferencesTestCase):
         with patch('settings_ui.QColorDialog.getColor', return_value=QColor('#fff1d6')):
             dialog.text_color_button.click()
         dialog.font_combo.setCurrentText('Segoe UI')
+        dialog.font_size_spin.setValue(18)
+        dialog.larger_font_button.click()
+        self.assertEqual(dialog.font_size_spin.value(), 19)
+        dialog.smaller_font_button.click()
         family = dialog.font_combo.currentText()
         self.assertIn('color:#fff1d6;', dialog.color_preview.styleSheet())
         self.assertEqual(dialog.color_preview.font().family(), family)
+        self.assertEqual(dialog.color_preview.font().pixelSize(), 18)
+        self.assertEqual(self.window.settings_button.font().pixelSize(), 13)
         self.assertEqual(get_preferences(), Preferences())
         dialog.save_button.click()
         saved = json.loads(self.settings_path.read_text(encoding='utf-8'))
         self.assertEqual(saved['accent_text_color'], '#fff1d6')
         self.assertEqual(saved['font_family'], family)
+        self.assertEqual(saved['font_size'], 18)
+        self.assertEqual(self.window.settings_button.font().pixelSize(), 18)
         self.assertEqual(saved['store_proxy'], 'system')
         self.assertEqual(theme_manager().tokens['on_accent'], '#fff1d6')
         self.window._restore_settings()
@@ -436,11 +445,14 @@ class SettingsWindowTests(PreferencesTestCase):
         dialog = self.window.settings_dialog
         self.assertEqual(dialog.text_color_combo.currentData(), '#fff1d6')
         self.assertEqual(dialog.font_combo.currentText(), family)
+        self.assertEqual(dialog.font_size_spin.value(), 18)
         dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('auto'))
         dialog.reset_font_button.click()
+        dialog.reset_size_button.click()
         dialog.save_button.click()
         self.assertEqual(get_preferences().accent_text_color, 'auto')
         self.assertEqual(get_preferences().font_family, effective_font_family(DEFAULT_FONT_FAMILY))
+        self.assertEqual(get_preferences().font_size, 13)
 
     def test_cancelled_text_picker_and_settings_do_not_change_live_font_or_color(self):
         from PySide6.QtGui import QColor
@@ -453,6 +465,7 @@ class SettingsWindowTests(PreferencesTestCase):
         self.assertEqual(dialog.text_color_combo.currentData(), 'auto')
         dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('#ffffff'))
         dialog.font_combo.setCurrentText('Segoe UI')
+        dialog.font_size_spin.setValue(24)
         dialog.cancel_button.click()
         self.assertEqual(get_preferences(), Preferences())
         self.assertEqual(theme_manager().tokens, before)
@@ -489,6 +502,24 @@ class SettingsWindowTests(PreferencesTestCase):
         self.assertTrue(dialog.isVisible())
         self.assertEqual(combo.currentText(), family)
         self.assertEqual(get_preferences(), Preferences())
+
+    def test_larger_font_reflows_existing_lists_and_preserves_checks(self):
+        from dataclasses import replace
+        self.window.input.setPlainText('C2040\nC20197')
+        self.window.load_queue()
+        self.window.table.item(1, main.DOWNLOAD_COLUMN).setCheckState(Qt.Unchecked)
+        store = self.window.ensure_store()
+        store.append_row(store.favorite_table, {'part': 'C2040', 'title': 'RP2040'})
+        store.favorite_table.item(0, 0).setCheckState(Qt.Checked)
+        for size in (24, 10, 13):
+            self.window.apply_preferences(replace(self.window.preferences, font_size=size))
+            self.app.processEvents()
+            for table in (self.window.table, store.favorite_table, store.search_table):
+                self.assertEqual(table.font().pixelSize(), size)
+                self.assertGreaterEqual(table.verticalHeader().defaultSectionSize(), table.fontMetrics().height() + 10)
+            self.assertEqual(self.window.ids, ['C2040', 'C20197'])
+            self.assertEqual(self.window.table.item(1, main.DOWNLOAD_COLUMN).checkState(), Qt.Unchecked)
+            self.assertEqual(store.favorite_checked, {'C2040'})
 
     def test_language_roundtrip_keeps_queue_checks_and_does_not_read_mainland_session_in_english(self):
         from dataclasses import replace

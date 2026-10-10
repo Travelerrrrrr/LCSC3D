@@ -96,6 +96,61 @@ def start(window, destination):
             combo.setCurrentIndex(original)
         report['font_popup_verified'] = True
 
+    def verify_large_font_and_checkboxes():
+        from favorites import FavoritesDialog
+        from store import StoreClient
+        from PySide6.QtWidgets import QStyle, QStyleOptionViewItem
+        from app_theme import theme_manager
+        # Populate native tables locally; no account, saved session or network requests.
+        store = FavoritesDialog(window, client_factory=StoreClient, vault=False)
+        store.selection_changed = lambda *_: None
+        store.tabs.setCurrentIndex(1)
+        store.status.setText('LCSC3D UI verification · offline sample data')
+        for part, title in (('C2040', 'RP2040'), ('C20197', '4D03WGJ0102T5E'), ('C163691', 'SMDRS1275-152N')):
+            store.append_row(store.favorite_table, {'part': part, 'title': title, 'manufacturer': 'Sample', 'package': 'Sample'})
+            store.append_row(store.search_table, {'part': part, 'title': title, 'manufacturer': 'Sample', 'package': 'Sample'})
+        for table in (store.favorite_table, store.search_table):
+            table.item(1, 0).setCheckState(Qt.Checked)
+            # Block selection callbacks so the synthetic row does not request product details.
+            table.blockSignals(True)
+            table.selectRow(0)
+            table.blockSignals(False)
+        store.show()
+        try:
+            for size, mode in ((24, 'dark'), (10, 'light'), (18, 'dark')):
+                window.apply_preferences(Preferences(theme_mode=mode, accent_color='#7c3aed', font_size=size))
+                QApplication.processEvents()
+                assert window.settings_button.font().pixelSize() == size
+                table = store.favorite_table
+                assert table.font().pixelSize() == size
+                assert table.rowHeight(0) >= table.fontMetrics().height() + 10
+                assert table.item(1, 0).checkState() == Qt.Checked
+                if size == 18:
+                    assert store.grab().save(str(destination / 'store-checkboxes-dark.png'))
+                    for row in (0, 1, 2):
+                        option = QStyleOptionViewItem()
+                        table.itemDelegate().initStyleOption(option, table.model().index(row, 0))
+                        option.rect = table.visualItemRect(table.item(row, 0))
+                        rect = table.style().subElementRect(QStyle.SE_ItemViewItemCheckIndicator, option, table)
+                        assert table.viewport().grab(rect).save(str(destination / ('checkbox-' + str(row) + '.png')))
+                    store.close()
+                    window.settings_button.click()
+                    dialog = window.settings_dialog
+                    QApplication.processEvents()
+                    assert dialog.grab().save(str(destination / 'settings-font-size.png'))
+                    assert window.grab().save(str(destination / 'main-font-size-dark.png'))
+                    dialog.reset_size_button.click()
+                    assert dialog.font_size_spin.value() == 13
+                    dialog.save_button.click()
+                    assert get_preferences().font_size == 13
+            report['font_size_range_and_reset_verified'] = True
+            report['checkboxes_dark_mode_verified'] = True
+            assert theme_manager().tokens['font_size'] == 13
+        finally:
+            store.shutdown()
+            store.close()
+            store.deleteLater()
+
     def verify_package(deadline):
         dialog = window.settings_dialog
         if dialog.worker is not None:
@@ -201,7 +256,10 @@ def start(window, destination):
             dialog.text_color_button.click()
             assert dialog.text_color_combo.currentData() == '#fff1d6'
             dialog.font_combo.setCurrentText('Segoe UI')
+            dialog.font_size_spin.setValue(18)
             assert dialog.color_preview.font().family() == dialog.font_combo.currentText()
+            assert dialog.color_preview.font().pixelSize() == 18
+            assert window.settings_button.font().pixelSize() == 13
             report['custom_text_color_picker_verified'] = True
             dialog.language_combo.setCurrentIndex(dialog.language_combo.findData('en_US'))
             dialog.theme_mode_combo.setCurrentIndex(dialog.theme_mode_combo.findData('dark'))
@@ -216,23 +274,28 @@ def start(window, destination):
             dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('#7c3aed'))
             dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('#ffffff'))
             dialog.font_combo.setCurrentText('Segoe UI')
+            dialog.font_size_spin.setValue(18)
             chosen_font = dialog.font_combo.currentText()
             dialog.save_button.click()
             assert manager.dark and manager.tokens['accent'] == '#7c3aed'
             assert manager.tokens['on_accent'] == manager.tokens['on_accent_hover'] == '#ffffff'
             assert window.start_button.palette().color(QPalette.ButtonText).name() == '#ffffff'
             assert window.settings_button.font().family() == chosen_font
+            assert window.settings_button.font().pixelSize() == 18
             assert window.settings_button.text() == 'Settings'
             assert window.path_input.text() == original_path_text
             saved_theme = Preferences.from_mapping(json.loads(main.SETTINGS_PATH.read_text(encoding='utf-8')))
             assert saved_theme.language == 'en_US' and saved_theme.theme_mode == 'dark'
             assert saved_theme.accent_color == '#7c3aed'
             assert saved_theme.accent_text_color == '#ffffff' and saved_theme.font_family == chosen_font
+            assert saved_theme.font_size == 18
             manager.apply(Preferences())
             window._restore_settings()
             assert manager.tokens['on_accent'] == '#ffffff'
             assert window.settings_button.font().family() == chosen_font
+            assert window.settings_button.font().pixelSize() == 18
             report['font_and_text_color_persisted'] = True
+            report['font_size_persisted_and_cancelled'] = True
             window.current_preview = 'C2040'
             window.open_store()
             assert report['opened_storefront'] == 'https://www.lcsc.com/product-detail/C2040.html'
@@ -271,6 +334,7 @@ def start(window, destination):
             assert not manager.dark
             assert manager.tokens['on_accent'] == '#ffffff'
             report['manual_text_color_preserved'] = True
+            verify_large_font_and_checkboxes()
             window.apply_preferences(Preferences())
             assert window.settings_button.text() == '设置'
             assert QApplication.instance()._qt_ui_translator is not None

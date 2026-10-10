@@ -21,6 +21,8 @@ ACCENT_COLORS = (('青绿', '#168878'), ('蓝色', '#2563eb'), ('紫色', '#7c3a
                  ('玫红', '#be185d'), ('橙色', '#c2410c'))
 DEFAULT_ACCENT = '#168878'
 DEFAULT_FONT_FAMILY = 'Microsoft YaHei UI'
+DEFAULT_FONT_SIZE = 13
+MIN_FONT_SIZE, MAX_FONT_SIZE = 10, 24
 
 
 def color_value(value, default):
@@ -37,6 +39,7 @@ class Preferences:
     accent_color: str = DEFAULT_ACCENT
     accent_text_color: str = 'auto'
     font_family: str = DEFAULT_FONT_FAMILY
+    font_size: int = DEFAULT_FONT_SIZE
 
     @classmethod
     def from_mapping(cls, values):
@@ -50,7 +53,9 @@ class Preferences:
                    accent_text_color=color_value(values.get('accent_text_color'), 'auto'),
                    font_family=values['font_family'].strip() if isinstance(values.get('font_family'), str)
                    and 0 < len(values['font_family'].strip()) <= 128
-                   and not any(ord(c) < 32 for c in values['font_family']) else DEFAULT_FONT_FAMILY)
+                   and not any(ord(c) < 32 for c in values['font_family']) else DEFAULT_FONT_FAMILY,
+                   font_size=values['font_size'] if type(values.get('font_size')) is int
+                   and MIN_FONT_SIZE <= values['font_size'] <= MAX_FONT_SIZE else DEFAULT_FONT_SIZE)
 
     def to_mapping(self):
         return asdict(self)

@@ -5,12 +5,13 @@ import sys
 
 from PySide6.QtCore import Qt, QUrl, QThread
 from PySide6.QtGui import QColor, QDesktopServices, QPixmap, QIcon, QFont, QFontDatabase
-from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QColorDialog,
+from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QColorDialog, QSpinBox, QAbstractSpinBox,
                                QComboBox as NativeComboBox)
 from localized_widgets import (QComboBox, QDialog, QFormLayout, QGroupBox, QLabel, QPushButton, QMessageBox)
 
 from app_settings import (LOG_LEVELS, PROXY_OPTIONS, Preferences, LANGUAGES,
-                          THEME_MODES, ACCENT_COLORS, DEFAULT_ACCENT, DEFAULT_FONT_FAMILY)
+                          THEME_MODES, ACCENT_COLORS, DEFAULT_ACCENT, DEFAULT_FONT_FAMILY,
+                          DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE)
 from app_theme import effective_font_family, foreground
 from app_logging import (get_log_directory, log_event, record_error, logging_health,
                          contextual, new_context)
@@ -187,12 +188,36 @@ class SettingsDialog(QDialog):
         font_row.addWidget(self.reset_font_button)
         theme_form.addRow(ui_text('界面字体'), font_row)
 
+        size_row = QHBoxLayout()
+        self.font_size_spin = QSpinBox()
+        self.font_size_spin.setRange(MIN_FONT_SIZE, MAX_FONT_SIZE)
+        self.font_size_spin.setSuffix(' px')
+        self.font_size_spin.setValue(preferences.font_size)
+        self.font_size_spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.smaller_font_button = QPushButton('−')
+        self.larger_font_button = QPushButton('+')
+        self.smaller_font_button.setToolTip(ui_text('减小字号'))
+        self.larger_font_button.setToolTip(ui_text('增大字号'))
+        for button in (self.smaller_font_button, self.larger_font_button):
+            button.setAutoDefault(False)
+        self.smaller_font_button.clicked.connect(self.font_size_spin.stepDown)
+        self.larger_font_button.clicked.connect(self.font_size_spin.stepUp)
+        self.reset_size_button = QPushButton(ui_text('恢复默认'))
+        self.reset_size_button.setAutoDefault(False)
+        self.reset_size_button.clicked.connect(lambda: self.font_size_spin.setValue(DEFAULT_FONT_SIZE))
+        size_row.addWidget(self.font_size_spin, 1)
+        size_row.addWidget(self.smaller_font_button)
+        size_row.addWidget(self.larger_font_button)
+        size_row.addWidget(self.reset_size_button)
+        theme_form.addRow(ui_text('界面字号'), size_row)
+
         self.color_preview = QLabel()
         self.color_preview.setAlignment(Qt.AlignCenter)
         self.color_preview.setWordWrap(True)
         self.accent_combo.currentIndexChanged.connect(self.update_color_preview)
         self.text_color_combo.currentIndexChanged.connect(self.update_color_preview)
         self.font_combo.currentTextChanged.connect(self.update_color_preview)
+        self.font_size_spin.valueChanged.connect(self.update_color_preview)
         self.update_color_preview()
         theme_form.addRow(self.color_preview)
         theme_hint = QLabel(ui_text('保存后立即生效。English 使用 LCSC 国际商城。'))
@@ -315,9 +340,12 @@ class SettingsDialog(QDialog):
         text_color = self.text_color_combo.currentData()
         if text_color == 'auto':
             text_color = foreground(value)
-        self.color_preview.setFont(QFont(self.font_combo.currentText()))
+        font = QFont(self.font_combo.currentText())
+        font.setPixelSize(self.font_size_spin.value())
+        self.color_preview.setFont(font)
         self.color_preview.setText(ui_text('配色与字体预览 · ') + 'LCSC3D Aa 123 · ' + value.upper())
-        self.color_preview.setStyleSheet(ui_message('background:{0};color:{1};padding:7px;border-radius:6px;', value, text_color))
+        self.color_preview.setStyleSheet(ui_message('background:{0};color:{1};font-size:{2}px;padding:7px;border-radius:6px;',
+                                                    value, text_color, self.font_size_spin.value()))
 
     def open_repository(self):
         if QDesktopServices.openUrl(QUrl(REPOSITORY_URL)):
@@ -351,7 +379,7 @@ class SettingsDialog(QDialog):
                                   theme_mode=self.theme_mode_combo.currentData(),
                                   accent_color=self.accent_combo.currentData(),
                                   accent_text_color=self.text_color_combo.currentData(),
-                                  font_family=self.font_combo.currentText())
+                                  font_family=self.font_combo.currentText(), font_size=self.font_size_spin.value())
         if self.save(preferences):
             self.accept()
         else:
@@ -386,7 +414,8 @@ class SettingsDialog(QDialog):
                        self.save_button, self.cancel_button, self.store_proxy_combo,
                        self.update_proxy_combo, self.log_level_combo, self.language_combo,
                        self.theme_mode_combo, self.accent_combo, self.color_button,
-                       self.text_color_combo, self.text_color_button, self.font_combo, self.reset_font_button):
+                       self.text_color_combo, self.text_color_button, self.font_combo, self.reset_font_button,
+                       self.font_size_spin, self.reset_size_button, self.smaller_font_button, self.larger_font_button):
             widget.setEnabled(not busy)
 
     def finish_log_package(self):

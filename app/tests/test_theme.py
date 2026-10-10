@@ -43,10 +43,11 @@ class AppearanceTests(unittest.TestCase):
                       {'accent_text_color': '#fff', 'font_family': []},
                       {'accent_text_color': None, 'font_family': '\nArial'},
                       {'accent_text_color': {}, 'font_family': ' '},
-                      {'accent_text_color': [], 'font_family': 'f' * 129}):
+                      {'accent_text_color': [], 'font_family': 'f' * 129},
+                      *({'font_size': size} for size in (None, True, '18', 18.5, [], {}, 9, 25))):
             self.assertEqual(Preferences.from_mapping(value), Preferences())
         expected = Preferences(language='en_US', theme_mode='dark', accent_color='#123abc', store_proxy='direct',
-                               accent_text_color='#fff1d6', font_family='Segoe UI')
+                               accent_text_color='#fff1d6', font_family='Segoe UI', font_size=18)
         values = expected.to_mapping()
         values['accent_color'] = '#123ABC'
         values['accent_text_color'] = '#FFF1D6'
@@ -178,6 +179,74 @@ class AppearanceTests(unittest.TestCase):
         self.assertEqual(theme_manager().tokens['font_family'], expected)
         self.assertEqual(self.app.font().family(), expected)
 
+    def test_font_size_updates_existing_widgets_and_relative_heading_sizes(self):
+        manager = theme_manager()
+        button, heading, hint = QPushButton('Download'), QLabel('Title'), QLabel('Hint')
+        heading.setObjectName('section')
+        hint.setObjectName('muted')
+        try:
+            for size in (10, 18, 24, 13):
+                manager.apply(Preferences(font_size=size))
+                for widget in (button, heading, hint):
+                    widget.ensurePolished()
+                self.assertEqual(button.font().pixelSize(), size)
+                self.assertEqual(heading.font().pixelSize(), round(size * 16 / 13))
+                self.assertEqual(hint.font().pixelSize(), round(size * 12 / 13))
+                self.assertEqual(Preferences.from_mapping(Preferences(font_size=size).to_mapping()).font_size, size)
+        finally:
+            for widget in (button, heading, hint):
+                widget.deleteLater()
+
+    def test_checkbox_and_table_indicators_remain_visible_on_dark_and_selected_rows(self):
+        from PySide6.QtWidgets import QCheckBox, QStyle, QStyleOptionViewItem
+        from app_theme import foreground
+        box = QCheckBox('')
+        table = QTableWidget(1, 1)
+        item = QTableWidgetItem()
+        item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
+        table.setItem(0, 0, item)
+        table.verticalHeader().setDefaultSectionSize(44)
+        table.resize(180, 130)
+        table.show()
+        def pixels(image, target):
+            from PySide6.QtGui import QColor
+            color = QColor(target).getRgb()[:3]
+            return sum(max(abs(a - b) for a, b in zip(image.pixelColor(x, y).getRgb()[:3], color)) < 15
+                       for y in range(image.height()) for x in range(image.width()))
+        try:
+            for mode in ('light', 'dark'):
+                for accent in ('#7c3aed', '#ffffff', '#000000'):
+                    theme_manager().apply(Preferences(theme_mode=mode, accent_color=accent))
+                    c = theme_manager().tokens
+                    self.assertGreaterEqual(contrast(c['control_border'], c['surface']), 3)
+                    for selected in (False, True):
+                        for state in (Qt.Unchecked, Qt.Checked, Qt.PartiallyChecked):
+                            with self.subTest(mode=mode, accent=accent, selected=selected, state=state):
+                                item.setSelected(selected)
+                                item.setCheckState(state)
+                                self.app.processEvents()
+                                option = QStyleOptionViewItem()
+                                table.itemDelegate().initStyleOption(option, table.model().index(0, 0))
+                                option.rect = table.visualItemRect(item)
+                                rect = table.style().subElementRect(QStyle.SE_ItemViewItemCheckIndicator, option, table)
+                                image = table.viewport().grab(rect).toImage()
+                                target = c['control_border'] if state == Qt.Unchecked else foreground(accent)
+                                self.assertGreater(pixels(image, target), 5)
+                                if state != Qt.Unchecked:
+                                    # The interior must contain the tick / dash, not just a visible border.
+                                    self.assertGreater(pixels(table.viewport().grab(rect.adjusted(4, 4, -4, -4)).toImage(), target), 2)
+                                box.setCheckState(state)
+                                box.resize(box.sizeHint())
+                                self.assertGreater(pixels(box.grab().toImage(), target), 5)
+                    box.setChecked(True)
+                    box.setEnabled(False)
+                    self.assertGreater(pixels(box.grab().toImage(), c['disabled']), 5)
+                    box.setEnabled(True)
+        finally:
+            for widget in (box, table):
+                widget.close()
+                widget.deleteLater()
+
     def test_font_change_reflows_open_product_descriptions_and_parameter_rows(self):
         from favorites import DetailLabel, ParameterTable
         label = DetailLabel('LCSC3D component parameter with long text. ' * 24)
@@ -190,8 +259,8 @@ class AppearanceTests(unittest.TestCase):
         label.show()
         table.show()
         try:
-            for family in ('Segoe UI', 'Consolas'):
-                theme_manager().apply(Preferences(font_family=family))
+            for family, size in (('Segoe UI', 13), ('Consolas', 24), ('Segoe UI', 10)):
+                theme_manager().apply(Preferences(font_family=family, font_size=size))
                 for _ in range(10):
                     self.app.processEvents()
                 self.assertGreaterEqual(label.height(), label.heightForWidth(label.width()))

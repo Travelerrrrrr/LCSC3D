@@ -1,6 +1,9 @@
 """English UI catalog. Keys remain the Simplified Chinese source messages."""
 
 ENGLISH = {
+    '界面字号': 'Font size',
+    '减小字号': 'Decrease font size',
+    '增大字号': 'Increase font size',
     '\n可用资源：': '\nAvailable resources: ',
     '\n无法自动打开目录，请按上方路径取出 ZIP。': '\nCould not open the folder. Retrieve the ZIP from the path above.',
     '\n源码运行请打开发布页面下载便携 EXE。': '\nFrom source, open the releases page to download the portable EXE.',

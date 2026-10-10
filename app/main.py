@@ -15,7 +15,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal, QRectF
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPixmap, QPainter
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QHeaderView, QProgressBar, QSizePolicy, QSplitter, QSplitterHandle, QStackedWidget, QVBoxLayout, QWidget, QAbstractItemView)
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QHeaderView, QProgressBar, QScrollArea, QSizePolicy, QSplitter, QSplitterHandle, QStackedWidget, QVBoxLayout, QWidget, QAbstractItemView)
 from localized_widgets import (QCheckBox, QComboBox, QFileDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem)
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -352,7 +352,13 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         canvas = QWidget()
         canvas.setObjectName('canvas')
-        self.setCentralWidget(canvas)
+        # Large interface fonts can exceed a small screen; keep every control
+        # reachable without forcing the top-level window off screen.
+        self.content_scroll = QScrollArea()
+        self.content_scroll.setFrameShape(QFrame.NoFrame)
+        self.content_scroll.setWidgetResizable(True)
+        self.content_scroll.setWidget(canvas)
+        self.setCentralWidget(self.content_scroll)
         layout = QVBoxLayout(canvas)
         layout.setContentsMargins(24, 20, 24, 16)
         layout.setSpacing(16)
@@ -759,6 +765,9 @@ class MainWindow(QMainWindow):
 
     def refresh_appearance(self):
         tokens = theme_manager().tokens
+        scale = tokens['font_size'] / 13
+        self.input.setFixedHeight(max(76, self.input.fontMetrics().lineSpacing() * 2 + 22))
+        self.table.verticalHeader().setDefaultSectionSize(round(40 * scale))
         for row, part in enumerate(self.ids):
             item = self.table.item(row, RESULT_COLUMN)
             if item is not None:
@@ -766,8 +775,9 @@ class MainWindow(QMainWindow):
                 role = {ui_text('成功'): 'success', ui_text('部分完成'): 'warning', ui_text('失败'): 'error',
                         ui_text('无模型'): 'warning', ui_text('已取消'): 'muted'}.get(status, 'text')
                 item.setForeground(QColor(tokens[role]))
-        self.table.setColumnWidth(DOWNLOAD_COLUMN, 85 if self.preferences.language == 'en_US' else 56)
-        self.table.setColumnWidth(RESULT_COLUMN, 125 if self.preferences.language == 'en_US' else 100)
+        self.table.setColumnWidth(DOWNLOAD_COLUMN, round((85 if self.preferences.language == 'en_US' else 56) * scale))
+        self.table.setColumnWidth(PART_COLUMN, round(104 * scale))
+        self.table.setColumnWidth(RESULT_COLUMN, round((125 if self.preferences.language == 'en_US' else 100) * scale))
         if self.web is not None:
             self.web.page().setBackgroundColor(QColor(tokens['field']))
             self.update_viewer_appearance()
@@ -1246,9 +1256,8 @@ class MainWindow(QMainWindow):
         self.export_layout_timer.start(0)
 
     def adjust_export_layout(self):
-        # Revealing the merge rows changes the minimum height of the left column.
-        # Recompute it after Qt lays out the rows so the table cannot overlap status controls.
-        self.centralWidget().layout().activate()
+        # Reflow the canvas inside its scroll area when merge controls appear.
+        self.content_scroll.widget().layout().activate()
         self.setMinimumHeight(max(740, self.minimumSizeHint().height()))
 
     def configure_export_targets(self):

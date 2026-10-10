@@ -15,6 +15,7 @@ from store import (FAVORITES_URL, SEARCH_PAGE_SIZE, StoreClient, StoreError, Ses
                    CaptchaRequired, is_favorites_url, normalize_items)
 from store_session import SessionVault, MemoryOnlyVault
 from international_store import catalog_client, HOME
+from app_theme import theme_manager
 from store_images import ImageGallery, ProductImage
 from store_diagnostics import record_request_error
 from app_logging import (log_event, new_context, log_context, contextual, record_error, traced, safe_part)
@@ -754,6 +755,8 @@ class FavoritesDialog(QDialog):
         layout.addWidget(self.status)
         self.clear_detail()
         self.update_count()
+        theme_manager().changed.connect(self.refresh_appearance)
+        self.refresh_appearance()
         if self.international:
             self.setWindowTitle('LCSC International · Search & Products')
             self.account_label.setText('International account: LCSC.com')
@@ -767,6 +770,16 @@ class FavoritesDialog(QDialog):
     @property
     def table(self):
         return self.favorite_table if self.tabs.currentIndex() == 1 else self.search_table
+
+    def refresh_appearance(self):
+        scale = theme_manager().tokens.get('font_size', 13) / 13
+        for table in (self.search_table, self.favorite_table):
+            table.ensurePolished()
+            table.verticalHeader().setDefaultSectionSize(max(round(36 * scale), table.fontMetrics().height() + 14))
+            for column, width in ((0, 46), (1, 95), (3, 100), (4, 115), (5, 210), (6, 85)):
+                if column < table.columnCount():
+                    title = table.horizontalHeaderItem(column).text()
+                    table.setColumnWidth(column, max(round(width * scale), table.fontMetrics().horizontalAdvance(title) + 28))
 
     def make_table(self, commercial=False):
         labels = [ui_text('选择'), ui_text('C 编号'), ui_text('型号'), ui_text('厂商'), ui_text('封装')]
