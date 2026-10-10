@@ -401,9 +401,21 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.wait_for_preview('C2040')
         with patch.object(main, 'ROOT', Path(__file__).resolve().parents[1]):
             self.window.reload_button.click()
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and not self.window.viewer_ready:
+        # The mock page can finish an in-flight load during reload. Wait for
+        # the real renderer's API, rather than accepting that page's signal.
+        deadline = time.monotonic() + 10
+        renderer_ready = []
+        while time.monotonic() < deadline:
+            renderer_ready = []
+            self.window.web.page().runJavaScript(
+                'typeof window.getModelPreviewState === "function"', renderer_ready.append)
+            poll_deadline = min(deadline, time.monotonic() + .25)
+            while time.monotonic() < poll_deadline and not renderer_ready:
+                QTest.qWait(10)
+            if renderer_ready == [True]:
+                break
             QTest.qWait(20)
+        self.assertEqual(renderer_ready, [True], 'Real model renderer did not finish loading')
         # Red marks the top (+Z), blue the bottom (-Z). Verify their actual
         # framebuffer positions so an inverted initial view cannot pass.
         payload = {'vertices': [[-.35,-.25,1],[.35,-.25,1],[0,.35,1],

@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from app_logging import close_logging
@@ -37,9 +37,10 @@ class WindowChromeTests(unittest.TestCase):
             stub.start()
             self.addCleanup(stub.stop)
         self.window = main.MainWindow(settings_enabled=False)
-        # Keep the restored size within the monitor work area, also when this
-        # suite is run at 200% scaling on a 2560x1600 desktop.
-        self.window.resize(1060, 740)
+        # Restore only to a size supported by this monitor, including the
+        # 1024x720 work area on hosted Windows runners and high-DPI desktops.
+        available = self.window.screen().availableGeometry()
+        self.window.resize(min(1060, available.width()), min(740, available.height()))
         self.window.show()
         self.settle()
         self.addCleanup(self.close_window)
@@ -114,6 +115,13 @@ class WindowChromeTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'win32', 'Native Windows frame')
     def test_native_client_has_no_titlebar_and_maximizes_inside_work_area(self):
         w = self.window
+        # Reproduce the small-screen reflow even on a large developer display.
+        with patch.object(w, 'screen') as screen:
+            screen.return_value.availableGeometry.return_value = QRect(0, 0, 1024, 720)
+            w.adjust_export_layout()
+            self.assertLessEqual(w.minimumWidth(), 1024)
+            self.assertLessEqual(w.minimumHeight(), 720)
+        w.adjust_export_layout()
         user = w._native_frame.user
         user.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
         user.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]

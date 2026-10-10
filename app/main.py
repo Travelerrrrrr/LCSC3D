@@ -1295,7 +1295,8 @@ class MainWindow(FramelessMainWindow):
         self.workspace_splitter.setMinimumHeight(0)
         self.workspace_splitter.setMinimumHeight(self.workspace_splitter.minimumSizeHint().height())
         self.content_scroll.widget().layout().activate()
-        self.setMinimumHeight(740)
+        available = self.screen().availableGeometry()
+        self.setMinimumSize(min(1060, available.width()), min(740, available.height()))
 
     def configure_export_targets(self):
         current = getattr(self, 'export_dialog', None)
