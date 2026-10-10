@@ -1,3 +1,5 @@
+[![赞助支持 LCSC3D](docs/images/sponsorship/button.svg)](docs/sponsorship.md)
+
 # LCSC3D：立创元件 3D 模型下载与 Altium Designer 元件库导出
 
 [![Release](https://img.shields.io/github/v/release/Travelerrrrrr/LCSC3D?label=release)](https://github.com/Travelerrrrrr/LCSC3D/releases/latest)
