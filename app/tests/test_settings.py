@@ -403,8 +403,7 @@ class SettingsWindowTests(PreferencesTestCase):
         dialog.theme_mode_combo.setCurrentIndex(dialog.theme_mode_combo.findData('dark'))
         dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('#7c3aed'))
         dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('#ffffff'))
-        from PySide6.QtGui import QFont
-        dialog.font_combo.setCurrentFont(QFont('Segoe UI'))
+        dialog.font_combo.setCurrentText('Segoe UI')
         with patch('main.write_settings', side_effect=PermissionError()):
             dialog.save_button.click()
         self.assertTrue(dialog.isVisible())
@@ -414,15 +413,15 @@ class SettingsWindowTests(PreferencesTestCase):
         self.assertEqual(self.window.path_input.text(), 'F:/用户选择/模型')
 
     def test_text_color_and_font_save_restore_and_reset_without_affecting_other_preferences(self):
-        from PySide6.QtGui import QFont, QColor
+        from PySide6.QtGui import QColor
         from app_theme import theme_manager, effective_font_family
         from app_settings import DEFAULT_FONT_FAMILY
         self.window.open_settings()
         dialog = self.window.settings_dialog
         with patch('settings_ui.QColorDialog.getColor', return_value=QColor('#fff1d6')):
             dialog.text_color_button.click()
-        dialog.font_combo.setCurrentFont(QFont('Segoe UI'))
-        family = dialog.font_combo.currentFont().family()
+        dialog.font_combo.setCurrentText('Segoe UI')
+        family = dialog.font_combo.currentText()
         self.assertIn('color:#fff1d6;', dialog.color_preview.styleSheet())
         self.assertEqual(dialog.color_preview.font().family(), family)
         self.assertEqual(get_preferences(), Preferences())
@@ -436,7 +435,7 @@ class SettingsWindowTests(PreferencesTestCase):
         self.window.open_settings()
         dialog = self.window.settings_dialog
         self.assertEqual(dialog.text_color_combo.currentData(), '#fff1d6')
-        self.assertEqual(dialog.font_combo.currentFont().family(), family)
+        self.assertEqual(dialog.font_combo.currentText(), family)
         dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('auto'))
         dialog.reset_font_button.click()
         dialog.save_button.click()
@@ -444,7 +443,7 @@ class SettingsWindowTests(PreferencesTestCase):
         self.assertEqual(get_preferences().font_family, effective_font_family(DEFAULT_FONT_FAMILY))
 
     def test_cancelled_text_picker_and_settings_do_not_change_live_font_or_color(self):
-        from PySide6.QtGui import QFont, QColor
+        from PySide6.QtGui import QColor
         from app_theme import theme_manager
         before = dict(theme_manager().tokens)
         self.window.open_settings()
@@ -453,11 +452,43 @@ class SettingsWindowTests(PreferencesTestCase):
             dialog.text_color_button.click()
         self.assertEqual(dialog.text_color_combo.currentData(), 'auto')
         dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('#ffffff'))
-        dialog.font_combo.setCurrentFont(QFont('Segoe UI'))
+        dialog.font_combo.setCurrentText('Segoe UI')
         dialog.cancel_button.click()
         self.assertEqual(get_preferences(), Preferences())
         self.assertEqual(theme_manager().tokens, before)
         self.assertFalse(self.settings_path.exists())
+
+    def test_font_popup_is_compact_scrollable_and_escape_preserves_selection(self):
+        from PySide6.QtTest import QTest
+        self.addCleanup(self.app.setStyle, self.app.style().objectName())
+        self.app.setStyle('Fusion')
+        self.window.open_settings()
+        dialog = self.window.settings_dialog
+        combo = dialog.font_combo
+        self.app.processEvents()
+        combo.showPopup()
+        self.app.processEvents()
+        view = combo.view()
+        popup = view.window()
+        self.assertTrue(QTest.qWaitForWindowExposed(popup))
+        self.assertLessEqual(popup.width(), combo.width() + 2)
+        self.assertLessEqual(popup.height(), 250)
+        self.assertTrue(view.verticalScrollBar().isVisible())
+        self.assertGreater(view.verticalScrollBar().maximum(), 0)
+        QTest.keyClick(view, Qt.Key_End)
+        QTest.keyClick(view, Qt.Key_Return)
+        family = combo.itemText(combo.count() - 1)
+        self.assertEqual(combo.currentText(), family)
+        self.assertEqual(dialog.color_preview.font().family(), family)
+        self.assertFalse(popup.isVisible())
+        combo.showPopup()
+        self.assertTrue(QTest.qWaitForWindowExposed(popup))
+        QTest.keyClick(view, Qt.Key_Home)
+        QTest.keyClick(view, Qt.Key_Escape)
+        self.assertFalse(popup.isVisible())
+        self.assertTrue(dialog.isVisible())
+        self.assertEqual(combo.currentText(), family)
+        self.assertEqual(get_preferences(), Preferences())
 
     def test_language_roundtrip_keeps_queue_checks_and_does_not_read_mainland_session_in_english(self):
         from dataclasses import replace

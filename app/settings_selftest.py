@@ -6,8 +6,8 @@ import time
 import zipfile
 from dataclasses import replace
 
-from PySide6.QtCore import QTimer, QObject, Slot, QUrl
-from PySide6.QtGui import QDesktopServices, QColor, QFont, QPalette
+from PySide6.QtCore import QTimer, QObject, Slot, QUrl, Qt, QEvent
+from PySide6.QtGui import QDesktopServices, QColor, QPalette, QKeyEvent
 from PySide6.QtWidgets import QApplication, QMessageBox, QColorDialog
 
 from app_settings import Preferences, get_preferences, set_preferences
@@ -19,6 +19,8 @@ def start(window, destination):
     destination = Path(destination).resolve()
     destination.mkdir(parents=True, exist_ok=True)
     QApplication.instance().setQuitOnLastWindowClosed(False)
+    # Measure the final popup, independent of Windows' transient animation.
+    QApplication.setEffectEnabled(Qt.UI_AnimateCombo, False)
     original_path = main.SETTINGS_PATH
     main.SETTINGS_PATH = destination / 'LCSC3D-settings.json'
     window.settings_enabled = True
@@ -52,6 +54,47 @@ def start(window, destination):
         main.SETTINGS_PATH = original_path
         window.close()
         QApplication.instance().exit(1 if error else 0)
+
+    def verify_font_popup(dialog, appearance):
+        combo = dialog.font_combo
+        original = combo.currentIndex()
+        combo.showPopup()
+        QApplication.processEvents()
+        view = combo.view()
+        popup = view.window()
+        try:
+            assert popup.isVisible()
+            assert popup.width() <= combo.width() + 2, 'Font popup wider than its field'
+            assert popup.height() <= 250, 'Font popup exceeds compact list height'
+            assert view.verticalScrollBar().isVisible()
+            assert view.verticalScrollBar().maximum() > 0
+            assert view.viewport().rect().contains(view.visualRect(view.currentIndex()).center())
+            assert popup.grab().save(str(destination / ('font-popup-' + appearance + '.png')))
+            report.setdefault('font_popups', []).append({
+                'appearance': appearance, 'width': popup.width(), 'height': popup.height(),
+                'field_width': combo.width(), 'font_count': combo.count(),
+                'device_pixel_ratio': combo.devicePixelRatioF()})
+
+            def key_press(key):
+                for event_type in (QEvent.KeyPress, QEvent.KeyRelease):
+                    QApplication.sendEvent(view, QKeyEvent(event_type, key, Qt.NoModifier))
+                QApplication.processEvents()
+
+            key_press(Qt.Key_End)
+            assert view.currentIndex().row() == combo.count() - 1
+            key_press(Qt.Key_Return)
+            assert not popup.isVisible()
+            assert combo.currentIndex() == combo.count() - 1
+            assert dialog.color_preview.font().family() == combo.currentText()
+            combo.showPopup()
+            key_press(Qt.Key_Home)
+            key_press(Qt.Key_Escape)
+            assert not popup.isVisible() and dialog.isVisible()
+            assert combo.currentIndex() == combo.count() - 1
+        finally:
+            combo.hidePopup()
+            combo.setCurrentIndex(original)
+        report['font_popup_verified'] = True
 
     def verify_package(deadline):
         dialog = window.settings_dialog
@@ -113,6 +156,7 @@ def start(window, destination):
             assert dialog.isVisible()
             assert dialog.store_proxy_combo.currentData() == dialog.update_proxy_combo.currentData() == 'system'
             assert dialog.log_level_combo.currentData() == 'DEBUG'
+            verify_font_popup(dialog, 'light')
             assert dialog.grab().save(str(destination / '设置.png'))
             assert window.grab().save(str(destination / '主窗口.png'))
             dialog.star_button.click()
@@ -137,7 +181,6 @@ def start(window, destination):
             report['support_buttons_verified'] = report['bundled_payment_codes_verified'] = True
             report['support_preserves_unsaved_preferences'] = True
             from app_theme import theme_manager
-            from PySide6.QtCore import Qt
             manager = theme_manager()
             original_path_text = window.path_input.text()
             def choose_custom_color():
@@ -157,8 +200,8 @@ def start(window, destination):
             QTimer.singleShot(50, choose_custom_text_color)
             dialog.text_color_button.click()
             assert dialog.text_color_combo.currentData() == '#fff1d6'
-            dialog.font_combo.setCurrentFont(QFont('Segoe UI'))
-            assert dialog.color_preview.font().family() == dialog.font_combo.currentFont().family()
+            dialog.font_combo.setCurrentText('Segoe UI')
+            assert dialog.color_preview.font().family() == dialog.font_combo.currentText()
             report['custom_text_color_picker_verified'] = True
             dialog.language_combo.setCurrentIndex(dialog.language_combo.findData('en_US'))
             dialog.theme_mode_combo.setCurrentIndex(dialog.theme_mode_combo.findData('dark'))
@@ -172,8 +215,8 @@ def start(window, destination):
             dialog.theme_mode_combo.setCurrentIndex(dialog.theme_mode_combo.findData('dark'))
             dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('#7c3aed'))
             dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('#ffffff'))
-            dialog.font_combo.setCurrentFont(QFont('Segoe UI'))
-            chosen_font = dialog.font_combo.currentFont().family()
+            dialog.font_combo.setCurrentText('Segoe UI')
+            chosen_font = dialog.font_combo.currentText()
             dialog.save_button.click()
             assert manager.dark and manager.tokens['accent'] == '#7c3aed'
             assert manager.tokens['on_accent'] == manager.tokens['on_accent_hover'] == '#ffffff'
@@ -203,6 +246,7 @@ def start(window, destination):
             window.settings_button.click()
             dialog = window.settings_dialog
             QApplication.processEvents()
+            verify_font_popup(dialog, 'dark')
             assert dialog.grab().save(str(destination / 'settings-English-dark.png'))
             assert window.grab().save(str(destination / 'main-English-dark.png'))
             dialog.cancel_button.click()

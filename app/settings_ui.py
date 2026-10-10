@@ -4,8 +4,9 @@ from pathlib import Path
 import sys
 
 from PySide6.QtCore import Qt, QUrl, QThread
-from PySide6.QtGui import QColor, QDesktopServices, QPixmap, QIcon, QFont
-from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QColorDialog, QFontComboBox)
+from PySide6.QtGui import QColor, QDesktopServices, QPixmap, QIcon, QFont, QFontDatabase
+from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QColorDialog,
+                               QComboBox as NativeComboBox)
 from localized_widgets import (QComboBox, QDialog, QFormLayout, QGroupBox, QLabel, QPushButton, QMessageBox)
 
 from app_settings import (LOG_LEVELS, PROXY_OPTIONS, Preferences, LANGUAGES,
@@ -168,12 +169,20 @@ class SettingsDialog(QDialog):
         theme_form.addRow(text_hint)
 
         font_row = QHBoxLayout()
-        self.font_combo = QFontComboBox()
-        self.font_combo.setEditable(False)
-        self.font_combo.setCurrentFont(QFont(effective_font_family(preferences.font_family)))
+        # Keep the full font list compact; the native font picker widens its
+        # preview popup and Fusion's menu mode ignores maxVisibleItems.
+        self.font_combo = NativeComboBox()
+        self.font_combo.addItems(QFontDatabase.families())
+        self.font_combo.setSizeAdjustPolicy(NativeComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.font_combo.setMinimumContentsLength(18)
+        self.font_combo.setMaxVisibleItems(8)
+        self.font_combo.setStyleSheet('QComboBox { combobox-popup: 0; } '
+                                     'QComboBox QAbstractItemView::item { min-height: 24px; }')
+        self.font_combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.font_combo.setCurrentText(effective_font_family(preferences.font_family))
         self.reset_font_button = QPushButton(ui_text('恢复默认'))
         self.reset_font_button.setAutoDefault(False)
-        self.reset_font_button.clicked.connect(lambda: self.font_combo.setCurrentFont(QFont(effective_font_family(DEFAULT_FONT_FAMILY))))
+        self.reset_font_button.clicked.connect(lambda: self.font_combo.setCurrentText(effective_font_family(DEFAULT_FONT_FAMILY)))
         font_row.addWidget(self.font_combo, 1)
         font_row.addWidget(self.reset_font_button)
         theme_form.addRow(ui_text('界面字体'), font_row)
@@ -183,7 +192,7 @@ class SettingsDialog(QDialog):
         self.color_preview.setWordWrap(True)
         self.accent_combo.currentIndexChanged.connect(self.update_color_preview)
         self.text_color_combo.currentIndexChanged.connect(self.update_color_preview)
-        self.font_combo.currentFontChanged.connect(self.update_color_preview)
+        self.font_combo.currentTextChanged.connect(self.update_color_preview)
         self.update_color_preview()
         theme_form.addRow(self.color_preview)
         theme_hint = QLabel(ui_text('保存后立即生效。English 使用 LCSC 国际商城。'))
@@ -306,7 +315,7 @@ class SettingsDialog(QDialog):
         text_color = self.text_color_combo.currentData()
         if text_color == 'auto':
             text_color = foreground(value)
-        self.color_preview.setFont(self.font_combo.currentFont())
+        self.color_preview.setFont(QFont(self.font_combo.currentText()))
         self.color_preview.setText(ui_text('配色与字体预览 · ') + 'LCSC3D Aa 123 · ' + value.upper())
         self.color_preview.setStyleSheet(ui_message('background:{0};color:{1};padding:7px;border-radius:6px;', value, text_color))
 
@@ -342,7 +351,7 @@ class SettingsDialog(QDialog):
                                   theme_mode=self.theme_mode_combo.currentData(),
                                   accent_color=self.accent_combo.currentData(),
                                   accent_text_color=self.text_color_combo.currentData(),
-                                  font_family=self.font_combo.currentFont().family())
+                                  font_family=self.font_combo.currentText())
         if self.save(preferences):
             self.accept()
         else:
