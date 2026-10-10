@@ -125,6 +125,9 @@ class WindowChromeTests(unittest.TestCase):
             return point.x, point.y, point.x + rect.right, point.y + rect.bottom
 
         outer = wintypes.RECT()
+        available = w.screen().availableGeometry()
+        self.assertLessEqual(w.minimumWidth(), available.width())
+        self.assertLessEqual(w.minimumHeight(), available.height())
         self.assertTrue(user.GetWindowRect(int(w.winId()), ctypes.byref(outer)))
         self.assertEqual(client_rect(), (outer.left, outer.top, outer.right, outer.bottom))
         w.showMaximized()

@@ -211,7 +211,10 @@ class AppearanceTests(unittest.TestCase):
         def pixels(image, target):
             from PySide6.QtGui import QColor
             color = QColor(target).getRgb()[:3]
-            return sum(max(abs(a - b) for a, b in zip(image.pixelColor(x, y).getRgb()[:3], color)) < 15
+            # A 2.2-unit SVG stroke becomes 1.83 physical pixels at 100%.
+            # Include its antialiased core, but never count transparent pixels.
+            return sum(image.pixelColor(x, y).alpha() > 220
+                       and max(abs(a - b) for a, b in zip(image.pixelColor(x, y).getRgb()[:3], color)) < 32
                        for y in range(image.height()) for x in range(image.width()))
         try:
             for mode in ('light', 'dark'):

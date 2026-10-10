@@ -106,7 +106,7 @@ class SingleWindowTests(unittest.TestCase):
         self.assert_one_window()
         w.folder_page.selectFile(self.folder.name)
         w.folder_page.accept()
-        self.assertEqual(Path(w.path_input.text()), Path(self.folder.name))
+        self.assertEqual(Path(w.path_input.text()).resolve(), Path(self.folder.name).resolve())
         w.show_help()
         self.assert_one_window()
         self.assertIs(w._page_host.current_page(), w.help_page)

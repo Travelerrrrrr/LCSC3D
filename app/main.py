@@ -256,7 +256,10 @@ class MainWindow(FramelessMainWindow):
         self.update_source = update_source
         self.setWindowTitle(ui_text('LCSC3D（本地更新测试）') if update_source is not None else 'LCSC3D')
         self.resize(1380, 880)
-        self.setMinimumSize(1060, 740)
+        available = self.screen().availableGeometry()
+        # A minimum larger than the screen prevents Qt from honoring the
+        # native maximized work area. The content remains scrollable below it.
+        self.setMinimumSize(min(1060, available.width()), min(740, available.height()))
         self.setWindowIcon(QIcon(str(ROOT / 'assets' / 'app.ico')))
         self.settings_enabled = settings_enabled
         self.preferences = Preferences()
@@ -311,7 +314,7 @@ class MainWindow(FramelessMainWindow):
         self._setup_ui()
         self._setup_preview()
         theme_manager().changed.connect(self.refresh_appearance)
-        self.setMinimumHeight(max(self.minimumHeight(), self.minimumSizeHint().height()))
+        self.setMinimumHeight(min(available.height(), max(self.minimumHeight(), self.minimumSizeHint().height())))
         self._restore_settings()
         if self.settings_enabled:
             QTimer.singleShot(0, self.ensure_store)
