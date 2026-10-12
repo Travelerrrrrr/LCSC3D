@@ -336,6 +336,20 @@ class NetworkApi:
     def get_raw_3d_model_obj(self, uuid: str) -> str | None:
         return self._model_payload(uuid, ENDPOINT_3D_MODEL, 'obj')
 
+    def get_model_origin(self, uuid: str):
+        """Reuse a tiny session-local anchor; never retain parsed mesh geometry."""
+        from model_geometry import ModelOrigin, obj_origin
+        self.check_cancelled()
+        key = 'model-origin-v1:' + uuid
+        cached = PAYLOAD_CACHE.get(key) if self.use_cache else None
+        if cached is not None:
+            item = json.loads(cached)
+            return ModelOrigin(tuple(item['position']), item['sha256'])
+        origin = obj_origin(self.get_raw_3d_model_obj(uuid), self.check_cancelled)
+        if self.use_cache:
+            PAYLOAD_CACHE.put(key, json.dumps(dict(position=origin.position, sha256=origin.sha256)).encode('utf-8'), 86400)
+        return origin
+
     def get_step_3d_model(self, uuid: str) -> bytes | None:
         return self._model_payload(uuid, ENDPOINT_3D_MODEL_STEP, 'step')
 
@@ -723,8 +737,13 @@ def download_part(part: str, options: Options, api: NetworkApi,
                 if len(component.models) > 1:
                     return StepPayload(api.get_step_3d_model(reference.uuid),identifier=reference.uuid)
                 return component_step_payload(data,reference,api)
+            def fetch_origin(reference):
+                if obj is not None and model and reference.uuid == model.uuid:
+                    from model_geometry import obj_origin
+                    return obj_origin(obj.result(), api.check_cancelled)
+                return api.get_model_origin(reference.uuid)
             component,model_assets = resolve_models(component,fetch_step,api.check_cancelled,
-                                                   prepare_altium='PCBLIB' in options.formats)
+                prepare_altium='PCBLIB' in options.formats, origin_fetch=fetch_origin)
             for diagnostic in component.diagnostics:
                 if diagnostic.domain != 'model3d':
                     continue

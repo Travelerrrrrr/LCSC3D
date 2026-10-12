@@ -1,6 +1,6 @@
 """Verify the frozen model pipeline with isolated data and only the Windows PATH.
 
-Supply public C2765186.json and source.step in --fixtures.
+Supply public C2765186.json, source.step and source.obj in --fixtures.
 This deliberately does not use cached credentials or network fixtures.
 """
 import argparse
@@ -22,7 +22,7 @@ def verify(exe,fixtures,root):
     if any(cwd.iterdir()) or any(executable.parent.iterdir()):
         raise ValueError('Use a fresh verification directory')
     shutil.copy2(exe,executable)
-    for name in ('C2765186.json','source.step'):
+    for name in ('C2765186.json','source.step','source.obj'):
         shutil.copyfile(fixtures/name,destination/'fixtures'/name)
     environment = {k:v for k,v in os.environ.items()
                    if not k.startswith(('PYTHON','QT_','QML_','QSG_','_PYI_','LCSC3D_'))}

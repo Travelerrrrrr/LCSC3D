@@ -17,9 +17,9 @@ from typing import get_args, get_origin, get_type_hints
 
 from errors import DownloadError, EdaError
 
-SCHEMA_VERSION = '1.3'
+SCHEMA_VERSION = '1.4'
 CORE_FEATURES = frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias',
-                           'model-placement', 'model-direct-placement'})
+                           'model-placement', 'model-direct-placement', 'model-source-anchor'})
 # Open vocabulary: readers preserve future/source-specific values verbatim.
 # `power` records an undirected source declaration; it is not `power_in`.
 PIN_ELECTRICAL_TYPES = frozenset({'unspecified', 'input', 'output', 'bidirectional',
@@ -178,8 +178,9 @@ class Footprint(Record):
 class ModelPlacement(Record):
     """Requested model pose in local right-handed mm.
 
-    New imports use step-origin-zxy: rotate around the untouched STEP origin,
-    then translate. No centering, bottom alignment or scaling is inferred.
+    New imports use source-anchor-zxy: subtract the source XY-centre/min-Z
+    anchor, rotate, then translate. Original physical size is preserved.
+    step-origin-zxy remains readable for historical direct-origin requests.
     The default convention and size field remain for historical IR readers.
     """
     position: tuple[Decimal, ...] = ()
@@ -194,7 +195,7 @@ class ModelAsset(Record):
     name: str = ''
     format: str = 'STEP'
     sha256: str = ''
-    reference_sha256: str = ''  # Legacy OBJ comparison digest; empty for original STEP export.
+    reference_sha256: str = ''  # OBJ used for the placement anchor; does not assert geometry equivalence.
     bounds: tuple[Decimal, ...] = ()  # Legacy mm bounds; empty means unknown, never zero-sized.
     source_sha256: str = ''  # Original STEP if an export-ready scaled copy is used.
 
@@ -334,7 +335,7 @@ def validate(component):
     for model in component.models:
         if model.placement is not None:
             p = model.placement
-            size_valid = (not p.size and p.convention == 'step-origin-zxy') or (len(p.size) == 2 and min(p.size) > 0)
+            size_valid = (not p.size and p.convention in ('step-origin-zxy', 'source-anchor-zxy')) or (len(p.size) == 2 and min(p.size) > 0)
             if len(p.position) != 3 or len(p.angles) != 3 or not size_valid:
                 raise DownloadError('IR 模型放置参数无效')
         if model.transform and (len(model.transform) != 16 or not model.asset_id or
@@ -343,6 +344,9 @@ def validate(component):
         if model.transform and (model.asset_id not in assets or len(model.scale) != 3 or
                 min(model.scale) <= 0 or 'model-placement' not in component.required_features):
             raise DownloadError('IR 模型缺少资源、缩放比例或能力声明')
+        if (model.transform and model.placement is not None and model.placement.convention == 'source-anchor-zxy'
+                and 'model-source-anchor' not in component.required_features):
+            raise DownloadError('IR 模型缺少 model-source-anchor 能力声明')
     return component
 
 

@@ -422,7 +422,7 @@ def import_models(data, package, head):
             if 'x' not in head or 'y' not in head:
                 raise DownloadError('封装原点缺失，无法确定 3D 放置')
             placement = ModelPlacement(((x-decimal(head['x']))*UNIT,(decimal(head['y'])-y)*UNIT,
-                                        length(attrs['z'])),angles,convention='step-origin-zxy')
+                                        length(attrs['z'])),angles,convention='source-anchor-zxy')
             models[-1] = replace(model,placement=placement)
         except (DownloadError, ValueError, TypeError, KeyError) as exc:
             issue('invalid_model_placement', str(exc), identity)

@@ -24,7 +24,7 @@ from easyeda_import import parse_component, model_outline_center
 from eda_ir import Model3D, ModelPlacement, ModelAsset, dumps, loads
 from errors import DownloadError, Cancelled
 from model_export import resolve_models
-from model_geometry import rotation_zxy, euler_xyz
+from model_geometry import rotation_zxy, euler_xyz, obj_origin, ModelOrigin
 from altium import export_pcblib, MergedLibrary
 from library_merge import LibraryIndex, append_library
 from kicad import build_library, footprint_definition
@@ -33,14 +33,14 @@ import olefile
 import zstandard
 
 FIXTURES = Path(__file__).parent/'fixtures'
-OBJ = '''v 10 20 30
-v 12 20 30
-v 12 24 30
-v 10 24 30
-v 10 20 33
-v 12 20 33
-v 12 24 33
-v 10 24 33
+OBJ = '''v -1 -2 -.5
+v 1 -2 -.5
+v 1 2 -.5
+v -1 2 -.5
+v -1 -2 2.5
+v 1 -2 2.5
+v 1 2 2.5
+v -1 2 2.5
 f 1 2 3 4
 f 5 8 7 6
 f 1 5 6 2
@@ -93,7 +93,8 @@ class ModelPlacementTests(unittest.TestCase):
 
     def resolved(self, data=None, *, ad=False):
         c = parse_component(data or source(),'C20197')
-        return resolve_models(c,lambda ref:backend.StepPayload(self.step,identifier=ref.uuid),prepare_altium=ad)
+        return resolve_models(c,lambda ref:backend.StepPayload(self.step,identifier=ref.uuid),
+                              prepare_altium=ad,origin_fetch=lambda ref:obj_origin(OBJ))
 
     def api(self, data=None):
         api = backend.NetworkApi(threading.Event(),use_cache=False)
@@ -212,15 +213,78 @@ class ModelPlacementTests(unittest.TestCase):
             c,assets = self.resolved(edit_attrs(source(),**updates))
             self.assertTrue(assets,c.diagnostics)
             self.assertEqual(c.models[0].placement.size,())
-            self.assertEqual(c.models[0].placement.convention,'step-origin-zxy')
+            self.assertEqual(c.models[0].placement.convention,'source-anchor-zxy')
 
-    def test_original_step_origin_is_used_without_cad_or_subprocess(self):
+    def test_source_anchor_is_used_without_cad_or_subprocess(self):
         with patch('subprocess.Popen',side_effect=AssertionError('CAD process must not run')):
             c,assets = self.resolved(source(z='-2'),ad=True)
             self.assertEqual(list(assets.values()),[self.step])
-            self.assertEqual(c.models[0].translation,(D(0),D(0),D('-.508')))
+            self.assertEqual(c.models[0].translation,(D(0),D(0),D('-.008')))
             self.assertEqual(c.model_assets[0].bounds,())
             self.assertFalse((self.root/'profile/LCSC3D/cache/step-bounds-v1').exists())
+
+    def test_typec_anchor_regressions_have_independent_expected_ad_offsets(self):
+        from altium_inspect import pcb, Reader, parameters
+        # Public source extrema and JSON local poses, measured before this fix.
+        # C2765186: no rotation; C165948: 180 degrees, so Y compensation reverses.
+        cases = [('C2765186','v -4.47 -3.665 -2.58\nv 4.47 3.915 1.58\n',
+                  (0,'-1.1999976','-.8999982'),'0,0,0',(0,'-1.3249976','1.6800018')),
+                 ('C165948','v -4.47 -5.3 -.85\nv 4.47 2.6 3.251\n',
+                  (0,'-1.0999978','-.850011'),'0,0,180',(0,'-2.4499978','-.000011'))]
+        for part,obj,position,angles,expected in cases:
+            with self.subTest(part=part):
+                c = parse_component(source(angles),part)
+                m = replace(c.models[0],placement=replace(c.models[0].placement,position=tuple(map(D,position))))
+                c,assets = resolve_models(replace(c,models=(m,)),lambda _:backend.StepPayload(self.step),
+                    origin_fetch=lambda _:obj_origin(obj),prepare_altium=True)
+                body = next(b for kind,b in pcb(export_pcblib(c,part,model_assets=assets))[2] if kind==12)
+                fields = parameters(Reader(body[18:]).block()[1])
+                for key,value in zip(('MODEL.2D.X','MODEL.2D.Y','MODEL.3D.DZ'),expected):
+                    self.assertAlmostEqual(float(D(fields[key].removesuffix('mil'))*D('.0254')),
+                                           float(value),delta=.00000254)
+
+    def test_anchor_scan_ignores_faces_materials_normals_and_supports_vertex_syntax(self):
+        raw = 'newmtl a\nKd 99 99 99\nvn 500 500 500\nvt 500 500\n  v\t-1e0 2 -3 # a\r\nv 5 8 9 1\nf invalid\n'
+        result = obj_origin(raw)
+        self.assertEqual(result.position,(2,5,-3))
+        self.assertEqual(result.sha256,hashlib.sha256(raw.encode()).hexdigest())
+
+    def test_missing_invalid_anchor_skips_model_instead_of_silent_zero_origin(self):
+        for raw in (None,'','f 1 2 3','v 0 0 0\n','v nan 0 0\nv 1 1 1',
+                    'v 0 0\nv 1 1 1','v 1e20 0 0\nv 1 1 1'):
+            with self.subTest(raw=raw):
+                c,assets = resolve_models(parse_component(source(),'C20197'),lambda _:backend.StepPayload(self.step),
+                                          origin_fetch=lambda _:obj_origin(raw))
+                self.assertFalse(assets)
+                self.assertIsNotNone(c.footprint)
+                self.assertFalse(c.models[0].transform)
+                self.assertTrue(any(d.severity=='error' and d.domain=='model3d' for d in c.diagnostics))
+
+    def test_anchor_scan_cancellation_propagates(self):
+        with self.assertRaises(Cancelled):
+            obj_origin(OBJ,lambda:(_ for _ in ()).throw(Cancelled()))
+
+    def test_anchor_cache_reuses_only_small_summary_and_obeys_disabled_cache(self):
+        cache = backend.PayloadCache()
+        api = self.api()
+        api.use_cache = True
+        api.get_raw_3d_model_obj = Mock(return_value=OBJ)
+        with patch('backend.PAYLOAD_CACHE',cache):
+            first = api.get_model_origin('test-model')
+            self.assertEqual(api.get_model_origin('test-model'),first)
+            api.get_raw_3d_model_obj.assert_called_once()
+            self.assertLess(cache.size,256)
+            api.use_cache = False
+            self.assertEqual(api.get_model_origin('test-model'),first)
+            self.assertEqual(api.get_raw_3d_model_obj.call_count,2)
+
+    def test_legacy_direct_origin_ir_keeps_its_original_transform(self):
+        c = parse_component(source(),'C20197')
+        m = replace(c.models[0],placement=replace(c.models[0].placement,convention='step-origin-zxy'))
+        c,assets = resolve_models(replace(c,models=(m,)),lambda _:backend.StepPayload(self.step))
+        c = replace(c,schema_version='1.3')
+        self.assertEqual(c.models[0].translation,(D(0),)*3)
+        self.assertEqual(loads(dumps(c)),c)
 
     def test_corrupt_step_skips_only_model(self):
         c = parse_component(source(),'C20197')
@@ -234,7 +298,8 @@ class ModelPlacementTests(unittest.TestCase):
         c = parse_component(source(),'C20197')
         model = replace(c.models[0],placement=replace(c.models[0].placement,position=(D(6000),D(0),D(0))))
         c = replace(c,models=(model,))
-        c,assets = resolve_models(c,lambda _:backend.StepPayload(self.step),prepare_altium=True)
+        c,assets = resolve_models(c,lambda _:backend.StepPayload(self.step),prepare_altium=True,
+                                 origin_fetch=lambda _:obj_origin(OBJ))
         self.assertFalse(assets)
         self.assertIsNotNone(c.footprint)
         self.assertFalse(c.models[0].transform)
@@ -244,12 +309,12 @@ class ModelPlacementTests(unittest.TestCase):
         c,assets = self.resolved(source('90,0,90','-2'))
         self.assertTrue(assets,c.diagnostics)
         m = c.models[0].transform
-        # Untouched STEP origin goes to the JSON Z position; +X becomes +Z.
+        # The source anchor goes to JSON Z; a point one mm along +X becomes +Z.
         def apply(point):
             return tuple(sum(float(m[4*i+j])*point[j] for j in range(3))+float(m[4*i+3]) for i in range(3))
-        for actual,wanted in zip(apply((0,0,0)),(0,0,-.508)):
+        for actual,wanted in zip(apply((0,0,-.5)),(0,0,-.508)):
             self.assertAlmostEqual(actual,wanted,places=6)
-        for actual,wanted in zip(apply((1,0,0)),(0,0,.492)):
+        for actual,wanted in zip(apply((1,0,-.5)),(0,0,.492)):
             self.assertAlmostEqual(actual,wanted,places=6)
         self.assertFalse(any(d.severity=='warning' for d in c.diagnostics))
         self.assertEqual(loads(dumps(c)),c)
@@ -278,7 +343,7 @@ class ModelPlacementTests(unittest.TestCase):
                     self.assertEqual(list(assets.values()),[self.step])
                     self.assertEqual(c.model_assets[0].sha256,hashlib.sha256(self.step).hexdigest())
                     self.assertEqual(c.model_assets[0].source_sha256,c.model_assets[0].sha256)
-                    self.assertEqual(c.model_assets[0].reference_sha256,'')
+                    self.assertEqual(c.model_assets[0].reference_sha256,hashlib.sha256(OBJ.encode()).hexdigest())
                     if ad:
                         raw = export_pcblib(c,c.part,model_assets=assets)
                         with olefile.OleFileIO(io.BytesIO(raw)) as ole:
@@ -286,7 +351,10 @@ class ModelPlacementTests(unittest.TestCase):
 
     def test_fallback_step_is_original_and_never_claims_obj_verification(self):
         c = parse_component(source(),'C20197')
-        c,assets = resolve_models(c,lambda _:backend.StepPayload(self.step,used_library=True,identifier='fallback'))
+        origin_fetch = Mock(return_value=obj_origin(OBJ))
+        c,assets = resolve_models(c,lambda _:backend.StepPayload(self.step,used_library=True,identifier='fallback'),
+                                 origin_fetch=origin_fetch)
+        self.assertEqual(origin_fetch.call_args.args[0].uuid,'fallback')
         self.assertEqual(list(assets.values()),[self.step])
         self.assertEqual(c.model_assets[0].identifier,'fallback')
         message = next(d.message for d in c.diagnostics if d.code=='model_library_resolved')
@@ -296,7 +364,8 @@ class ModelPlacementTests(unittest.TestCase):
         self.assertIn(b'SI_UNIT(.MILLI.,.METRE.)',self.step)
         centimetres = self.step.replace(b'SI_UNIT(.MILLI.,.METRE.)',b'SI_UNIT(.CENTI.,.METRE.)')
         c,assets = resolve_models(parse_component(source(),'C20197'),
-            lambda _:backend.StepPayload(centimetres),prepare_altium=True)
+            lambda _:backend.StepPayload(centimetres),prepare_altium=True,
+            origin_fetch=lambda _:ModelOrigin((0,0,0),''))
         self.assertEqual(list(assets.values()),[centimetres],c.diagnostics)
         self.assertEqual(c.model_assets[0].bounds,())
         self.assertEqual(c.models[0].translation,(D(0),)*3)
@@ -306,6 +375,7 @@ class ModelPlacementTests(unittest.TestCase):
         c,_ = self.resolved()
         for invalid in (replace(c,model_assets=()), replace(c,required_features=('local-mm-y-up',)),
                         replace(c,required_features=tuple(f for f in c.required_features if f!='model-direct-placement')),
+                        replace(c,required_features=tuple(f for f in c.required_features if f!='model-source-anchor')),
                         replace(c,model_assets=(replace(c.model_assets[0],bounds=(D(0),)*6),))):
             with self.assertRaises(DownloadError):
                 dumps(invalid)
@@ -313,20 +383,22 @@ class ModelPlacementTests(unittest.TestCase):
     def test_direct_placement_requires_explicit_target_support(self):
         from eda_targets import ALTIUM
         c,_ = self.resolved()
-        self.assertEqual(c.schema_version,'1.3')
+        self.assertEqual(c.schema_version,'1.4')
         target = replace(ALTIUM,features=ALTIUM.features-{'model-direct-placement'})
         with self.assertRaisesRegex(DownloadError,'model-direct-placement'):
             target.require(c,'footprint')
+        with self.assertRaisesRegex(DownloadError,'model-source-anchor'):
+            replace(ALTIUM,features=ALTIUM.features-{'model-source-anchor'}).require(c,'footprint')
 
-    def test_ad_body_proxy_does_not_change_raw_origin_pose(self):
+    def test_ad_body_proxy_does_not_change_anchored_pose(self):
         from altium_inspect import pcb, Reader, parameters
         c,assets = self.resolved(source('20,30,40','-2'),ad=True)
         raw = export_pcblib(c,c.part,model_assets=assets)
         body = next(b for kind,b in pcb(raw)[2] if kind==12)
         params = parameters(Reader(body[18:]).block()[1])
-        self.assertEqual(D(params['MODEL.2D.X'].removesuffix('mil')),D(0))
-        self.assertEqual(D(params['MODEL.2D.Y'].removesuffix('mil')),D(0))
-        self.assertAlmostEqual(float(D(params['MODEL.3D.DZ'].removesuffix('mil'))*D('.0254')),-.508)
+        for index,key in enumerate(('MODEL.2D.X','MODEL.2D.Y','MODEL.3D.DZ')):
+            actual=float(D(params[key].removesuffix('mil'))*D('.0254'))
+            self.assertAlmostEqual(actual,float(c.models[0].translation[index]),delta=.00000254)
         self.assertEqual(params['STANDOFFHEIGHT'],'0.0000000000mil')
         self.assertEqual(params['OVERALLHEIGHT'],'0.0000000000mil')
 
@@ -428,13 +500,14 @@ class ModelPlacementTests(unittest.TestCase):
         self.assertFalse(errors)
         self.assertEqual(sum(a.format=='KICAD_FOOTPRINT' for a in artifacts),2)
 
-    def test_backend_binds_original_step_without_requesting_obj(self):
+    def test_backend_binds_original_step_with_anchor_only_obj_read(self):
         for fmt in ('PCBLIB','KICAD_FOOTPRINT'):
             api = self.api()
-            api.get_raw_3d_model_obj = Mock(side_effect=AssertionError('unexpected OBJ request'))
-            result = backend.download_part('C20197',backend.Options(self.root/fmt,(fmt,)),api)
+            api.get_raw_3d_model_obj = Mock(return_value=OBJ)
+            with patch('model3d.read_obj',side_effect=AssertionError('mesh must not be built')):
+                result = backend.download_part('C20197',backend.Options(self.root/fmt,(fmt,)),api)
             self.assertEqual(result.status,'成功',result.message)
-            api.get_raw_3d_model_obj.assert_not_called()
+            api.get_raw_3d_model_obj.assert_called_once_with('test-model')
             self.assertFalse(any(p.endswith('.step') for p in result.files))
             self.assertTrue(result.files)
 

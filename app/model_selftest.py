@@ -1,7 +1,7 @@
 """Offline frozen-app exercise of real STEP placement, GUI and resource output.
 
-The explicitly selected folder supplies fixtures/C2765186.json and source.step.
-Reports and exported libraries stay in that same folder. OBJ is never requested.
+The explicitly selected folder supplies fixtures/C2765186.json, source.step
+and source.obj. OBJ supplies only the source placement anchor.
 """
 import base64
 import copy
@@ -26,6 +26,7 @@ def start(window, folder):
     root.mkdir(parents=True,exist_ok=True)
     source = json.loads((root/'fixtures/C2765186.json').read_text('utf-8'))
     step = (root/'fixtures/source.step').read_bytes()
+    obj = (root/'fixtures/source.obj').read_text('utf-8')
     data = {p:copy.deepcopy(source) for p in ('C2765186','C900001','C900002','C900003','C900004')}
     for part in data:
         doc = data[part]['packageDetail']['dataStr']
@@ -58,7 +59,7 @@ def start(window, folder):
             return step
         def get_raw_3d_model_obj(self,identifier):
             self.check_cancelled()
-            raise AssertionError('Footprint export must not request OBJ')
+            return obj
 
     main.NetworkApi = OfflineApi
     window.request_component_info = lambda:None
@@ -145,6 +146,25 @@ def start(window, folder):
                                 payload = zlib.decompress(ole.openstream('Library/Models/'+str(i)).read())
                                 assert payload==step
                                 model_count+=1
+                            # Independent golden pose for the real C2765186:
+                            # source anchor (0, .125, -2.58), JSON (0,-1.1999976,-.8999982).
+                            if state['name'] in ('ad','ad-original-size'):
+                                from library_merge import Reader, parameters
+                                poses = []
+                                for stream in ole.listdir():
+                                    if len(stream)!=2 or stream[0]=='Library' or stream[1]!='Data':
+                                        continue
+                                    reader = Reader(ole.openstream(stream).read())
+                                    reader.string()
+                                    while reader.offset < len(reader.data):
+                                        kind = reader.take(1)[0]
+                                        blocks = [reader.block() for _ in range(6 if kind==2 else 2 if kind==5 else 1)]
+                                        if kind==12:
+                                            values = parameters(Reader(blocks[0][1][18:]).block()[1])
+                                            poses.append([float(values[k].removesuffix('mil'))*.0254
+                                                for k in ('MODEL.2D.X','MODEL.2D.Y','MODEL.3D.DZ')])
+                                assert len(poses)==1,poses
+                                assert max(abs(a-b) for a,b in zip(poses[0],(0,-1.3249976,1.6800018)))<.000003,poses
                     elif path.suffix=='.kicad_mod':
                         text = path.read_text('utf-8')
                         for payload in re.findall(r'\(data \|([^|]+)\|\)',text):

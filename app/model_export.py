@@ -13,7 +13,7 @@ def model_diagnostic(severity, code, message, model=None):
     return Diagnostic('model3d',severity,code,message,source_id=model.source_id if model else '')
 
 
-def resolve_models(component, step_fetch, check=lambda: None, *, prepare_altium=False):
+def resolve_models(component, step_fetch, check=lambda: None, *, prepare_altium=False, origin_fetch=None):
     """Keep each failed placement unresolved; successful 2D domains survive."""
     assets, payloads, models = {}, {}, []
     diagnostics = list(component.diagnostics)
@@ -27,7 +27,7 @@ def resolve_models(component, step_fetch, check=lambda: None, *, prepare_altium=
             continue
         try:
             placement = model.placement
-            if placement.convention != 'step-origin-zxy':
+            if placement.convention not in ('source-anchor-zxy', 'step-origin-zxy'):
                 raise DownloadError('模型放置规则尚不支持')
             reference = ModelReference(model.name,model.identifier)
             step = step_fetch(reference)
@@ -37,6 +37,20 @@ def resolve_models(component, step_fetch, check=lambda: None, *, prepare_altium=
             check()
             rotation = rotation_zxy(placement.angles)
             offset = placement.position
+            reference_digest = ''
+            if placement.convention == 'source-anchor-zxy':
+                if origin_fetch is None:
+                    raise DownloadError('缺少官方模型放置基准，已跳过关联')
+                # A fallback STEP may have a different raw origin. Always use
+                # the companion OBJ of the actual file asset, not the library ID.
+                origin = origin_fetch(ModelReference(model.name, getattr(step, 'identifier', '') or model.identifier))
+                anchor = tuple(D(str(v)) for v in origin.position)
+                if len(anchor) != 3 or not all(v.is_finite() for v in anchor):
+                    raise DownloadError('官方模型放置基准无效，已跳过关联')
+                offset = tuple(placement.position[i] - sum(D(str(rotation[i][j]))*anchor[j]
+                               for j in range(3)) for i in range(3))
+                reference_digest = origin.sha256
+                check()
             matrix = tuple(D(str(rotation[i][j] if j<3 else offset[i])) for i in range(3) for j in range(4)) + (D(0),D(0),D(0),D(1))
             if any(abs(v)>10_000_000 for v in matrix):
                 raise DownloadError('模型放置超出目标坐标范围')
@@ -46,7 +60,7 @@ def resolve_models(component, step_fetch, check=lambda: None, *, prepare_altium=
                     raise DownloadError('模型放置超出 AD 坐标范围，已跳过关联')
             digest = hashlib.sha256(payload).hexdigest()
             assets[digest] = ModelAsset(getattr(step,'identifier','') or model.identifier,model.name,'STEP',digest,
-                                       '',(),digest)
+                                       reference_digest,(),digest)
             payloads[digest] = payload
             resolved = replace(model,translation=tuple(D(str(v)) for v in offset),rotation=placement.angles,
                                scale=(D(1),)*3,asset_id=digest,transform=matrix)
@@ -64,6 +78,8 @@ def resolve_models(component, step_fetch, check=lambda: None, *, prepare_altium=
     features = component.required_features
     if assets:
         features += tuple(f for f in ('model-placement','model-direct-placement') if f not in features)
+        if any(m.transform and m.placement.convention == 'source-anchor-zxy' for m in models):
+            features += tuple(f for f in ('model-source-anchor',) if f not in features)
     return replace(component,models=tuple(models),model_assets=tuple(assets.values()),diagnostics=tuple(diagnostics),
                    required_features=features),payloads
 
