@@ -7,7 +7,7 @@
 
 **简体中文** | [English](README.en.md)
 
-# LCSC3D：立创元件 3D 模型下载与 AD / KiCad 元件库导出
+# LCSC3D：3D 模型内嵌与 AD / KiCad 元件库导出
 
 [![Release](docs/images/release-badge.svg)](https://github.com/Travelerrrrrr/LCSC3D/releases/latest)
 [![Windows build](https://github.com/Travelerrrrrr/LCSC3D/actions/workflows/windows.yml/badge.svg)](https://github.com/Travelerrrrrr/LCSC3D/actions/workflows/windows.yml)
@@ -15,23 +15,24 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![赞助支持 LCSC3D](docs/images/sponsorship/button.svg)](docs/sponsorship.md)
 
-**从立创商城搜索、账号收藏或 C 编号选择元件，预览官方资源，批量下载 STEP / OBJ，并导出 AD 或 KiCad 符号库与封装库。**
+**从立创商城搜索、账号收藏或 C 编号选择元件，批量生成 AD / KiCad 符号库，以及自带 3D 模型的封装库。也可独立下载官方 STEP / OBJ。**
 
 LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。下载 `LCSC3D.exe` 即可运行，无须安装 Python；生成元件库也无须安装对应的 EDA 软件。
 
-当前源码与本地交付为 **2.4.0**，新增按处理阶段更新的平滑下载进度、“消息”记录页和最新在上的右上角通知；保留已验证的 Type-C 模型放置规则。以下在线下载仍指向正式版 2.3.0；本次未发布 Release。
+**2.4.0 默认开启封装关联 3D 模型。** AD PcbLib 与 KiCad 9/10 封装直接内嵌 STEP，模型随库文件保存，无需逐个手动关联；KiCad 8 提供外部模型兼容模式。保留 STEP 原始尺寸，并按官方位姿换算放置基准。
 
-**当前版本：2.3.0** · **[下载 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.3.0.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**当前版本：2.4.0** · **[下载 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.4.0.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
-![LCSC3D 2.3.0 工作台：KiCad 符号预览与导出设置](docs/images/2.3.0-release/kicad.png)
+![LCSC3D 2.4.0 工作台：Type-C 三维预览、默认开启封装关联 3D 模型、新消息入口与下载进度](docs/images/2.4.0-release/main.png)
 
-## 2.3.0 更新重点
+## 2.4.0 更新重点
 
-- **新增 KiCad 8+ 导出**：生成 `.kicad_sym` 符号库和 `.pretty` 封装库，支持独立导出、分别合并和保留单器件副本。
-- **按软件显示配置**：通过“导出到”切换 AD / KiCad，分别记住设置。KiCad 可配置引脚电气类型，并显示对应的符号预览。
-- **引入 EDA 中间层**：统一保存元件的电气与几何信息，由各软件的导出器生成文件，为后续适配其他 EDA 提供基础。
-- **修复导出与排版**：修正部分符号的引脚方向，补齐封装过孔，修复长结果文字重叠、控制栏间距和点击“合并”时的闪动。
-- **改进选型和文件管理**：搜索与收藏列表增加商品缩略图，搜索每页 20 项；AD 追加支持自定义工程输出目录、库名及按钮直接导入工程。完善导出日志与故障诊断。
+- **封装内嵌 3D**：AD `.PcbLib` 内嵌 STEP；KiCad 9/10 将模型保存到封装文件，KiCad 8 使用库内相对路径引用外部 STEP。
+- **批量生成带模型的封装**：单器件、分别合并、保留独立副本和 AD 追加均支持模型关联；不必另勾 STEP 下载。
+- **保持模型原始尺寸**：修正 Type-C 的水平和高度基准换算，保留官方角度、偏移和原始 STEP 内容。
+- **平滑下载进度**：查询、模型准备、处理和写库阶段推动进度；取消不再误显示 100%。
+- **消息记录**：左侧新增“消息”，通知统一从右上角出现，新消息在上；支持历史查看、搜索、筛选与复制。
+- **代码与诊断整理**：应用实现按职责分包，保留日志、更新、备份与失败恢复流程；636 项全量回归通过。
 
 旧版变化见 [版本历史](docs/版本历史.md)。
 
@@ -44,6 +45,28 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 5. 点击 **开始下载**，完成后点击 **打开器件目录**。在 AD 中打开 SchLib / PcbLib；在 KiCad 库管理器中添加符号库文件和封装库目录。
 
 **再次合并以本次勾选为准。** AD 和 KiCad 的普通导出、合并会在生成成功后覆盖同名库；KiCad 会替换整个同名 `.pretty` 目录，移除旧成员。需要保留的元件须一并勾选。AD 的 **追加** 模式用于向已有库增加元件，KiCad 暂不提供追加。
+
+## 封装内嵌 3D 模型
+
+勾选 AD **PcbLib** 或 KiCad **封装库**，保持 **封装关联 3D 模型** 开启，软件会取得所需官方 STEP 并写入封装。**无需另勾“STEP”下载，也无需在 EDA 中逐个手动关联模型。**
+
+| 目标 | 模型保存方式 | 复制或搬迁 |
+| --- | --- | --- |
+| Altium Designer | STEP 内嵌到 `.PcbLib` | 模型随封装库文件保存 |
+| KiCad 9 / 10 | STEP 内嵌到 `.kicad_mod` | 模型随封装文件保存，保留 `.pretty` 库结构 |
+| KiCad 8 | `.pretty/LCSC3D.3dshapes/` 内的外部 STEP | 整体保留 `.pretty` 文件夹及其模型目录 |
+
+以下是用户提供的 AD、KiCad 实测截图，展示导出后的 Type-C 三维效果。点击图片可查看原图。
+
+| AD 内嵌模型示例一 | AD 内嵌模型示例二 |
+| --- | --- |
+| <a href="docs/images/2.4.0-release/ad-embedded-typec-user.png"><img src="docs/images/2.4.0-release/ad-embedded-typec-user.png" alt="用户实测：AD PcbLib 中的 Type-C 三维模型与封装" width="440"></a> | <a href="docs/images/2.4.0-release/ad-embedded-typec-side-user.png"><img src="docs/images/2.4.0-release/ad-embedded-typec-side-user.png" alt="用户实测：AD 中另一款 Type-C 模型及焊盘" width="440"></a> |
+
+| KiCad PCB 三维视图 | KiCad 底面与焊盘视图 |
+| --- | --- |
+| <a href="docs/images/2.4.0-release/kicad-embedded-typec-top-user.png"><img src="docs/images/2.4.0-release/kicad-embedded-typec-top-user.png" alt="用户实测：KiCad 中 Type-C 模型与 PCB 的三维效果" width="440"></a> | <a href="docs/images/2.4.0-release/kicad-embedded-typec-bottom-user.png"><img src="docs/images/2.4.0-release/kicad-embedded-typec-bottom-user.png" alt="用户实测：KiCad 中 Type-C 底部焊盘与固定脚" width="440"></a> |
+
+缺少 3D 模型时仍可导出可用的二维封装；模型关联失败会保留二维结果并说明原因。**商城有商品，不代表官方已提供符号、封装或 3D 资源。**具体操作与放置范围见 [使用说明](app/README.md#封装关联-3d-模型) 和 [模型放置说明](docs/3D模型放置.md)。
 
 ## 符号与封装导出
 
@@ -58,7 +81,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 KiCad 添加封装库时，**库昵称应与导出库名一致**，例如 `LCSC3D`，以便符号找到对应封装。KiCad 封装中的过孔保留位置、孔径和铜环，网络归属需在 PCB 中确认。导出过程需要近似转换时，会在结果中提示。
 
-两种目标均支持多单元符号、字符串引脚编号和常见贴片 / 通孔封装。正式版 2.3.0 需要手动关联模型；本地开发版 **2.4.0 默认关联 3D**，支持 AD 内嵌、KiCad 9/10 内嵌与 KiCad 8 外部模型，详见 [使用说明](app/README.md)。AD 暂不生成 IntLib。
+两种目标均支持多单元符号、字符串引脚编号和常见贴片 / 通孔封装，并默认关联可用的 3D 模型。AD 暂不生成 IntLib。
 
 具体操作见 [使用说明](app/README.md)。
 
@@ -157,7 +180,7 @@ flowchart LR
 
 ## 使用范围
 
-下载和在线预览需要联网，3D 预览需要支持 WebGL 的显卡驱动。已验证 KiCad 8 / 9 / 10；支持情况与本版验证范围见 [验证记录](docs/2.3.0验证记录.md)。
+下载和在线预览需要联网，3D 预览需要支持 WebGL 的显卡驱动。已验证 KiCad 8 / 9 / 10；支持情况与本版验证范围见 [验证记录](docs/2.4.0验证记录.md)。
 
 预览和导出用于辅助选型与设计，生产使用前仍需按数据手册核对引脚、电气类型、尺寸和封装。此前用旧版导出的引脚方向异常符号，需要重新导出。
 

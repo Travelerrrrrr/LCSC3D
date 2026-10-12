@@ -7,7 +7,7 @@
 
 [简体中文](README.md) | **English**
 
-# LCSC3D: LCSC 3D Model Downloader and AD / KiCad Library Exporter
+# LCSC3D: Embedded 3D Models and AD / KiCad Library Export
 
 [![Release](docs/images/release-badge.svg)](https://github.com/Travelerrrrrr/LCSC3D/releases/latest)
 [![Windows build](https://github.com/Travelerrrrrr/LCSC3D/actions/workflows/windows.yml/badge.svg)](https://github.com/Travelerrrrrr/LCSC3D/actions/workflows/windows.yml)
@@ -15,23 +15,24 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Support LCSC3D](https://img.shields.io/badge/Support-LCSC3D-087AF5)](docs/sponsorship.md)
 
-**Find parts through LCSC search, mainland account favorites or C-numbers, preview official resources, download STEP / OBJ models, and export AD or KiCad symbol and footprint libraries in batches.**
+**Find parts through LCSC search, mainland account favorites or C-numbers, and export AD / KiCad symbols and footprints with attached 3D models in batches. Download original STEP / OBJ files separately when needed.**
 
 LCSC3D is a portable Windows tool for hardware development, PCB design and mechanical fit checks. Download and run `LCSC3D.exe`; no Python installation is required. Generating libraries does not require the target EDA software to be installed.
 
-The source and local delivery are now **2.4.0**, adding smooth processing progress, a persistent Messages page and newest-first notices in the upper-right corner. The verified Type-C placement rules are retained. The online download links below still point to stable 2.3.0; this development build has not been published.
+**2.4.0 attaches 3D models to footprints by default.** AD PcbLib and KiCad 9/10 footprints embed STEP models, keeping the model with the library file. KiCad 8 uses portable external models. The original STEP size is preserved and the source placement anchor is converted before applying the official pose.
 
-**Current version: 2.3.0** · **[Download for Windows](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [User guide (Chinese)](app/README.md) · [Release notes (Chinese)](docs/releases/v2.3.0.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**Current version: 2.4.0** · **[Download for Windows](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [User guide (Chinese)](app/README.md) · [Release notes (Chinese)](docs/releases/v2.4.0.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
-![LCSC3D 2.3.0 workspace with KiCad symbol preview and export settings](docs/images/2.3.0-release/kicad.png)
+![LCSC3D 2.4.0 workspace: Type-C 3D preview, enabled footprint model binding, Messages navigation and download progress](docs/images/2.4.0-release/main.png)
 
-## What's new in 2.3.0
+## What's new in 2.4.0
 
-- **KiCad 8+ export:** Generate `.kicad_sym` symbol libraries and `.pretty` footprint libraries, with individual exports, independent merging and optional per-part copies.
-- **Target-specific settings:** Switch between AD and KiCad through **Export to**, retaining each target's settings. Configure KiCad pin electrical types and preview symbols in KiCad style.
-- **EDA intermediate representation:** Store component electrical and geometric information once, then generate files through each EDA's exporter, providing a foundation for future targets.
-- **Export and layout fixes:** Correct reversed pins in some symbols, support footprint vias, and fix overlapping result text, control spacing and flicker when toggling Merge.
-- **Selection and file management:** Product thumbnails in search and favorites, 20 results per search page, and custom AD project output folders, library names and direct library imports. Improved export logging and diagnostics.
+- **Embedded 3D models:** STEP inside AD `.PcbLib` and KiCad 9/10 footprint files, with relative external STEP paths for KiCad 8.
+- **Batch model binding:** Supported in individual exports, merged libraries, retained copies and AD append, independently of standalone STEP downloads.
+- **Original model dimensions:** Correct Type-C horizontal and height anchors while preserving official rotations, offsets and STEP contents.
+- **Smooth progress:** Lookup, preparation, processing and file publication contribute to progress. Cancellation does not falsely show 100%.
+- **Message history:** New Messages navigation, newest-first notices in the upper-right corner, search, filters and copyable details.
+- **Code and diagnostics:** Application packages organized by responsibility, with logs, updates, backups and recovery retained. All 636 regression tests passed.
 
 Earlier changes are listed in the [version history (Chinese)](docs/版本历史.md).
 
@@ -44,6 +45,28 @@ Earlier changes are listed in the [version history (Chinese)](docs/版本历史.
 5. Click **Download**, then **Part folder**. Open SchLib / PcbLib in AD, or add the symbol file and footprint directory through KiCad's library managers.
 
 **Merging again uses the current selection.** Normal and merged AD / KiCad exports replace same-name libraries after successful generation. KiCad replaces the entire same-name `.pretty` directory, removing old members. Include every part you want to retain. AD's **Append** mode adds parts to existing libraries; KiCad append is not currently available.
+
+## Embedded 3D models
+
+Select AD **PcbLib** or KiCad **Footprints** and leave **Attach 3D models to footprints** enabled. LCSC3D fetches the required official STEP and writes its placement into the footprint. **You do not need to select standalone STEP downloads or attach each model manually in the EDA application.**
+
+| Target | Model storage | Moving the library |
+| --- | --- | --- |
+| Altium Designer | STEP embedded in `.PcbLib` | The model stays inside the footprint library |
+| KiCad 9 / 10 | STEP embedded in `.kicad_mod` | The model stays with the footprint file; keep the `.pretty` library structure |
+| KiCad 8 | External STEP in `.pretty/LCSC3D.3dshapes/` | Keep the entire `.pretty` folder and model directory |
+
+These user-provided AD and KiCad screenshots show the exported Type-C models. Click an image to view the original.
+
+| AD embedded model example 1 | AD embedded model example 2 |
+| --- | --- |
+| <a href="docs/images/2.4.0-release/ad-embedded-typec-user.png"><img src="docs/images/2.4.0-release/ad-embedded-typec-user.png" alt="User validation: Type-C 3D model and footprint in an AD PcbLib" width="440"></a> | <a href="docs/images/2.4.0-release/ad-embedded-typec-side-user.png"><img src="docs/images/2.4.0-release/ad-embedded-typec-side-user.png" alt="User validation: another Type-C model and pads in AD" width="440"></a> |
+
+| KiCad PCB 3D view | KiCad underside and pads |
+| --- | --- |
+| <a href="docs/images/2.4.0-release/kicad-embedded-typec-top-user.png"><img src="docs/images/2.4.0-release/kicad-embedded-typec-top-user.png" alt="User validation: Type-C model and PCB in KiCad" width="440"></a> | <a href="docs/images/2.4.0-release/kicad-embedded-typec-bottom-user.png"><img src="docs/images/2.4.0-release/kicad-embedded-typec-bottom-user.png" alt="User validation: Type-C underside pads and mounting pins in KiCad" width="440"></a> |
+
+A missing or failed 3D model does not discard an available 2D footprint. **A storefront product does not guarantee that official symbol, footprint or model data is available.** See the [user guide (Chinese)](app/README.md) and [placement details (Chinese)](docs/3D模型放置.md).
 
 ## Symbol and footprint export
 
@@ -58,7 +81,7 @@ Earlier changes are listed in the [version history (Chinese)](docs/版本历史.
 
 In KiCad, **use the exported footprint library name as its nickname**, such as `LCSC3D`, so symbol footprint references resolve. Footprint vias retain their positions, drills and copper rings; confirm their net assignment in the PCB. Conversion approximations appear in export results.
 
-Both targets support multi-unit symbols, string pin numbers and common surface-mount / through-hole footprints. Stable 2.3.0 requires manual model association. Local development version **2.4.0 binds models by default**: embedded STEP for AD and KiCad 9/10, and portable external STEP for KiCad 8. See the [user guide](app/README.md). AD IntLib generation is not supported.
+Both targets support multi-unit symbols, string pin numbers and common surface-mount / through-hole footprints, with available 3D models attached by default. AD IntLib generation is not supported.
 
 Detailed operations are in the [user guide (Chinese)](app/README.md).
 
@@ -157,7 +180,7 @@ Startup checks for stable updates in the background. Use **Settings → About & 
 
 ## Requirements and limitations
 
-Downloads and online previews need internet access. 3D preview needs a graphics driver supporting WebGL. KiCad 8 / 9 / 10 have been verified; see the [verification record (Chinese)](docs/2.3.0验证记录.md) for scope.
+Downloads and online previews need internet access. 3D preview needs a graphics driver supporting WebGL. KiCad 8 / 9 / 10 have been verified; see the [verification record (Chinese)](docs/2.4.0验证记录.md) for scope.
 
 Preview and export assist selection and design. Check pins, electrical types, dimensions and footprints against the datasheet before production use. Re-export any symbols affected by reversed pins in earlier versions.
 
