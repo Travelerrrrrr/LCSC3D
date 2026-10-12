@@ -98,11 +98,11 @@ class StepFallbackTests(unittest.TestCase):
     def test_fallback_failure_never_replaces_existing_step(self):
         with patch.object(self.api, 'get_cad_data_of_component', return_value=COMPONENT), \
                 patch.object(self.api, 'get_step_3d_model', return_value=STEP):
-            original = backend.download_part('C48800488', backend.Options(self.folder / 'exports'), self.api)
+            original = backend.download_part('C48800488', backend.Options(self.folder / 'exports', bind_3d_models=False), self.api)
         self.assertEqual(original.status, '成功')
         with patch.object(self.api, 'get_cad_data_of_component', return_value=COMPONENT), \
                 patch.object(self.api, 'fetch', return_value=None):
-            failed = backend.download_part('C48800488', backend.Options(self.folder / 'exports'), self.api)
+            failed = backend.download_part('C48800488', backend.Options(self.folder / 'exports', bind_3d_models=False), self.api)
         self.assertEqual(failed.status, '失败')
         self.assertEqual(Path(original.files[0]).read_bytes(), STEP)
         self.assertEqual(list(Path(original.folder).iterdir()), [Path(original.files[0])])
@@ -163,7 +163,7 @@ class StepFallbackTests(unittest.TestCase):
                 patch.object(self.api, 'get_step_3d_model', side_effect=step), \
                 patch.object(self.api, 'get_3d_library_model', return_value=ModelReference('USB model', 'backup-asset')), \
                 patch.object(self.api, 'get_raw_3d_model_obj', return_value=OBJ) as obj:
-            result = backend.download_part('C48800488', backend.Options(self.folder / 'exports', ('STEP', 'OBJ')), self.api)
+            result = backend.download_part('C48800488', backend.Options(self.folder / 'exports', ('STEP', 'OBJ'), bind_3d_models=False), self.api)
         self.assertEqual(result.status, '成功', result.message)
         self.assertFalse(result.export_errors)
         self.assertIn('备用关联', result.message)
@@ -227,7 +227,7 @@ class StepFallbackTests(unittest.TestCase):
             with patch('backend.ENDPOINT_3D_MODEL_STEP', base + '/step/{uuid}'), \
                     patch('backend.MODEL_LIBRARY_ENDPOINTS', (base + '/library/{uuid}', base + '/mirror-library/{uuid}')), \
                     patch.object(self.api, 'get_cad_data_of_component', return_value=COMPONENT):
-                result = backend.download_part('C48800488', backend.Options(self.folder / 'exports'), self.api)
+                result = backend.download_part('C48800488', backend.Options(self.folder / 'exports', bind_3d_models=False), self.api)
         finally:
             server.shutdown()
             server.server_close()
@@ -249,7 +249,7 @@ class StepFallbackTests(unittest.TestCase):
         configure_logging(directory=self.folder / 'logs')
         with patch.object(self.api, 'get_cad_data_of_component', return_value=COMPONENT), \
                 patch.object(self.api, 'fetch', return_value=None):
-            result = backend.download_part('C48800488', backend.Options(self.folder / 'exports'), self.api)
+            result = backend.download_part('C48800488', backend.Options(self.folder / 'exports', bind_3d_models=False), self.api)
         self.assertEqual(result.status, '失败')
         close_logging()
         entries = [json.loads(line) for line in (self.folder / 'logs/LCSC3D.log').read_text('utf-8').splitlines()]

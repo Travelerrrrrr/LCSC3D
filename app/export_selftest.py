@@ -129,6 +129,7 @@ def start(window, folder):
         window.lib_merge_box.setChecked(False)
         window.path_input.setText(str(root / 'downloads'))
         window.step_box.setChecked(True)
+        window.bind_3d_box.setChecked(False)  # 2D library mode regression; models have a dedicated self-test.
         window.obj_box.setChecked(True)
         window.schlib_box.setChecked(True)
         window.pcblib_box.setChecked(True)

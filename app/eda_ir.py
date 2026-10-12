@@ -17,8 +17,8 @@ from typing import get_args, get_origin, get_type_hints
 
 from errors import DownloadError, EdaError
 
-SCHEMA_VERSION = '1.1'
-CORE_FEATURES = frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias'})
+SCHEMA_VERSION = '1.2'
+CORE_FEATURES = frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias', 'model-placement'})
 # Open vocabulary: readers preserve future/source-specific values verbatim.
 # `power` records an undirected source declaration; it is not `power_in`.
 PIN_ELECTRICAL_TYPES = frozenset({'unspecified', 'input', 'output', 'bidirectional',
@@ -174,6 +174,31 @@ class Footprint(Record):
 
 
 @dataclass(frozen=True)
+class ModelPlacement(Record):
+    """Requested placement of a normalized model, in local right-handed mm.
+
+    Normalize the unrotated resource to XY centre/minimum Z; apply uniform
+    min(size.x / width, size.y / height), then Z, X, Y rotations, then position.
+    This is explicit source-adapter output, never inferred by an exporter.
+    """
+    position: tuple[Decimal, ...] = ()
+    angles: tuple[Decimal, ...] = ()  # X, Y, Z degrees; applied Z then X then Y.
+    size: tuple[Decimal, ...] = ()  # Unrotated XY dimensions, not scale factors.
+    convention: str = 'center-bottom-zxy-uniform'
+
+
+@dataclass(frozen=True)
+class ModelAsset(Record):
+    identifier: str = ''  # Actual file asset ID, distinct from a library record.
+    name: str = ''
+    format: str = 'STEP'
+    sha256: str = ''
+    reference_sha256: str = ''  # OBJ used to verify the Standard geometry basis.
+    bounds: tuple[Decimal, ...] = ()  # xmin, ymin, zmin, xmax, ymax, zmax in mm.
+    source_sha256: str = ''  # Original STEP if an export-ready scaled copy is used.
+
+
+@dataclass(frozen=True)
 class Model3D(Record):
     identifier: str = ''
     name: str = ''
@@ -181,6 +206,11 @@ class Model3D(Record):
     translation: tuple[Decimal, ...] = ()
     rotation: tuple[Decimal, ...] = ()
     scale: tuple[Decimal, ...] = ()
+    placement: ModelPlacement | None = None
+    asset_id: str = ''  # SHA-256 of an asset in Component.model_assets.
+    # Row-major affine matrix: original resource mm -> footprint local mm.
+    # Empty means unresolved, never identity. Exporters require resolved data.
+    transform: tuple[Decimal, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -204,6 +234,7 @@ class Component(Record):
     symbol: Symbol | None = None
     footprint: Footprint | None = None
     models: tuple[Model3D, ...] = ()
+    model_assets: tuple[ModelAsset, ...] = ()
     diagnostics: tuple[Diagnostic, ...] = ()
     schema_version: str = SCHEMA_VERSION
     required_features: tuple[str, ...] = ('local-mm-y-up',)
@@ -211,7 +242,7 @@ class Component(Record):
 
 RECORD_TYPES = {t.__name__: t for t in (
     Extension, Point, Stroke, TextStyle, Graphic, Pin, Pad, Via, Property, SymbolUnit,
-    Symbol, Footprint, Model3D, Diagnostic, Component)}
+    Symbol, Footprint, ModelPlacement, ModelAsset, Model3D, Diagnostic, Component)}
 
 
 def _encode(value):
@@ -289,6 +320,26 @@ def validate(component):
     missing = set(component.required_features) - CORE_FEATURES
     if missing:
         raise DownloadError('IR 需要尚不支持的能力：' + ', '.join(sorted(missing)))
+    assets = {}
+    for asset in component.model_assets:
+        if (asset.format != 'STEP' or len(asset.sha256) != 64 or
+                any(c not in '0123456789abcdef' for c in asset.sha256) or
+                len(asset.bounds) != 6 or any(asset.bounds[i+3] <= asset.bounds[i] for i in range(3))):
+            raise DownloadError('IR 模型资源元数据无效')
+        if asset.sha256 in assets:
+            raise DownloadError('IR 模型资源重复')
+        assets[asset.sha256] = asset
+    for model in component.models:
+        if model.placement is not None:
+            p = model.placement
+            if len(p.position) != 3 or len(p.angles) != 3 or len(p.size) != 2 or min(p.size) <= 0:
+                raise DownloadError('IR 模型放置参数无效')
+        if model.transform and (len(model.transform) != 16 or not model.asset_id or
+                model.transform[12:] != (D(0), D(0), D(0), D(1))):
+            raise DownloadError('IR 模型变换矩阵无效')
+        if model.transform and (model.asset_id not in assets or len(model.scale) != 3 or
+                min(model.scale) <= 0 or 'model-placement' not in component.required_features):
+            raise DownloadError('IR 模型缺少资源、缩放比例或能力声明')
     return component
 
 

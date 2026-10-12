@@ -152,7 +152,7 @@ class KiCadTests(unittest.TestCase):
         for merge, extra in ((False, ()), (True, ()), (True, ('SCHLIB', 'PCBLIB', 'STEP'))):
             with self.subTest(merge=merge, extra=extra):
                 root = self.root / str(merge) / str(len(extra))
-                options = backend.Options(root, extra + FORMATS, kicad_merge=merge)
+                options = backend.Options(root, extra + FORMATS, kicad_merge=merge, bind_3d_models=False)
                 rows = backend.download_batch(['C23922', 'C8734'], options, api=self.api)
                 self.assertTrue(all(r.status == '成功' for r in rows), [r.message for r in rows])
                 self.assertTrue(all(set(r.completed_formats) == set(options.formats) for r in rows))
@@ -164,7 +164,7 @@ class KiCadTests(unittest.TestCase):
         for symbols, footprints in ((False, False), (True, False), (False, True), (True, True)):
             root = self.root / f'{symbols}-{footprints}'
             options = backend.Options(root, FORMATS + ('STEP',), kicad_merge_symbols=symbols,
-                                      kicad_merge_footprints=footprints, kicad_electrical_policy='output')
+                                      kicad_merge_footprints=footprints, kicad_electrical_policy='output', bind_3d_models=False)
             rows = backend.download_batch(['C23922', 'C8734'], options, api=self.api)
             self.assertTrue(all(r.status == '成功' for r in rows), [r.message for r in rows])
             self.assertEqual(len(list(root.rglob('*.kicad_sym'))), 1 if symbols else 2)
@@ -177,7 +177,7 @@ class KiCadTests(unittest.TestCase):
                     self.assertTrue(all(p[1] == 'output' for u in children(symbol, 'symbol') for p in children(u, 'pin')))
         root = self.root / 'footprint-only'
         rows = backend.download_batch(['C23922', 'C8734'], backend.Options(root, ('KICAD_FOOTPRINT',),
-            kicad_merge_footprints=True), api=self.api)
+            kicad_merge_footprints=True, bind_3d_models=False), api=self.api)
         self.assertTrue(all(r.status == '成功' for r in rows))
         self.assertEqual(len(list(root.glob('*.pretty/*.kicad_mod'))), 1)
         self.assertFalse(list(root.rglob('*.kicad_sym')))
@@ -202,7 +202,7 @@ class KiCadTests(unittest.TestCase):
             root = self.root / f'copies-{keep_symbols}-{keep_footprints}'
             options = backend.Options(root, FORMATS + ('STEP',), kicad_merge=True,
                 kicad_symbol_name='Symbols.kicad_sym', kicad_footprint_name='Pads.pretty',
-                keep_kicad_symbols=keep_symbols, keep_kicad_footprints=keep_footprints)
+                keep_kicad_symbols=keep_symbols, keep_kicad_footprints=keep_footprints, bind_3d_models=False)
             rows = backend.download_batch(['C23922','C8734'], options, api=self.api)
             self.assertTrue(all(r.status == '成功' for r in rows), [r.message for r in rows])
             self.assertTrue((root/'Symbols.kicad_sym').is_file())
@@ -235,7 +235,7 @@ class KiCadTests(unittest.TestCase):
 
     def test_repeated_merge_replaces_members_and_whole_pretty_library(self):
         root = self.root / 'outputs'
-        options = backend.Options(root, FORMATS, kicad_merge=True)
+        options = backend.Options(root, FORMATS, kicad_merge=True, bind_3d_models=False)
         rows = backend.download_batch(['C23922','C8734'], options, api=self.api)
         self.assertTrue(all(r.status == '成功' for r in rows))
         old = list((root/'LCSC3D.pretty').glob('*.kicad_mod'))
@@ -261,7 +261,7 @@ class KiCadTests(unittest.TestCase):
         self.api.get_cad_data_of_component=lambda part: fixture('C31966')
         for formats in (FORMATS,('SCHLIB','PCBLIB')):
             root=self.root/formats[0]
-            options=backend.Options(root,formats,merge_schlib=True,merge_pcblib=True,kicad_merge=True)
+            options=backend.Options(root,formats,merge_schlib=True,merge_pcblib=True,kicad_merge=True, bind_3d_models=False)
             rows=backend.download_batch(['C31966','C900001'],options,api=self.api)
             self.assertTrue(all(r.status=='成功' for r in rows),[r.message for r in rows])
             if formats==FORMATS:
@@ -279,7 +279,7 @@ class KiCadTests(unittest.TestCase):
                     library.ole.close()
                 self.assertEqual(sum(kind==3 for kind,_ in pcb(original)[2]),4)
                 result=backend.download_part('C900002',backend.Options(root,('PCBLIB',),
-                    append_mode=True,pcblib_target=str(target)),self.api)
+                    append_mode=True,pcblib_target=str(target), bind_3d_models=False),self.api)
                 self.assertEqual(result.status,'成功',result.message)
                 library=LibraryIndex(target.read_bytes(),'PCBLIB')
                 try:
@@ -311,7 +311,7 @@ class KiCadTests(unittest.TestCase):
         data = fixture()
         data['dataStr']['shape'] = []
         self.api.get_cad_data_of_component = lambda part: data
-        row = backend.download_part('C2765186', backend.Options(self.root / 'out', FORMATS), self.api)
+        row = backend.download_part('C2765186', backend.Options(self.root / 'out', FORMATS, bind_3d_models=False), self.api)
         self.assertEqual(row.status, '部分完成', row.message)
         self.assertEqual(row.completed_formats, ['KICAD_FOOTPRINT'])
         self.assertEqual(len(row.files), 1)
@@ -361,10 +361,10 @@ class KiCadTests(unittest.TestCase):
         with self.assertRaises(Cancelled):
             build_library([component], {component.part: FORMATS}, 'Test', cancel)
         with self.assertRaises(DownloadError):
-            backend.Options(self.root, FORMATS, append_mode=True)
+            backend.Options(self.root, FORMATS, append_mode=True, bind_3d_models=False)
         for name in ('../escape', 'C:\\bad', 'A:B', 'CON', 'x'*81):
             with self.subTest(name=name), self.assertRaises(DownloadError):
-                backend.Options(self.root, FORMATS, kicad_library_name=name)
+                backend.Options(self.root, FORMATS, kicad_library_name=name, bind_3d_models=False)
 
     def test_unknown_copper_layer_is_not_remapped_to_silkscreen(self):
         component = parse_component(fixture(), 'C2765186')

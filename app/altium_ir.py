@@ -227,7 +227,9 @@ def schematic(component, check, *, merged=False, merge_pcb=False, fonts=None, fo
                     section + '/Data': b''.join(records), 'Storage': a._parameters({'HEADER': 'Icon storage'})}
 
 
-def pcb(component, check, *, merged=False, footprint_name=None):
+def pcb(component, check, *, merged=False, footprint_name=None, model_assets=None):
+    if model_assets is None and any(m.transform for m in component.models):
+        raise DownloadError('已解析的模型缺少资源，无法写入 AD 封装')
     import altium as a
     footprint = ALTIUM.require(component, 'footprint')
     name = a._library_name(footprint.name, component.part + '_Footprint')
@@ -342,4 +344,7 @@ def pcb(component, check, *, merged=False, footprint_name=None):
     }
     for folder in ('Models', 'ModelsNoEmbed', 'Textures'):
         streams[f'Library/{folder}/Header'], streams[f'Library/{folder}/Data'] = struct.pack('<I', 0), b''
+    if model_assets is not None:
+        from altium_models import embed_models
+        embed_models(component, streams, section, model_assets, check)
     return name, streams

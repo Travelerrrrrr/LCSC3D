@@ -139,7 +139,7 @@ class ExportIntegrityTests(unittest.TestCase):
                                                     footprint_name='Existing_LQFP48')
                     target.write_bytes(original)
                 options = backend.Options(root, ('STEP', 'SCHLIB', 'PCBLIB'), merge_sch, True,
-                    'symbols', 'footprints', keep_sch, keep_pcb, pcblib_target=str(target) if append else '')
+                    'symbols', 'footprints', keep_sch, keep_pcb, pcblib_target=str(target) if append else '', bind_3d_models=False)
                 rows = backend.download_batch(['C23922', 'C8734'], options, api=self.api)
                 self.assertEqual([row.status for row in rows], ['成功', '成功'])
                 merged_pcb = options.merged_paths()['PCBLIB']
@@ -162,7 +162,7 @@ class ExportIntegrityTests(unittest.TestCase):
         fields = data['shape'][i].split('~')
         fields[4] = str(float(fields[4]) + 1)
         data['shape'][i] = '~'.join(fields)
-        options = backend.Options(self.root, ('SCHLIB', 'PCBLIB'), True, True)
+        options = backend.Options(self.root, ('SCHLIB', 'PCBLIB'), True, True, bind_3d_models=False)
         rows = backend.download_batch(['C23922', 'C8734'], options, api=self.api)
         self.assertEqual([row.status for row in rows], ['成功', '成功'])
         board = options.merged_paths()['PCBLIB']
@@ -232,7 +232,7 @@ class ExportIntegrityTests(unittest.TestCase):
 
     def test_same_geometry_with_different_source_names_uses_one_name_in_both_symbols(self):
         self.data['C8734']['packageDetail']['title'] = 'Alternate_LQFP48'
-        options = backend.Options(self.root, ('SCHLIB', 'PCBLIB'), True, True)
+        options = backend.Options(self.root, ('SCHLIB', 'PCBLIB'), True, True, bind_3d_models=False)
         rows = backend.download_batch(['C23922', 'C8734'], options, api=self.api)
         self.assertEqual([row.status for row in rows], ['成功', '成功'])
         self.assertEqual(len(self.names(options.merged_paths()['PCBLIB'], 'PCBLIB')), 1)
@@ -256,7 +256,7 @@ class ExportIntegrityTests(unittest.TestCase):
         self.assertEqual(skipped, ['Old_LQFP_A'])
 
     def test_standalone_files_do_not_gain_part_numbers(self):
-        row = backend.download_batch(['C23922'], backend.Options(self.root, ('SCHLIB', 'PCBLIB')), api=self.api)[0]
+        row = backend.download_batch(['C23922'], backend.Options(self.root, ('SCHLIB', 'PCBLIB'), bind_3d_models=False), api=self.api)[0]
         self.assertEqual(row.status, '成功')
         self.assertEqual(Path(row.folder).name, 'STM32F030C8T6_C23922')
         self.assertEqual({Path(file).name for file in row.files}, {'STM32F030C8T6.SchLib', 'STM32F030C8T6.PcbLib'})
@@ -265,7 +265,7 @@ class ExportIntegrityTests(unittest.TestCase):
 
     def test_cancelled_shared_export_does_not_publish_pending_independent_pairs(self):
         options = backend.Options(self.root / 'out', ('SCHLIB', 'PCBLIB'), True, True,
-                                  keep_schlib=True, keep_pcblib=True)
+                                  keep_schlib=True, keep_pcblib=True, bind_3d_models=False)
         def stop(index, row):
             if row.pending_formats:
                 self.api.cancelled.set()
@@ -277,7 +277,7 @@ class ExportIntegrityTests(unittest.TestCase):
 
     def test_individual_write_failure_still_reports_partial_after_successful_shared_export(self):
         options = backend.Options(self.root / 'out', ('SCHLIB', 'PCBLIB'), True, True,
-                                  keep_schlib=True, keep_pcblib=True)
+                                  keep_schlib=True, keep_pcblib=True, bind_3d_models=False)
         original_write = backend.atomic_write
         def write(path, payload):
             if path.parent.name.endswith('_C8734') and path.suffix == '.SchLib':

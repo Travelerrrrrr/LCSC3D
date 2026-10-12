@@ -78,13 +78,13 @@ class Tests(unittest.TestCase):
 
     def test_step_survives_unavailable_obj(self):
         with self.importer():
-            result = download_part('C2040', Options(self.folder, ('STEP', 'OBJ')), FakeApi())
+            result = download_part('C2040', Options(self.folder, ('STEP', 'OBJ'), bind_3d_models=False), FakeApi())
         self.assertEqual(result.status, '部分完成')
         self.assertEqual((self.folder / 'Test component_C2040/C2040_QFN_56.step').read_bytes(), STEP)
         self.assertFalse((self.folder / 'Test component_C2040/C2040_QFN_56.obj').exists())
 
     def test_rerun_downloads_and_replaces_existing_selected_files(self):
-        options = Options(self.folder, ('STEP', 'OBJ'))
+        options = Options(self.folder, ('STEP', 'OBJ'), bind_3d_models=False)
         updated_step = STEP.replace(b'HEADER;', b'HEADER; /* refreshed */')
         updated_obj = OBJ.replace('2.54', '5.08')
         with self.importer():
@@ -100,16 +100,16 @@ class Tests(unittest.TestCase):
 
     def test_failed_refresh_preserves_existing_file(self):
         with self.importer():
-            original = download_part('C2040', Options(self.folder), FakeApi())
-            result = download_part('C2040', Options(self.folder), FakeApi(step=DownloadError('timeout')))
+            original = download_part('C2040', Options(self.folder, bind_3d_models=False), FakeApi())
+            result = download_part('C2040', Options(self.folder, bind_3d_models=False), FakeApi(step=DownloadError('timeout')))
         self.assertEqual(result.status, '失败')
         self.assertEqual(Path(original.files[0]).read_bytes(), STEP)
         self.assertEqual(set(Path(original.folder).iterdir()), {Path(original.files[0])})
 
     def test_refresh_does_not_replace_unselected_formats(self):
         with self.importer():
-            original = download_part('C2040', Options(self.folder, ('STEP', 'OBJ')), FakeApi(obj=OBJ))
-            result = download_part('C2040', Options(self.folder, ('STEP',)), FakeApi(step=STEP + b'\n'))
+            original = download_part('C2040', Options(self.folder, ('STEP', 'OBJ'), bind_3d_models=False), FakeApi(obj=OBJ))
+            result = download_part('C2040', Options(self.folder, ('STEP',), bind_3d_models=False), FakeApi(step=STEP + b'\n'))
         self.assertEqual(result.status, '成功')
         self.assertEqual(len(result.files), 1)
         self.assertEqual(Path(result.files[0]).read_bytes(), STEP + b'\n')
@@ -126,7 +126,7 @@ class Tests(unittest.TestCase):
 
     def test_network_failure_has_no_placeholder_file(self):
         with self.importer():
-            result = download_part('C2040', Options(self.folder), FakeApi(step=DownloadError('timeout')))
+            result = download_part('C2040', Options(self.folder, bind_3d_models=False), FakeApi(step=DownloadError('timeout')))
         self.assertEqual(result.status, '失败')
         self.assertFalse((self.folder / 'Test component_C2040/C2040_QFN_56.step').exists())
 
@@ -135,28 +135,28 @@ class Tests(unittest.TestCase):
         path.parent.mkdir()
         path.touch()
         with self.importer():
-            result = download_part('C2040', Options(self.folder), FakeApi())
+            result = download_part('C2040', Options(self.folder, bind_3d_models=False), FakeApi())
         self.assertEqual(result.status, '成功')
         self.assertEqual(path.read_bytes(), STEP)
 
     def test_different_part_numbers_do_not_share_a_file(self):
         with self.importer():
-            first = download_part('C2040', Options(self.folder), FakeApi())
-            second = download_part('C20197', Options(self.folder), FakeApi())
+            first = download_part('C2040', Options(self.folder, bind_3d_models=False), FakeApi())
+            second = download_part('C20197', Options(self.folder, bind_3d_models=False), FakeApi())
         self.assertEqual(Path(first.folder).name, 'Test component_C2040')
         self.assertEqual(Path(second.folder).name, 'Test component_C20197')
         self.assertEqual(len(list(self.folder.rglob('*.step'))), 2)
 
     def test_folder_uses_component_title_instead_of_model_name(self):
         with self.importer():
-            result = download_part('C2040', Options(self.folder), FakeApi(title='RP2040'))
+            result = download_part('C2040', Options(self.folder, bind_3d_models=False), FakeApi(title='RP2040'))
         self.assertEqual(Path(result.folder), self.folder / 'RP2040_C2040')
         self.assertEqual(result.status, '成功')
         self.assertTrue(all(Path(file).parent == Path(result.folder) for file in result.files))
 
     def test_folder_handles_unicode_and_windows_characters(self):
         with self.importer():
-            result = download_part('C2040', Options(self.folder), FakeApi(title=' 温度/传感器:V1 '))
+            result = download_part('C2040', Options(self.folder, bind_3d_models=False), FakeApi(title=' 温度/传感器:V1 '))
         self.assertEqual(Path(result.folder), self.folder / '温度_传感器_V1_C2040')
         self.assertEqual(result.status, '成功')
         self.assertEqual(result.title, '温度/传感器:V1')
@@ -166,13 +166,13 @@ class Tests(unittest.TestCase):
             with self.subTest(data=data):
                 api = FakeApi()
                 with self.importer(), patch.object(api, 'get_cad_data_of_component', return_value=data):
-                    result = download_part('C2040', Options(self.folder), api)
+                    result = download_part('C2040', Options(self.folder, bind_3d_models=False), api)
                 self.assertEqual(Path(result.folder), self.folder / '未命名器件_C2040')
                 self.assertEqual(result.status, '成功')
 
     def test_long_title_keeps_number_suffix_and_stays_inside_destination(self):
         with self.importer():
-            result = download_part('C2040', Options(self.folder), FakeApi(title='../' + 'x' * 200))
+            result = download_part('C2040', Options(self.folder, bind_3d_models=False), FakeApi(title='../' + 'x' * 200))
         folder = Path(result.folder)
         self.assertEqual(folder.resolve().parent, self.folder.resolve())
         self.assertTrue(folder.name.endswith('_C2040'))
@@ -185,7 +185,7 @@ class Tests(unittest.TestCase):
             with self.subTest(title=title), patch('backend.model_reference', return_value=None), \
                     patch('backend.export_schlib', return_value=b'schematic'), \
                     patch('backend.export_pcblib', return_value=b'footprint'):
-                result = download_part('C2040', Options(self.folder, ('SCHLIB', 'PCBLIB')), FakeApi(title=title))
+                result = download_part('C2040', Options(self.folder, ('SCHLIB', 'PCBLIB'), bind_3d_models=False), FakeApi(title=title))
             self.assertEqual(result.status, '成功', result.message)
             self.assertEqual(Path(result.folder), self.folder / f'{basename}_C2040')
             self.assertEqual({Path(file).name for file in result.files}, {f'{basename}.SchLib', f'{basename}.PcbLib'})
@@ -244,19 +244,19 @@ class Tests(unittest.TestCase):
                         ('JSON',), ('SVG',), ('STEP', 'SYMBOL'), ()):
             with self.subTest(formats=formats), patch.object(FakeApi, 'get_cad_data_of_component') as fetch:
                 with self.assertRaises(DownloadError):
-                    download_part('C2040', Options(self.folder, formats), FakeApi())
+                    download_part('C2040', Options(self.folder, formats, bind_3d_models=False), FakeApi())
                 fetch.assert_not_called()
 
     def test_missing_model_does_not_create_output_files(self):
         with patch('backend.model_reference', return_value=None):
-            result = download_part('C2040', Options(self.folder), FakeApi())
+            result = download_part('C2040', Options(self.folder, bind_3d_models=False), FakeApi())
         self.assertEqual(result.status, '无模型')
         self.assertEqual(result.files, [])
         self.assertEqual(list(self.folder.iterdir()), [])
 
     def test_official_3d_formats_preserve_payload_without_conversion(self):
         with self.importer():
-            result = download_part('C2040', Options(self.folder, ('STEP', 'OBJ')), FakeApi(obj=OBJ))
+            result = download_part('C2040', Options(self.folder, ('STEP', 'OBJ'), bind_3d_models=False), FakeApi(obj=OBJ))
         self.assertEqual(result.status, '成功')
         self.assertEqual({Path(file).suffix for file in result.files}, {'.step', '.obj'})
         self.assertEqual(set(Path(result.folder).iterdir()), {Path(file) for file in result.files})

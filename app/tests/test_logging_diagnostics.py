@@ -108,7 +108,7 @@ class DiagnosticTests(unittest.TestCase):
         with patch('backend.model_reference', return_value=SimpleNamespace(name='model', uuid='synthetic')), \
                 patch('backend.export_pcblib', side_effect=ValueError('PRIVATE-converter-data')):
             results = backend.download_batch(['C2040', 'C20197'],
-                backend.Options(self.directory / 'exports', ('STEP', 'PCBLIB')), api=api)
+                backend.Options(self.directory / 'exports', ('STEP', 'PCBLIB'), bind_3d_models=False), api=api)
         self.assertTrue(all(result.status == '部分完成' for result in results))
         rows = self.entries('download.format_failed')
         self.assertEqual({row['part'] for row in rows}, {'C2040','C20197'})
@@ -121,7 +121,7 @@ class DiagnosticTests(unittest.TestCase):
         api = FakeApi(step=STEP)
         with patch('backend.model_reference', return_value=SimpleNamespace(name='model', uuid='synthetic')), \
                 patch('backend.replace_file', side_effect=PermissionError(errno.EACCES, 'PRIVATE-directory')):
-            result = backend.download_part('C2040', backend.Options(self.directory, ('STEP',)), api)
+            result = backend.download_part('C2040', backend.Options(self.directory, ('STEP',), bind_3d_models=False), api)
         self.assertEqual(result.status, '失败')
         row = self.entries('download.format_failed')[0]
         self.assertEqual((row['part'], row['format'], row['stage']), ('C2040','STEP','write'))
@@ -142,7 +142,7 @@ class DiagnosticTests(unittest.TestCase):
         bad['packageDetail']['dataStr']['shape'].append('FUTURE~PRIVATE-source-record')
         api=backend.NetworkApi()
         api.get_cad_data_of_component=lambda part: bad if part=='C31966' else fixture(part)
-        options=backend.Options(self.directory/'exports',('KICAD_SYMBOL','KICAD_FOOTPRINT'),kicad_merge=True)
+        options=backend.Options(self.directory/'exports',('KICAD_SYMBOL','KICAD_FOOTPRINT'),kicad_merge=True, bind_3d_models=False)
         results=backend.download_batch(['C31966','C23922'],options,api=api)
         self.assertEqual([r.status for r in results],['部分完成','成功'])
         row=next(r for r in self.entries('export.kicad_conversion_failed') if r['part']=='C31966')
@@ -164,7 +164,7 @@ class DiagnosticTests(unittest.TestCase):
         data['packageDetail']['dataStr']['shape'].append('FUTURE~PRIVATE-source-record')
         api=backend.NetworkApi()
         api.get_cad_data_of_component=lambda part:data
-        backend.download_batch(['C31966'],backend.Options(self.directory/'ad',('SCHLIB','PCBLIB'),True,True),api=api)
+        backend.download_batch(['C31966'],backend.Options(self.directory/'ad',('SCHLIB','PCBLIB'),True,True, bind_3d_models=False),api=api)
         row=self.entries('download.format_failed')[0]
         self.assertEqual(self.assert_cause(row,'EdaError')['eda_primitive'],'FUTURE')
         data['packageDetail']['dataStr']['shape']=['VIA~4000~3000~2~~5~gge123']
@@ -182,7 +182,7 @@ class DiagnosticTests(unittest.TestCase):
         api=backend.NetworkApi()
         api.get_cad_data_of_component=lambda part:fixture(part)
         root=self.directory/'libraries'
-        options=backend.Options(root,('KICAD_SYMBOL','KICAD_FOOTPRINT'),kicad_merge=True)
+        options=backend.Options(root,('KICAD_SYMBOL','KICAD_FOOTPRINT'),kicad_merge=True, bind_3d_models=False)
         backend.download_batch(['C23922'],options,api=api)
         before={p.relative_to(root):p.read_bytes() for p in root.rglob('*') if p.is_file()}
         original=library_files.replace_file
@@ -216,7 +216,7 @@ class DiagnosticTests(unittest.TestCase):
         api = backend.NetworkApi()
         api.get_cad_data_of_component = lambda part: data[part]
         options = backend.Options(self.directory / 'exports', ('SCHLIB', 'PCBLIB'), True, True,
-                                  keep_schlib=True, keep_pcblib=True)
+                                  keep_schlib=True, keep_pcblib=True, bind_3d_models=False)
         rows = backend.download_batch(['C23922', 'C8734'], options, api=api)
         self.assertEqual([row.status for row in rows], ['成功', '成功'])
         reuse = self.entries('library.footprint_reuse')
@@ -230,7 +230,7 @@ class DiagnosticTests(unittest.TestCase):
     def test_cancel_is_reported_without_a_false_error(self):
         stop = threading.Event()
         stop.set()
-        result = backend.download_batch(['C2040'], backend.Options(self.directory), cancelled=stop, api=FakeApi())
+        result = backend.download_batch(['C2040'], backend.Options(self.directory, bind_3d_models=False), cancelled=stop, api=FakeApi())
         self.assertEqual(result[0].status, '已取消')
         self.assertEqual(self.entries('download.batch_result')[0]['cancelled'], 1)
         self.assertFalse([row for row in self.entries() if row['level'] in ('ERROR','CRITICAL')])

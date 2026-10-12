@@ -66,7 +66,7 @@ class IRTests(unittest.TestCase):
         from test_kicad import sexpr, children, child
         from eda_targets import KICAD
         component = loads(dumps(parse_component(fixture('C31966'), 'C31966')))
-        self.assertEqual(component.schema_version, '1.1')
+        self.assertEqual(component.schema_version, '1.2')
         vias = [v for v in component.footprint.items if isinstance(v, Via)]
         self.assertEqual(len(vias), 4)
         self.assertEqual(len([p for p in component.footprint.items if isinstance(p, Pad)]), 9)

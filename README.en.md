@@ -19,6 +19,8 @@
 
 LCSC3D is a portable Windows tool for hardware development, PCB design and mechanical fit checks. Download and run `LCSC3D.exe`; no Python installation is required. Generating libraries does not require the target EDA software to be installed.
 
+The source and local delivery are now **2.4.0-demo.1**, adding footprint 3D model association. The online download links below still point to stable 2.3.0; this development build has not been published.
+
 **Current version: 2.3.0** · **[Download for Windows](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [User guide (Chinese)](app/README.md) · [Release notes (Chinese)](docs/releases/v2.3.0.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
 ![LCSC3D 2.3.0 workspace with KiCad symbol preview and export settings](docs/images/2.3.0-release/kicad.png)
@@ -56,7 +58,7 @@ Earlier changes are listed in the [version history (Chinese)](docs/版本历史.
 
 In KiCad, **use the exported footprint library name as its nickname**, such as `LCSC3D`, so symbol footprint references resolve. Footprint vias retain their positions, drills and copper rings; confirm their net assignment in the PCB. Conversion approximations appear in export results.
 
-Both targets support multi-unit symbols, string pin numbers and common surface-mount / through-hole footprints. **Neither currently binds 3D models automatically.** Download STEP files, add them in your EDA, and check position, height and rotation. AD IntLib generation is not supported.
+Both targets support multi-unit symbols, string pin numbers and common surface-mount / through-hole footprints. Stable 2.3.0 requires manual model association. Local development version **2.4.0-demo.1 binds models by default**: embedded STEP for AD and KiCad 9/10, and portable external STEP for KiCad 8. See the [user guide](app/README.md). AD IntLib generation is not supported.
 
 Detailed operations are in the [user guide (Chinese)](app/README.md).
 
@@ -89,7 +91,7 @@ These previously shared AD screenshots show exported symbols, footprints and lib
 <details>
 <summary>More AD examples: multi-unit symbols, BGA footprints and manually added STEP models</summary>
 
-The 3D views below show the result **after manually adding a STEP model in AD**. Exported PcbLib files do not include these 3D bodies automatically.
+The 3D views below show the result **after manually adding a STEP model in AD**. These historical examples predate the automatic model binding added in the development build.
 
 | Multi-unit schematic symbol | BGA footprint |
 | --- | --- |

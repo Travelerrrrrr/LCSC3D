@@ -66,7 +66,8 @@ def commit_library(root, artifacts, check_cancelled=lambda: None, *, overwrite=F
             # (which may already contain this batch's STEP/OBJ/AD output).
             containers = {path.parent for _, path in paths} | {p.parent for p in pretty_dirs}
             containers -= pretty_dirs
-            for container in sorted(containers):
+            outer = {c for c in containers if not any(c.is_relative_to(p) for p in pretty_dirs)}
+            for container in sorted(outer):
                 missing, current = [], container
                 while current != root and not current.exists():
                     missing.append(current)
@@ -77,6 +78,14 @@ def commit_library(root, artifacts, check_cancelled=lambda: None, *, overwrite=F
             for directory in sorted(pretty_dirs):
                 directory.mkdir()  # exclusive reservation; no existing directory is reused
                 made_dirs.append(directory)
+            for container in sorted(containers - outer):
+                missing, current = [], container
+                while current != root and not current.exists():
+                    missing.append(current)
+                    current = current.parent
+                for directory in reversed(missing):
+                    directory.mkdir()
+                    made_dirs.append(directory)
             for artifact, source, target in staged:
                 check_cancelled()
                 _move_new(source, target)
@@ -186,6 +195,9 @@ def _replace_libraries(root, artifacts, check):
                 (replace_file if path in before else _move_new)(source, path)
                 journal.append((path, hashlib.sha256(artifact.payload).hexdigest()))
             for artifact,path in paths:
+                if artifact.format == 'KICAD_MODEL':
+                    publish(artifact, path)
+            for artifact,path in paths:
                 if artifact.format == 'KICAD_FOOTPRINT':
                     publish(artifact, path)
             selected = {path for _,path in paths}
@@ -195,7 +207,7 @@ def _replace_libraries(root, artifacts, check):
                 path.unlink()
                 journal.append((path, None))
             for artifact,path in paths:
-                if artifact.format != 'KICAD_FOOTPRINT':
+                if artifact.format not in ('KICAD_MODEL','KICAD_FOOTPRINT'):
                     publish(artifact, path)
             wanted_dirs = {parent for _,path in paths for parent in path.parents if parent.is_relative_to(root)}
             for directory in sorted(old_dirs - wanted_dirs, key=lambda p:len(p.parts), reverse=True):

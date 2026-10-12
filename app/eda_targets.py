@@ -19,6 +19,8 @@ class TargetCapabilities:
 
     def require(self, component, domain):
         value = require_domain(component, domain)
+        if domain == 'footprint' and not self.model_placement and any(m.transform for m in component.models):
+            raise DownloadError(self.name + ' 不支持模型放置')
         required = set(component.required_features)
         if domain == 'symbol' and len(value.units) > 1:
             required.add('symbol-units')
@@ -60,14 +62,14 @@ class TargetCapabilities:
 
 ALTIUM = TargetCapabilities(
     'AD', ('SchLib binary 5.0', 'PcbLib binary 6.0'),
-    frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias'}),
+    frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias', 'model-placement'}),
     frozenset({'rect', 'ellipse', 'polyline', 'polygon', 'path', 'text'}),
     frozenset({'rect', 'ellipse', 'polyline', 'path', 'region', 'text'}),
-    frozenset({'rect', 'ellipse', 'oval', 'octagon', 'polygon'}), append_existing=True, mechanical_footprints=False)
+    frozenset({'rect', 'ellipse', 'oval', 'octagon', 'polygon'}), append_existing=True, model_placement=True, mechanical_footprints=False)
 
 KICAD = TargetCapabilities(
-    'KiCad 8+', ('symbol 20211014', 'footprint 20240108'),
-    frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias'}),
+    'KiCad 8+', ('symbol 20211014', 'footprint 20240108', 'footprint 20241229 (embedded models, KiCad 9+)'),
+    frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias', 'model-placement'}),
     frozenset({'rect', 'ellipse', 'polyline', 'polygon', 'path', 'text'}),
     frozenset({'rect', 'ellipse', 'polyline', 'polygon', 'path', 'region', 'text'}),
-    frozenset({'rect', 'ellipse', 'oval', 'octagon', 'polygon'}))
+    frozenset({'rect', 'ellipse', 'oval', 'octagon', 'polygon'}), model_placement=True)

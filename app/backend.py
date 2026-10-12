@@ -188,7 +188,7 @@ class NetworkApi:
     """Official component/model APIs with bounded requests and cancellation."""
     def __init__(self, cancelled: threading.Event | None = None, use_cache=True):
         self.cancelled = cancelled or threading.Event()
-        self.headers = {'User-Agent': 'LCSC3D/2.3.0', 'Accept-Encoding': 'gzip',
+        self.headers = {'User-Agent': 'LCSC3D/2.4.0-demo.1', 'Accept-Encoding': 'gzip',
                         'Accept': '*/*'}
         self.use_cache = use_cache
 
@@ -420,6 +420,7 @@ class NetworkApi:
 class StepPayload:
     data: bytes | None
     used_library: bool = False
+    identifier: str = field(default='', compare=False)
 
 
 @traced('resources.component_step', lambda component, model, api: {'format': 'STEP'})
@@ -429,7 +430,7 @@ def component_step_payload(component: dict, model: ModelReference, api: NetworkA
     try:
         payload = api.get_step_3d_model(model.uuid)
         if payload:
-            return StepPayload(payload)
+            return StepPayload(payload, identifier=model.uuid)
         primary_error = DownloadError('文件不存在或已移除')
     except DownloadError as exc:
         primary_error = exc
@@ -451,7 +452,7 @@ def component_step_payload(component: dict, model: ModelReference, api: NetworkA
         if not payload:
             raise DownloadError('备用 STEP 文件不存在或已移除')
         log_event('INFO', 'resources.step_fallback_succeeded', model_id=reference.uuid, bytes=len(payload))
-        return StepPayload(payload, used_library=True)
+        return StepPayload(payload, used_library=True, identifier=reference.uuid)
     except DownloadError as exc:
         record_error(exc, 'resources.step_fallback_failed', level='WARNING')
         raise DownloadError(f'主模型 STEP：{primary_error}；备用关联：{exc}') from exc
@@ -489,9 +490,13 @@ class Options:
     kicad_footprint_name: str = ''
     keep_kicad_symbols: bool = False
     keep_kicad_footprints: bool = False
+    bind_3d_models: bool = True
+    kicad_3d_mode: str = 'embedded'
 
     def __post_init__(self):
         self.symbol_style = normalize_symbol_style(self.symbol_style)
+        if self.kicad_3d_mode not in ('embedded', 'external'):
+            raise DownloadError('请选择 KiCad 9/10 内嵌模式或 KiCad 8 兼容模式')
         # The demo.1 combined switch remains a supported caller contract.
         if self.kicad_merge_symbols is None:
             self.kicad_merge_symbols = self.kicad_merge
@@ -628,6 +633,7 @@ class Result:
     pending_formats: list[str] = field(default_factory=list)
     completed_formats: list[str] = field(default_factory=list)
     export_errors: list[str] = field(default_factory=list)
+    model_diagnostics: list[dict] = field(default_factory=list)
 
 
 @traced('component.lookup', lambda part, api: {'part': safe_part(part)})
@@ -702,16 +708,41 @@ def download_part(part: str, options: Options, api: NetworkApi,
     for fmt, path in paths.items():
         if libraries and fmt in libraries and options.keeps_individual(fmt) and path.resolve() in reserved:
             raise DownloadError('独立导出与指定库路径相同，请关闭“独立导出器件”或另选保存目录')
+    bind_models = options.bind_3d_models and component is not None and component.footprint is not None and any(
+        fmt in options.formats for fmt in ('PCBLIB','KICAD_FOOTPRINT'))
+    model_assets = None
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix='model-format') as pool:
-        step = submit_logged(pool, component_step_payload, data, model, api) if model and 'STEP' in options.formats else None
-        obj = submit_logged(pool, api.get_raw_3d_model_obj, model.uuid) if model and 'OBJ' in options.formats else None
+        step = submit_logged(pool, component_step_payload, data, model, api) if model and ('STEP' in options.formats or bind_models) else None
+        obj = submit_logged(pool, api.get_raw_3d_model_obj, model.uuid) if model and ('OBJ' in options.formats or bind_models) else None
+        if bind_models:
+            from model_export import resolve_models
+            notify('核对 3D 模型放置',title)
+            def fetch_step(reference):
+                if model and reference.uuid == model.uuid and step is not None:
+                    return step.result()
+                if len(component.models) > 1:
+                    return StepPayload(api.get_step_3d_model(reference.uuid),identifier=reference.uuid)
+                return component_step_payload(data,reference,api)
+            def fetch_obj(identifier):
+                return obj.result() if model and identifier == model.uuid and obj is not None else api.get_raw_3d_model_obj(identifier)
+            component,model_assets = resolve_models(component,fetch_step,fetch_obj,api.check_cancelled,
+                                                   prepare_altium='PCBLIB' in options.formats)
+            for diagnostic in component.diagnostics:
+                if diagnostic.domain != 'model3d':
+                    continue
+                result.model_diagnostics.append({'severity':diagnostic.severity,'code':diagnostic.code,
+                                                  'message':diagnostic.message,'source_id':diagnostic.source_id})
+                (errors if diagnostic.severity == 'error' else notes).append('3D：'+diagnostic.message)
+                log_event('WARNING' if diagnostic.severity in ('warning','error') else 'INFO',
+                          'export.model_diagnostic',part=part,domain='model3d',code=diagnostic.code,
+                          source_id=diagnostic.source_id,stage='model_placement')
         for fmt in options.formats:
             api.check_cancelled()
             if fmt in KICAD_FORMATS:
                 notify('准备导出 KiCad 元件库', title)
                 log_event('INFO', 'download.format_started', format=fmt, stage='convert')
                 with merge_lock:
-                    kicad_entries[part] = (component, folder)
+                    kicad_entries[part] = (component, folder, model_assets or {})
                 result.pending_formats.append(fmt)
                 continue
             path = paths[fmt]
@@ -721,7 +752,7 @@ def download_part(part: str, options: Options, api: NetworkApi,
             try:
                 if libraries and fmt in libraries:
                     with merge_lock:
-                        libraries[fmt].add(component, part, api.check_cancelled)
+                        libraries[fmt].add(component, part, api.check_cancelled, model_assets=model_assets)
                     result.pending_formats.append(fmt)
                     if not options.keeps_individual(fmt):
                         continue
@@ -729,7 +760,7 @@ def download_part(part: str, options: Options, api: NetworkApi,
                     # Resolve shared/existing footprint names before writing either
                     # member of an independent pair (or a non-merged symbol).
                     with merge_lock:
-                        deferred_outputs.setdefault(part, {})[fmt] = (path, component)
+                        deferred_outputs.setdefault(part, {})[fmt] = (path, component, model_assets)
                     if fmt not in result.pending_formats:
                         result.pending_formats.append(fmt)
                     continue
@@ -738,7 +769,7 @@ def download_part(part: str, options: Options, api: NetworkApi,
                     payload = exporter(component, part, api.check_cancelled, symbol_style=options.symbol_style)
                 elif fmt == 'PCBLIB':
                     exporter = export_linked_pcblib if options.merge_pcblib else export_pcblib
-                    payload = exporter(component, part, api.check_cancelled)
+                    payload = exporter(component, part, api.check_cancelled, model_assets=model_assets)
                 elif not model:
                     log_event('WARNING', 'download.format_unavailable', format=fmt, reason='no_model')
                     errors.append(f'{fmt}：' + (model_error or '官方库中没有关联的 3D 模型'))
@@ -912,7 +943,7 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
             if not error and fmt == 'PCBLIB' and libraries[fmt].reused_count:
                 result.message += f'；已复用 {libraries[fmt].reused_count} 个相同 footprint'
     for result in results:
-        for fmt, (path, data) in (deferred_outputs or {}).get(result.part, {}).items():
+        for fmt, (path, data, model_assets) in (deferred_outputs or {}).get(result.part, {}).items():
             if fmt not in result.pending_formats:
                 continue
             stage = 'convert'
@@ -922,7 +953,7 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                 exporter = export_linked_schlib if fmt == 'SCHLIB' else export_linked_pcblib
                 payload = exporter(data, result.part, api.check_cancelled,
                                    footprint_name=footprint_names.get(result.part),
-                                   **({'symbol_style': options.symbol_style} if fmt == 'SCHLIB' else {}))
+                                   **({'symbol_style': options.symbol_style} if fmt == 'SCHLIB' else {'model_assets':model_assets}))
                 api.check_cancelled()
                 stage = 'write'
                 with log_context(part=safe_part(result.part), format=fmt):
@@ -958,10 +989,11 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
             record_error(exc, 'library.project_import_failed')
             project_error = '加入 PCB 工程失败：' + str(exc)
     for index, result in enumerate(results):
-        result.files.sort(key=lambda file: (Path(file) in merged_paths.values(),
-                                            options.formats.index({'.kicad_sym': 'KICAD_SYMBOL',
-                                                '.kicad_mod': 'KICAD_FOOTPRINT'}.get(
-                                                Path(file).suffix.lower(), Path(file).suffix[1:].upper()))))
+        def output_order(file):
+            fmt = {'.kicad_sym':'KICAD_SYMBOL','.kicad_mod':'KICAD_FOOTPRINT'}.get(
+                Path(file).suffix.lower(),Path(file).suffix[1:].upper())
+            return Path(file) in merged_paths.values(), options.formats.index(fmt) if fmt in options.formats else len(options.formats), file
+        result.files.sort(key=output_order)
         pending = bool(result.pending_formats)
         if pending:
             result.pending_formats.clear()

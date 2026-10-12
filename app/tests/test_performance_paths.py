@@ -35,7 +35,7 @@ class DownloadPerformanceTests(unittest.TestCase):
         model = SimpleNamespace(name='QFN', uuid='model-id')
         with tempfile.TemporaryDirectory() as folder, \
                 patch('backend.model_reference', return_value=model):
-            result = backend.download_part('C2040', backend.Options(Path(folder), ('STEP', 'OBJ')), api)
+            result = backend.download_part('C2040', backend.Options(Path(folder), ('STEP', 'OBJ'), bind_3d_models=False), api)
         self.assertEqual(result.status, '成功')
         self.assertEqual(api.step_calls, 1)
         self.assertEqual(api.obj_calls, 1)
@@ -46,7 +46,7 @@ class DownloadPerformanceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, \
                 patch('backend.model_reference', return_value=model), \
                 patch.object(api, 'get_raw_3d_model_obj', return_value=None) as fetch:
-            result = backend.download_part('C2040', backend.Options(Path(folder), ('STEP', 'OBJ')), api)
+            result = backend.download_part('C2040', backend.Options(Path(folder), ('STEP', 'OBJ'), bind_3d_models=False), api)
         self.assertEqual(result.status, '部分完成')
         self.assertEqual(fetch.call_count, 1)
         self.assertEqual(len(result.files), 1)
@@ -67,7 +67,7 @@ class DownloadPerformanceTests(unittest.TestCase):
             return backend.Result(part, '成功')
 
         with patch('backend.download_part', side_effect=download):
-            results = backend.download_batch(['C1', 'C2', 'C3'], backend.Options(Path('unused')), api=FakeApi(),
+            results = backend.download_batch(['C1', 'C2', 'C3'], backend.Options(Path('unused'), bind_3d_models=False), api=FakeApi(),
                                               on_result=lambda row, result: callbacks.append((row, result.part)))
         self.assertEqual([result.part for result in results], ['C1', 'C2', 'C3'])
         self.assertEqual([result.status for result in results], ['成功', '成功', '失败'])
@@ -81,14 +81,14 @@ class DownloadPerformanceTests(unittest.TestCase):
             return backend.Result(part, '成功')
 
         with patch('backend.download_part', side_effect=first) as fetch:
-            results = backend.download_batch(['C1', 'C2', 'C3'], backend.Options(Path('unused')), cancelled, api=FakeApi(), workers=1)
+            results = backend.download_batch(['C1', 'C2', 'C3'], backend.Options(Path('unused'), bind_3d_models=False), cancelled, api=FakeApi(), workers=1)
         self.assertEqual(fetch.call_count, 1)
         self.assertEqual([result.status for result in results], ['成功', '已取消', '已取消'])
 
     def test_download_always_bypasses_cached_network_payloads(self):
         with patch('backend.NetworkApi', return_value=FakeApi()) as factory, \
                 patch('backend.download_part', return_value=backend.Result('C1', '成功')):
-            backend.download_batch(['C1'], backend.Options(Path('unused')))
+            backend.download_batch(['C1'], backend.Options(Path('unused'), bind_3d_models=False))
         self.assertFalse(factory.call_args.kwargs['use_cache'])
 
     def test_component_and_model_mirrors_recover_invalid_primary_payloads(self):

@@ -58,7 +58,7 @@ class SymbolStyleTests(unittest.TestCase):
     def test_missing_and_invalid_preferences_use_original_style(self):
         for value in (None, '', 'AD', 'unknown', {}, [], 123):
             self.assertEqual(normalize_symbol_style(value), 'jlc')
-            self.assertEqual(backend.Options(Path('.'), symbol_style=value).symbol_style, 'jlc')
+            self.assertEqual(backend.Options(Path('.'), symbol_style=value, bind_3d_models=False).symbol_style, 'jlc')
         self.assertEqual(normalize_symbol_style('ad'), 'ad')
 
     def test_transparency_pale_backgrounds_and_solid_marks_are_distinct(self):
@@ -250,7 +250,7 @@ class SymbolStyleExportTests(ExportFixture):
                                  keep_individual=True)
                 options = backend.Options(root, ('SCHLIB', 'PCBLIB'),
                     merge_schlib=mode == 'merge', merge_pcblib=mode in ('merge', 'deferred'),
-                    keep_schlib=True, keep_pcblib=True, symbol_style='ad', **extra)
+                    keep_schlib=True, keep_pcblib=True, symbol_style='ad', **extra, bind_3d_models=False)
                 results = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
                 self.assertEqual([r.status for r in results], ['成功', '成功'])
                 files = {Path(f) for r in results for f in r.files if f.endswith('.SchLib')}
@@ -272,7 +272,7 @@ class SymbolStyleExportTests(ExportFixture):
         targets = self.targets(self.root / 'append', ('SCHLIB', 'PCBLIB'))
         original = schematic(self.originals['SCHLIB'], 'C2765186_Symbol')
         options = backend.Options(self.root, ('SCHLIB', 'PCBLIB'), append_mode=True,
-                                  symbol_style='ad', **targets)
+                                  symbol_style='ad', **targets, bind_3d_models=False)
         results = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
         self.assertEqual([r.status for r in results], ['成功', '成功'])
         payload = options.merged_paths()['SCHLIB'].read_bytes()

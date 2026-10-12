@@ -116,7 +116,7 @@ class ExportMatrixTests(ExportFixture):
                 original_project = project.read_bytes() if project else None
                 options = backend.Options(root / 'must-not-create', models + ('SCHLIB', 'PCBLIB'),
                     append_mode=True, keep_individual=keep, **targets,
-                    project_path=str(project) if project else '', import_existing_to_project=project_mode == 'linked')
+                    project_path=str(project) if project else '', import_existing_to_project=project_mode == 'linked', bind_3d_models=False)
                 rows = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
                 self.assert_outputs(options, rows, models, keep)
                 self.assert_libraries(options.merged_paths(), 3)
@@ -134,7 +134,7 @@ class ExportMatrixTests(ExportFixture):
         for number, (formats, models, keep) in enumerate(itertools.product(AD_CHOICES, MODEL_CHOICES, (False, True))):
             with self.subTest(formats=formats, models=models, keep=keep):
                 options = backend.Options(self.root / str(number), models + formats,
-                    'SCHLIB' in formats, 'PCBLIB' in formats, '自定义符号.SchLib', '自定义封装', keep, keep)
+                    'SCHLIB' in formats, 'PCBLIB' in formats, '自定义符号.SchLib', '自定义封装', keep, keep, bind_3d_models=False)
                 rows = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
                 self.assert_outputs(options, rows, models, keep)
                 self.assert_libraries(options.merged_paths(), 2)
@@ -144,7 +144,7 @@ class ExportMatrixTests(ExportFixture):
             with self.subTest(formats=formats, models=models, keep=keep):
                 project = self.project(self.root / str(number))
                 options = backend.Options(self.root / 'unused', models + formats, append_mode=True,
-                                          keep_individual=keep, project_path=str(project))
+                                          keep_individual=keep, project_path=str(project), bind_3d_models=False)
                 rows = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
                 self.assert_outputs(options, rows, models, keep)
                 self.assert_libraries(options.merged_paths(), 2)
@@ -161,7 +161,7 @@ class ExportMatrixTests(ExportFixture):
             with self.subTest(merges=(sch_merge, pcb_merge), keeps=(sch_keep, pcb_keep)):
                 root = self.root / f'{sch_merge}-{pcb_merge}-{sch_keep}-{pcb_keep}'
                 options = backend.Options(root, ('STEP', 'SCHLIB', 'PCBLIB'), sch_merge, pcb_merge,
-                                          'symbols', 'footprints', sch_keep, pcb_keep)
+                                          'symbols', 'footprints', sch_keep, pcb_keep, bind_3d_models=False)
                 row = backend.download_batch(['C2040'], options, api=self.api)[0]
                 self.assertEqual(row.status, '成功')
                 merged = options.merged_paths()
@@ -181,7 +181,7 @@ class ExportMatrixTests(ExportFixture):
                     project_path=str(project), keep_individual=keep,
                     project_schlib_directory=str(root / 'symbols'), project_schlib_name='自选符号.SchLib',
                     project_pcblib_directory=str(root / 'footprints'), project_pcblib_name='自选封装',
-                    project_model_directory=str(root / 'models'), individual_directory=str(root / 'parts'))
+                    project_model_directory=str(root / 'models'), individual_directory=str(root / 'parts'), bind_3d_models=False)
                 rows = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
                 self.assert_outputs(options, rows, ('STEP', 'OBJ'), keep)
                 paths = options.merged_paths()
@@ -218,7 +218,7 @@ class ExportMatrixTests(ExportFixture):
                     project_path=str(project) if has_project else '', keep_individual=True,
                     individual_directory=str(self.root / 'individual') if custom else '',
                     project_schlib_directory=str(self.root / 'inactive-symbols'),
-                    project_schlib_name='../invalid', project_model_directory=str(self.root / 'inactive-models'))
+                    project_schlib_name='../invalid', project_model_directory=str(self.root / 'inactive-models'), bind_3d_models=False)
                 expected = self.root / ('individual' if custom else 'project' if has_project else 'libraries')
                 self.assertEqual(options.output_root(), expected)
                 rows = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
@@ -231,7 +231,7 @@ class ExportMatrixTests(ExportFixture):
     def test_project_default_libraries_are_independent_of_custom_individual_directory(self):
         project = self.project(self.root / 'project')
         options = backend.Options(self.root / 'unused', ('STEP', 'SCHLIB', 'PCBLIB'), append_mode=True,
-            project_path=str(project), keep_individual=True, individual_directory=str(self.root / 'parts'))
+            project_path=str(project), keep_individual=True, individual_directory=str(self.root / 'parts'), bind_3d_models=False)
         rows = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
         self.assert_outputs(options, rows, ('STEP',), True)
         self.assertEqual({file.parent for file in options.merged_paths().values()}, {project.parent})
@@ -240,7 +240,7 @@ class ExportMatrixTests(ExportFixture):
     def test_different_library_directories_use_schematic_folder_for_models(self):
         targets = {**self.targets(self.root / 'symbols', ('SCHLIB',)),
                    **self.targets(self.root / 'footprints', ('PCBLIB',))}
-        options = backend.Options(self.root / 'unused', ('STEP',), append_mode=True, **targets)
+        options = backend.Options(self.root / 'unused', ('STEP',), append_mode=True, **targets, bind_3d_models=False)
         rows = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
         self.assert_outputs(options, rows, ('STEP',), False)
         self.assertEqual({Path(file).parent for row in rows for file in row.files if file.endswith('.step')},
@@ -252,7 +252,7 @@ class ExportMatrixTests(ExportFixture):
         legacy.mkdir(parents=True)
         (legacy / 'older.step').write_bytes(b'keep this older export')
         for formats in (('STEP', 'SCHLIB'), ('SCHLIB',)):
-            options = backend.Options(root, formats, merge_schlib=True, schlib_name='current')
+            options = backend.Options(root, formats, merge_schlib=True, schlib_name='current', bind_3d_models=False)
             row = backend.download_batch(['C2040'], options, api=self.api)[0]
             self.assertEqual(row.status, '成功')
             self.assertEqual(Path(row.folder), root / 'current_3D' if 'STEP' in formats else root)
@@ -265,7 +265,7 @@ class ExportMatrixTests(ExportFixture):
                 targets = self.targets(root, formats)
                 project = self.project(root)
                 options = backend.Options(root / 'unused', (), append_mode=True, **targets,
-                    project_path=str(project), import_existing_to_project=True)
+                    project_path=str(project), import_existing_to_project=True, bind_3d_models=False)
                 result = backend.import_existing_libraries(options)
                 self.assertEqual((result['added'], result['skipped']), (len(formats), 0))
                 original = project.read_bytes()
@@ -280,7 +280,7 @@ class ExportMatrixTests(ExportFixture):
         project = self.project(self.root)
         targets = self.targets(self.root, ('SCHLIB', 'PCBLIB'))
         options = backend.Options(self.root / 'unused', ('STEP',), append_mode=True,
-            **targets, project_path=str(project), import_existing_to_project=True)
+            **targets, project_path=str(project), import_existing_to_project=True, bind_3d_models=False)
         original = project.read_bytes()
         Path(targets['pcblib_target']).write_bytes(b'invalid')
         with self.assertRaises(DownloadError):
@@ -296,14 +296,14 @@ class ExportMatrixTests(ExportFixture):
         with self.assertRaises(DownloadError):
             backend.import_existing_libraries(options)
         with self.assertRaises(DownloadError):
-            backend.download_batch(['C2040'], backend.Options(self.root, append_mode=True), api=self.api)
+            backend.download_batch(['C2040'], backend.Options(self.root, append_mode=True, bind_3d_models=False), api=self.api)
 
     def test_cancel_before_append_commit_preserves_original_libraries_and_project(self):
         targets = self.targets(self.root, ('SCHLIB', 'PCBLIB'))
         project = self.project(self.root)
         old_project = project.read_bytes()
         options = backend.Options(self.root / 'unused', ('STEP',), append_mode=True,
-            **targets, project_path=str(project), import_existing_to_project=True)
+            **targets, project_path=str(project), import_existing_to_project=True, bind_3d_models=False)
         def stop(index, row):
             if row.pending_formats:
                 self.api.cancelled.set()
@@ -321,7 +321,7 @@ class ExportMatrixTests(ExportFixture):
         project = self.project(self.root)
         Path(targets['pcblib_target']).write_bytes(b'invalid')
         options = backend.Options(self.root / 'unused', ('STEP', 'OBJ'), append_mode=True,
-            **targets, project_path=str(project), import_existing_to_project=True)
+            **targets, project_path=str(project), import_existing_to_project=True, bind_3d_models=False)
         rows = backend.download_batch(['C2040', 'C20197'], options, api=self.api)
         self.assertEqual([row.status for row in rows], ['部分完成', '部分完成'])
         self.assertIn('符号库.SchLib', project.read_text(encoding='utf-8'))
@@ -341,7 +341,7 @@ class ExportMatrixTests(ExportFixture):
         project = self.project(self.root)
         original = project.read_bytes()
         options = backend.Options(self.root / 'unused', (), append_mode=True, **targets,
-                                  project_path=str(project), import_existing_to_project=True)
+                                  project_path=str(project), import_existing_to_project=True, bind_3d_models=False)
         with patch('backend.add_libraries_to_project', side_effect=PermissionError('locked')):
             row = backend.download_batch(['C2040'], options, api=self.api)[0]
         self.assertEqual(row.status, '部分完成')
@@ -351,7 +351,7 @@ class ExportMatrixTests(ExportFixture):
 
     def test_project_named_library_appearing_during_download_is_not_overwritten(self):
         project = self.project(self.root)
-        options = backend.Options(self.root / 'unused', ('SCHLIB',), append_mode=True, project_path=str(project))
+        options = backend.Options(self.root / 'unused', ('SCHLIB',), append_mode=True, project_path=str(project), bind_3d_models=False)
         target = options.merged_paths()['SCHLIB']
         def appeared(index, row):
             if row.pending_formats:

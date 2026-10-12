@@ -261,16 +261,16 @@ The legacy reader requires numeric fields even when their value is zero.
 
 
 @traced('export.pcblib', lambda data, part, *a, **kw: {'part': safe_part(part), 'format': 'PCBLIB'}, level='INFO')
-def export_pcblib(data, part, check_cancelled=lambda: None):
-    _, streams = _pcblib_component(data, part, check_cancelled)
+def export_pcblib(data, part, check_cancelled=lambda: None, *, model_assets=None):
+    _, streams = _pcblib_component(data, part, check_cancelled, model_assets=model_assets)
     return compound_file(streams, check_cancelled)
 
 
-def _pcblib_component(data, part, check_cancelled, *, merged=False, footprint_name=None):
+def _pcblib_component(data, part, check_cancelled, *, merged=False, footprint_name=None, model_assets=None):
     from easyeda_import import parse_component
     from altium_ir import pcb
     return pcb(parse_component(data, part, check_cancelled, domains=('footprint',)), check_cancelled,
-               merged=merged, footprint_name=footprint_name)
+               merged=merged, footprint_name=footprint_name, model_assets=model_assets)
 
 
 def merged_name(name, part):
@@ -289,13 +289,13 @@ class MergedLibrary:
         self.footprint_names = {}
         self.reused_count = 0
 
-    @traced('export.merge_component', lambda self, data, part, *a: {'part': safe_part(part), 'format': self.format})
-    def add(self, data, part, check_cancelled):
+    @traced('export.merge_component', lambda self, data, part, *a, **kw: {'part': safe_part(part), 'format': self.format})
+    def add(self, data, part, check_cancelled, *, model_assets=None):
         if self.format == 'SCHLIB':
             entry = _schlib_component(data, part, check_cancelled, merged=True,
                                       merge_pcb=self.merge_pcb, fonts=self.fonts, symbol_style=self.symbol_style)
         else:
-            entry = _pcblib_component(data, part, check_cancelled, merged=True)
+            entry = _pcblib_component(data, part, check_cancelled, merged=True, model_assets=model_assets)
         check_cancelled()
         self.entries[part] = entry
 
@@ -335,6 +335,9 @@ class MergedLibrary:
             entries = [(name, component) for _, name, component in planned]
             streams = {path: value for path, value in entries[0][1].items()
                        if '/' not in path or path.startswith('Library/')}
+            from altium_models import aggregate_models
+            streams, model_components = aggregate_models(streams, [component for _,component in entries])
+            entries = [(name,component) for (name,_),component in zip(entries,model_components)]
             keys = struct.pack('<I', len(entries))
             names = b''
             for name, component in entries:
@@ -362,7 +365,7 @@ def export_linked_schlib(data, part, check_cancelled, *, footprint_name=None, sy
     return compound_file(streams, check_cancelled)
 
 
-def export_linked_pcblib(data, part, check_cancelled, *, footprint_name=None):
+def export_linked_pcblib(data, part, check_cancelled, *, footprint_name=None, model_assets=None):
     """Keep the standalone pair usable when also writing a combined library."""
-    _, streams = _pcblib_component(data, part, check_cancelled, merged=True, footprint_name=footprint_name)
+    _, streams = _pcblib_component(data, part, check_cancelled, merged=True, footprint_name=footprint_name, model_assets=model_assets)
     return compound_file(streams, check_cancelled)

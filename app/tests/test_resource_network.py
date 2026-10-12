@@ -117,7 +117,7 @@ class ResourceNetworkTests(unittest.TestCase):
                 self.route_models(base)
                 parts = [f'C{index}' for index in range(1, count + 1)]
                 callbacks = []
-                results = backend.download_batch(parts, backend.Options(self.folder / str(count), formats),
+                results = backend.download_batch(parts, backend.Options(self.folder / str(count), formats, bind_3d_models=False),
                     api=backend.NetworkApi(use_cache=False), workers=workers,
                     on_result=lambda index, result: callbacks.append((index, result.part)))
                 self.assertEqual([result.status for result in results], ['成功'] * count,
@@ -294,7 +294,7 @@ class ResourceNetworkTests(unittest.TestCase):
         existing.write_bytes(b'previous complete file')
         cancelled = threading.Event()
         with ThreadPoolExecutor(max_workers=1) as pool:
-            pending = pool.submit(backend.download_batch, parts, backend.Options(self.folder / 'exports'),
+            pending = pool.submit(backend.download_batch, parts, backend.Options(self.folder / 'exports', bind_3d_models=False),
                                   cancelled, api=backend.NetworkApi(cancelled, use_cache=False), workers=1)
             self.assertTrue(limited.wait(5))
             cancelled.set()

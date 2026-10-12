@@ -55,6 +55,39 @@ class KiCadUiTests(unittest.TestCase):
         self.assertEqual(self.window.selected_formats(), ('STEP',))
         self.assertFalse(self.window.kicad_symbol_box.isChecked())
         self.assertFalse(self.window.kicad_footprint_box.isChecked())
+        self.assertTrue(self.window.bind_3d_box.isChecked())
+        self.assertEqual(self.window.kicad_3d_mode_box.currentData(),'embedded')
+        self.assertTrue(self.window.model_options.isHidden())
+        self.window.pcblib_box.setChecked(True)
+        self.assertFalse(self.window.model_options.isHidden())
+
+    def test_model_binding_and_compatibility_survive_restart_and_lock_in_batch(self):
+        w = self.window
+        w.export_target_box.setCurrentIndex(w.export_target_box.findData('kicad'))
+        w.kicad_footprint_box.setChecked(True)
+        w.kicad_3d_mode_box.setCurrentIndex(w.kicad_3d_mode_box.findData('external'))
+        w.bind_3d_box.setChecked(False)
+        self.assertTrue(w.save_settings())
+        restored = self.create_window()
+        self.assertFalse(restored.export_options().bind_3d_models)
+        self.assertEqual(restored.export_options().kicad_3d_mode,'external')
+        restored.bind_3d_box.setChecked(True)
+        restored.set_running(True)
+        self.assertFalse(restored.bind_3d_box.isEnabled())
+        self.assertFalse(restored.kicad_3d_mode_box.isEnabled())
+
+    def test_batch_summarizes_model_notices_once_with_copyable_part_numbers(self):
+        from backend import Result
+        result = Result('C20197','成功',model_diagnostics=[
+            {'severity':'warning','code':'model_far_from_footprint','message':'官方模型位置明显远离封装'}])
+        with patch.object(main,'notify') as notify:
+            self.window.complete_batch([result])
+            notify.assert_called_once()
+            actions = notify.call_args.kwargs['actions']
+            actions[0][1]()
+            self.assertEqual(QApplication.clipboard().text(),'C20197')
+            actions[1][1]()
+            self.assertIn('官方模型位置明显远离封装',QApplication.clipboard().text())
 
     def test_kicad_only_selection_and_library_name_survive_restart(self):
         w = self.window

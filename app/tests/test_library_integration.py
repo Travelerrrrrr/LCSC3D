@@ -156,7 +156,7 @@ class LibraryIntegrationTests(unittest.TestCase):
         api.get_cad_data_of_component = lambda part: self.data[part]
         options = backend.Options(self.root/'out', ('SCHLIB', 'PCBLIB'), True, True,
                                   keep_schlib=True, keep_pcblib=True, schlib_target=str(files['SCHLIB']),
-                                  pcblib_target=str(files['PCBLIB']), project_path=str(project))
+                                  pcblib_target=str(files['PCBLIB']), project_path=str(project), bind_3d_models=False)
         results = backend.download_batch(['C2040', 'C2765186'], options, api=api)
         self.assertEqual([r.status for r in results], ['成功', '成功'])
         self.assertTrue(all(len(r.files) == 4 for r in results))
@@ -179,7 +179,7 @@ class LibraryIntegrationTests(unittest.TestCase):
     def test_individual_output_failure_is_not_hidden_by_successful_merge(self):
         api = backend.NetworkApi()
         api.get_cad_data_of_component = lambda part: self.data[part]
-        options = backend.Options(self.root/'out', ('SCHLIB',), True, keep_schlib=True)
+        options = backend.Options(self.root/'out', ('SCHLIB',), True, keep_schlib=True, bind_3d_models=False)
         original_write = backend.atomic_write
         def write(path, payload):
             if path.parent.name.endswith('C2040'):
@@ -197,7 +197,7 @@ class LibraryIntegrationTests(unittest.TestCase):
         target.write_bytes(original)
         api = backend.NetworkApi()
         api.get_cad_data_of_component = lambda part: self.data[part]
-        options = backend.Options(self.root, ('SCHLIB',), True, keep_schlib=True, schlib_target=str(target))
+        options = backend.Options(self.root, ('SCHLIB',), True, keep_schlib=True, schlib_target=str(target), bind_3d_models=False)
         result = backend.download_batch(['C2040'], options, api=api)[0]
         self.assertEqual(result.status, '失败')
         self.assertIn('路径相同', result.message)

@@ -46,7 +46,7 @@ from branding import BrandLogo
 from international_store import storefront_url
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
-VERSION = '2.3.0'
+VERSION = '2.4.0-demo.1'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
@@ -468,7 +468,7 @@ class MainWindow(FramelessMainWindow):
         self.schlib_box = QCheckBox('SchLib')
         self.schlib_box.setToolTip(ui_text('导出原生 AD 符号库，保留引脚编号及封装引用'))
         self.pcblib_box = QCheckBox('PcbLib')
-        self.pcblib_box.setToolTip(ui_text('导出原生 AD 封装库，保留焊盘、钻孔与槽孔；不内嵌 3D 模型'))
+        self.pcblib_box.setToolTip(ui_text('导出原生 AD 封装库，保留焊盘、钻孔与槽孔；可内嵌 STEP 模型'))
         for widget in (self.schlib_box, self.pcblib_box):
             ad_row.addWidget(widget)
         ad_row.addSpacing(12)
@@ -497,7 +497,7 @@ class MainWindow(FramelessMainWindow):
         self.kicad_symbol_box = QCheckBox(ui_text('符号库'))
         self.kicad_symbol_box.setToolTip(ui_text('导出 KiCad 8+ .kicad_sym 符号库；保留多单元与引脚编号'))
         self.kicad_footprint_box = QCheckBox(ui_text('封装库'))
-        self.kicad_footprint_box.setToolTip(ui_text('导出 KiCad 8+ .pretty 封装库；保留焊盘和钻孔，暂不绑定 3D'))
+        self.kicad_footprint_box.setToolTip(ui_text('导出 KiCad .pretty 封装库，保留焊盘、钻孔与官方模型放置'))
         self.kicad_merge_symbol_box = QCheckBox(ui_text('合并符号库'))
         self.kicad_merge_footprint_box = QCheckBox(ui_text('合并封装库'))
         self.kicad_symbol_name_input = QLineEdit('LCSC3D')
@@ -546,6 +546,21 @@ class MainWindow(FramelessMainWindow):
         kicad_merge_layout.addWidget(kicad_hint)
         kicad_layout.addWidget(self.kicad_merge_options)
         output_layout.addWidget(self.kicad_options)
+        self.model_options = QWidget()
+        model_row = QHBoxLayout(self.model_options)
+        model_row.setContentsMargins(0, 0, 0, 0)
+        self.bind_3d_box = QCheckBox(ui_text('封装关联 3D 模型'))
+        self.bind_3d_box.setChecked(True)
+        self.bind_3d_box.setToolTip(ui_text('按官方参数关联模型；开启后自动获取所需 STEP，不依赖单独下载选项'))
+        model_row.addWidget(self.bind_3d_box)
+        self.kicad_3d_mode_box = QComboBox()
+        self.kicad_3d_mode_box.setAccessibleName(ui_text('KiCad 模型兼容模式'))
+        self.kicad_3d_mode_box.addItem(ui_text('KiCad 9/10 · 内嵌模型'), 'embedded')
+        self.kicad_3d_mode_box.addItem(ui_text('KiCad 8 · 外部模型'), 'external')
+        model_row.addWidget(self.kicad_3d_mode_box)
+        model_row.addStretch()
+        output_layout.addWidget(self.model_options)
+        self.bind_3d_box.toggled.connect(self.update_merge_controls)
         self.export_target_box.currentIndexChanged.connect(self.export_target_changed)
         self.merge_schlib_box = QCheckBox(ui_text('合并 .SchLib'))
         self.merge_pcblib_box = QCheckBox(ui_text('合并 .PcbLib'))
@@ -825,6 +840,9 @@ class MainWindow(FramelessMainWindow):
         self.obj_box.setChecked(bool(settings.get('obj')))
         self.schlib_box.setChecked(bool(settings.get('schlib')))
         self.pcblib_box.setChecked(bool(settings.get('pcblib')))
+        self.bind_3d_box.setChecked(settings.get('bind_3d_models', True) is not False)
+        self.kicad_3d_mode_box.setCurrentIndex(self.kicad_3d_mode_box.findData(
+            'external' if settings.get('kicad_3d_mode') == 'external' else 'embedded'))
         self.kicad_symbol_box.setChecked(settings.get('kicad_symbol') is True)
         self.kicad_footprint_box.setChecked(settings.get('kicad_footprint') is True)
         self.kicad_merge_symbol_box.setChecked(settings.get('kicad_merge_symbols', settings.get('kicad_merge')) is True)
@@ -891,6 +909,8 @@ class MainWindow(FramelessMainWindow):
             write_settings(SETTINGS_PATH, {'destination': self.path_input.text(), 'step': self.step_box.isChecked(),
                 'obj': self.obj_box.isChecked(), 'schlib': self.schlib_box.isChecked(),
                 'pcblib': self.pcblib_box.isChecked(),
+                'bind_3d_models': self.bind_3d_box.isChecked(),
+                'kicad_3d_mode': self.kicad_3d_mode_box.currentData(),
                 'kicad_symbol': self.kicad_symbol_box.isChecked(),
                 'kicad_footprint': self.kicad_footprint_box.isChecked(),
                 'export_target': self.export_target_box.currentData(),
@@ -1412,6 +1432,9 @@ class MainWindow(FramelessMainWindow):
         self.export_target_box.setEnabled(not self.batch_running)
         self.ad_format_options.setVisible(ad)
         self.kicad_options.setVisible(not ad)
+        self.bind_3d_box.setEnabled(not self.batch_running)
+        self.kicad_3d_mode_box.setVisible(not ad)
+        self.kicad_3d_mode_box.setEnabled(not self.batch_running and self.bind_3d_box.isChecked())
         for widget in (self.kicad_symbol_box, self.kicad_footprint_box):
             widget.setEnabled(not self.batch_running and not ad)
         kicad_enabled = not self.batch_running and not ad
@@ -1446,6 +1469,7 @@ class MainWindow(FramelessMainWindow):
             box.setEnabled(enabled)
             keep.setEnabled(enabled and box.isChecked())
             name.setEnabled(enabled and box.isChecked())
+        self.model_options.setVisible(self.pcblib_box.isChecked() if ad else self.kicad_footprint_box.isChecked())
         targets = [self.export_targets[key] for key in ('schlib_target', 'pcblib_target') if self.export_targets.get(key)]
         summary = [ui_message('追加到 {0} 份已有库', len(targets))] if targets else []
         if self.export_targets.get('project_path') and not targets:
@@ -1545,6 +1569,8 @@ class MainWindow(FramelessMainWindow):
                        kicad_merge_symbols=kicad_merge and self.kicad_symbol_box.isChecked() and self.kicad_merge_symbol_box.isChecked(),
                        kicad_merge_footprints=kicad_merge and self.kicad_footprint_box.isChecked() and self.kicad_merge_footprint_box.isChecked(),
                        kicad_electrical_policy=self.kicad_electrical_box.currentData(),
+                       bind_3d_models=self.bind_3d_box.isChecked(),
+                       kicad_3d_mode=self.kicad_3d_mode_box.currentData(),
                        kicad_symbol_name=self.kicad_symbol_name_input.text().strip() if kicad_merge and self.kicad_merge_symbol_box.isChecked() else '',
                        kicad_footprint_name=self.kicad_footprint_name_input.text().strip() if kicad_merge and self.kicad_merge_footprint_box.isChecked() else '',
                        keep_kicad_symbols=kicad_merge and self.keep_kicad_symbol_box.isChecked(),
@@ -1672,6 +1698,8 @@ class MainWindow(FramelessMainWindow):
         item.setToolTip(result.message)
         role = {ui_text('成功'): 'success', ui_text('部分完成'): 'warning', ui_text('失败'): 'error', ui_text('无模型'): 'warning', ui_text('已取消'): 'muted'}.get(result.status, 'text')
         item.setForeground(QColor(theme_manager().tokens[role]))
+        if result.model_diagnostics and any(d.get('severity') == 'warning' for d in result.model_diagnostics):
+            item.setForeground(QColor(theme_manager().tokens['warning']))
         info = self.component_info.get(result.part, {})
         title = result.title or info.get('title', '')
         model = result.model or info.get('model', '')
@@ -1691,6 +1719,21 @@ class MainWindow(FramelessMainWindow):
         cancelled = sum(r.status == ui_text('已取消') for r in results)
         self.run_status.setText(ui_message('完成 · 成功 {0} · 部分完成 {1} · 失败或无模型 {2} · 取消 {3}', ok, partial, failed, cancelled))
         self.summary.setText(ui_message('{0} / {1} 成功', ok, len(results)))
+        affected = [r for r in results if any(d.get('severity') in ('warning', 'error') for d in r.model_diagnostics)]
+        if affected:
+            previous = getattr(self, '_model_toast', None)
+            if previous is not None:
+                try:
+                    previous.close()
+                except RuntimeError:
+                    pass
+            details = '\n'.join(r.part + ' · ' + '；'.join(
+                ui_text(d['message']) for d in r.model_diagnostics if d.get('severity') in ('warning', 'error')) for r in affected)
+            numbers = '\n'.join(r.part for r in affected)
+            self._model_toast = notify(self, ui_text('3D 模型提醒'),
+                ui_message('本批 {0} 个元件需要核对 3D 模型，具体原因见器件结果。', len(affected)),
+                severity='warning', actions=((ui_text('复制元件编号'), lambda: QApplication.clipboard().setText(numbers)),
+                                            (ui_text('复制详情'), lambda: QApplication.clipboard().setText(details))))
         self.batch_done.emit()
 
     def worker_finished(self):
@@ -2072,12 +2115,12 @@ class MainWindow(FramelessMainWindow):
             '左侧「设置」可分别选择商城与检查更新是否使用系统代理，并调整日志等级；默认 Debug。「打开日志」可打开日志目录。<br><br>'
             '可保存官方 STEP、OBJ，并导出原生 AD SchLib 符号库、PcbLib 封装库；不导出 JSON 或 SVG。<br>'
             '「导出到」选择 AD 或 KiCad，仅显示对应配置。KiCad 与 AD 使用相同的合并开关、分别命名和独立器件选项，KiCad 不提供追加；引脚类型默认跟随源数据，不支持的类型使用未指定，也可统一覆盖。矩形统一直角，实心填充使用主体背景颜色。<br>'
-            'KiCad 8+：添加 .kicad_sym 和 .pretty 时，封装库昵称须与导出库名一致。同名库按本次选择整体覆盖，.pretty 中未选中的旧封装会移除；暂不支持追加、自动注册工程库或自动绑定 3D。KiCad 符号预览固定使用 KiCad 风格，切回 AD 恢复原有风格。<br>'
+            'KiCad：添加 .kicad_sym 和 .pretty 时，封装库昵称须与导出库名一致。同名库按本次选择整体覆盖；暂不支持追加或自动注册工程库。3D 默认内嵌，适用于 KiCad 9/10；KiCad 8 请选外置模型模式，并整体保留 .pretty 文件夹。<br>'
             'SchLib / PcbLib 可分别勾选合并并自定义库名，合并文件保存在所选目录根部；默认逐器件导出。<br>'
             'Lib「合并」「追加」互斥，勾选后显示配置。未勾选「独立导出器件」时，3D 文件集中到 SchLib 旁的“库名_3D”文件夹；仅有 PcbLib 时跟随其名称。<br>'
             '「追加」仅指定 PCB 工程时，可分别设置 3D、SchLib、PcbLib 的目录和库名；独立器件目录留空时使用工程所在文件夹。<br>在追加配置页指定已有库和工程后，点击「将指定库导入到PCB工程」直接导入，无须下载器件。<br>'
             '相同 footprint 自动复用并同步符号引用；同名不同内容加序号区分。Lib 文件和库内名称不自动追加器件编号。<br>'
-            'AD 库保留引脚、焊盘和孔数据，遇到不支持的图元会提示失败；PcbLib 不内嵌 3D 模型。<br>'
+            '「封装关联 3D 模型」默认开启，按官方参数放置；AD PcbLib 内嵌 STEP。无需另勾 STEP 下载。模型参数无效或几何基准不一致时跳过模型，保留二维封装并提醒；可疑但有效的参数原样导出。<br>'
             '未合并的文件单独保存到“器件名_编号”目录，AD 库文件按元件型号命名；模型与 AD 库下载时覆盖已有同名文件。<br>'
             '3D 预览由 LCSC3D 在本地渲染官方模型；拖动旋转，滚轮缩放，右键拖动平移。<br><br>'
             '右侧上方可切换「3D 模型 / 符号 / 封装 / 商品图片」，无需先下载。<br>'
@@ -2205,6 +2248,7 @@ def main():
     parser.add_argument('--self-test-export', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-resources', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-kicad', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-models', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--capture-docs', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-material', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--update-ack', metavar='PLAN', help=argparse.SUPPRESS)
@@ -2237,7 +2281,7 @@ def main():
     logging.getLogger().setLevel(logging.ERROR)
     test_destination = next((value for value in (args.self_test, args.self_test_ad, args.self_test_favorites,
                                                   args.self_test_store_live, args.self_test_settings, args.self_test_backups,
-                                                  args.self_test_export, args.self_test_resources, args.self_test_kicad,
+                                                  args.self_test_export, args.self_test_resources, args.self_test_kicad, args.self_test_models,
                                                   args.capture_docs, args.self_test_material) if value), None)
     configure_logging('DEBUG' if test_destination else initial_log_level(SETTINGS_PATH), version=VERSION,
                       directory=Path(test_destination) / 'logs' if test_destination else None)
@@ -2279,6 +2323,10 @@ def main():
     if args.self_test_kicad:
         from kicad_selftest import start
         start(window, args.self_test_kicad)
+        return app.exec()
+    if args.self_test_models:
+        from model_selftest import start
+        start(window, args.self_test_models)
         return app.exec()
     if args.capture_docs:
         from docs_capture import start

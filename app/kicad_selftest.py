@@ -125,6 +125,7 @@ def start(window, folder):
                 window.lib_append_box.setChecked(False)
                 window.lib_merge_box.setChecked(name in ('ad-layout','ad-replace','via-ad'))
                 window.step_box.setChecked(name == 'copies')
+                window.bind_3d_box.setChecked(False)
                 window.obj_box.setChecked(False)
                 window.schlib_box.setChecked(ad)
                 window.pcblib_box.setChecked(ad)

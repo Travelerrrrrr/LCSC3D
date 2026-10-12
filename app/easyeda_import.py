@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from eda_geometry import NUMBER, number, points, path_points, pad_outline
 from eda_ir import (D, Point, Stroke, TextStyle, Graphic, Pin, Pad, Via, Property, check_via,
-                    SymbolUnit, Symbol, Footprint, Model3D, Diagnostic, Component,
+                    SymbolUnit, Symbol, Footprint, ModelPlacement, Model3D, Diagnostic, Component,
                     Extension, decimal)
 from errors import DownloadError, Cancelled, EdaError
 from app_logging import traced, record_error, log_event, safe_part
@@ -298,8 +298,14 @@ def footprint_item(shape, c, check):
         return Graphic('rect', (c.point(f[1], decimal(f[2]) + decimal(f[4])),), size,
                        stroke=Stroke(width), fill='#000000' if filled else 'none', layer=layer(f[5]), source_id=f[6])
     if kind == 'SVGNODE':
-        node = document(shape.partition('~')[2])
-        if document(node.get('attrs')).get('c_etype') == 'outline3D':
+        # Model-node failures belong to model3d diagnostics and must not erase
+        # otherwise usable pads. import_models checks these records separately.
+        try:
+            node = document(shape.partition('~')[2])
+            attrs = document(node.get('attrs'))
+        except DownloadError:
+            return None
+        if attrs.get('c_etype') in (None, 'outline3D'):
             return None
     return Graphic('unsupported', source_kind=kind, extensions=source_extension({'kind': kind, 'record': shape}))
 
@@ -321,6 +327,64 @@ def import_footprint(data, part, check):
                 code='invalid_source_primitive', domain='footprint', primitive=shape.split('~')[0]) from exc
     return Footprint(str(package.get('title') or params.get('package') or part + '_Footprint'),
                      tuple(items), str(head.get('licence') or ''))
+
+
+def import_models(data, package, head):
+    """Parse each explicit Standard model node, retaining failures per node."""
+    models, diagnostics = [], []
+    def issue(code, message, source_id=''):
+        diagnostics.append(Diagnostic('model3d', 'error', code, message, source_id=source_id))
+    doc = document(package.get('dataStr'))
+    records = doc.get('shape') or []
+    if not isinstance(records, list):
+        issue('invalid_model_nodes', '3D 模型关联列表无效')
+        return (), tuple(diagnostics)
+    for shape in records:
+        if not isinstance(shape, str) or not shape.startswith('SVGNODE~'):
+            continue
+        identity = ''
+        if len(models) >= 128:
+            issue('too_many_models','封装关联的 3D 模型数量超出支持范围')
+            break
+        try:
+            node = document(shape.partition('~')[2])
+            attrs = document(node.get('attrs'))
+            if attrs.get('c_etype') not in (None, 'outline3D'):
+                continue
+            identity = str(attrs.get('id') or '')
+            identifier = attrs.get('uuid')
+            if not isinstance(identifier, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', identifier):
+                raise DownloadError('3D 模型资源编号缺失或无效')
+            model = Model3D(identifier, str(attrs.get('title') or 'model'), source_id=identity,
+                            extensions=source_extension({'placements': [attrs]}))
+            models.append(model)
+            def vector(value, count):
+                if not isinstance(value, str) or len(value.split(',')) != count:
+                    raise DownloadError('3D 模型放置参数缺失或格式无效')
+                return tuple(decimal(v.strip()) for v in value.split(','))
+            x,y = vector(attrs.get('c_origin'),2)
+            angles = vector(attrs.get('c_rotation'),3)
+            if any(k not in attrs or str(attrs[k]).strip() == '' for k in ('z','c_width','c_height')):
+                raise DownloadError('3D 模型高度或尺寸参数缺失')
+            if 'x' not in head or 'y' not in head:
+                raise DownloadError('封装原点缺失，无法确定 3D 放置')
+            size = (length(attrs['c_width']),length(attrs['c_height']))
+            if min(size) <= 0:
+                raise DownloadError('3D 模型声明尺寸必须大于零')
+            placement = ModelPlacement(((x-decimal(head['x']))*UNIT,(decimal(head['y'])-y)*UNIT,
+                                        length(attrs['z'])),angles,size)
+            models[-1] = replace(model,placement=placement)
+        except (DownloadError, ValueError, TypeError, KeyError) as exc:
+            issue('invalid_model_placement', str(exc), identity)
+    if not models and not diagnostics:
+        try:
+            reference = model_reference(data)
+            if reference is not None:
+                models.append(Model3D(reference.uuid,reference.name))
+                issue('missing_model_placement', '官方关联了模型，但缺少可解释的放置参数')
+        except DownloadError as exc:
+            issue('invalid_model_reference', str(exc))
+    return tuple(models),tuple(diagnostics)
 
 
 @traced('eda.import', lambda data, part, *a, **kw: {'part': safe_part(part), 'domains': kw.get('domains', ('symbol', 'footprint'))})
@@ -353,15 +417,11 @@ def parse_component(data, part, check_cancelled=lambda: None, *, domains=('symbo
             diagnostics.append(Diagnostic(domain, 'error', getattr(exc, 'eda_code', 'invalid_source'), str(exc),
                 primitive=getattr(exc, 'eda_primitive', ''), source_id=getattr(exc, 'eda_source_id', '')))
     try:
-        reference = model_reference(data)
-        if reference:
-            placements = [document(s.partition('~')[2]).get('attrs', {})
-                          for s in document(package.get('dataStr')).get('shape', [])
-                          if isinstance(s, str) and s.startswith('SVGNODE~')]
-            component = replace(component, models=(Model3D(reference.uuid, reference.name,
-                                extensions=source_extension({'placements': placements})),))
-    except (DownloadError, TypeError, ValueError):
-        pass  # Model download reports its own errors independently of 2D export.
+        models, model_diagnostics = import_models(data, package, head)
+        component = replace(component, models=models)
+        diagnostics.extend(model_diagnostics)
+    except (DownloadError, TypeError, ValueError) as exc:
+        diagnostics.append(Diagnostic('model3d', 'error', 'invalid_model_reference', str(exc)))
     log_event('DEBUG', 'eda.import_result', part=safe_part(part), domains=domains,
               symbol_units=len(component.symbol.units) if component.symbol else 0,
               footprint_items=len(component.footprint.items) if component.footprint else 0,

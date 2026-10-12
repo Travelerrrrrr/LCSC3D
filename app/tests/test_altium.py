@@ -195,7 +195,7 @@ class LibraryTests(unittest.TestCase):
         data['packageDetail']['dataStr']['shape'] = [s for s in data['packageDetail']['dataStr']['shape'] if not s.startswith('SVGNODE~')]
         data['packageDetail']['dataStr']['head'].pop('uuid_3d', None)
         with tempfile.TemporaryDirectory() as folder:
-            options = Options(Path(folder), ('SCHLIB', 'PCBLIB'))
+            options = Options(Path(folder), ('SCHLIB', 'PCBLIB'), bind_3d_models=False)
             result = download_part('C2765186', options, Api(data))
             self.assertEqual(result.status, '成功', result.message)
             self.assertEqual({Path(f).suffix for f in result.files}, {'.SchLib', '.PcbLib'})
@@ -216,7 +216,7 @@ class LibraryTests(unittest.TestCase):
     def test_missing_model_does_not_block_libraries_in_mixed_selection(self):
         data = fixture()
         with tempfile.TemporaryDirectory() as folder, patch('backend.model_reference', return_value=None):
-            result = download_part('C2765186', Options(Path(folder), ('STEP', 'SCHLIB', 'PCBLIB')), Api(data))
+            result = download_part('C2765186', Options(Path(folder), ('STEP', 'SCHLIB', 'PCBLIB'), bind_3d_models=False), Api(data))
             self.assertEqual(result.status, '部分完成')
             self.assertEqual(len(result.files), 2)
             self.assertIn('STEP', result.message)
@@ -231,7 +231,7 @@ class LibraryTests(unittest.TestCase):
         data = fixture()
         data['packageDetail']['dataStr']['shape'].append('UNSUPPORTED~geometry')
         with tempfile.TemporaryDirectory() as folder:
-            result = download_part('C2765186', Options(Path(folder), ('SCHLIB', 'PCBLIB')), Api(data))
+            result = download_part('C2765186', Options(Path(folder), ('SCHLIB', 'PCBLIB'), bind_3d_models=False), Api(data))
             self.assertEqual(result.status, '部分完成')
             self.assertEqual(len(result.files), 1)
             self.assertFalse(list(Path(folder).rglob('*.PcbLib')))

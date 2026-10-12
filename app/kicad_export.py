@@ -32,8 +32,11 @@ def export_batch(results, entries, options, check):
         cancelled = False
         try:
             check()
+            model_assets = {key:payload for r in rows for key,payload in
+                            (entries[r.part][2] if len(entries[r.part]) > 2 else {}).items()} if options.bind_3d_models else None
             artifacts, errors = build_library([entries[r.part][0] for r in rows], formats, 'LCSC3D', check,
                 electrical_policy=options.kicad_electrical_policy,
+                model_assets=model_assets, model_mode=options.kicad_3d_mode,
                 symbol_libraries=libraries(options.kicad_merge_symbols, 'KICAD_SYMBOL'),
                 footprint_libraries=libraries(options.kicad_merge_footprints, 'KICAD_FOOTPRINT'))
             keep = {fmt for fmt, merge, enabled in (
@@ -45,12 +48,13 @@ def export_batch(results, entries, options, check):
                 separate, failures = build_library([entries[r.part][0] for r in rows],
                     {part: tuple(f for f in selected if f in keep) for part, selected in formats.items()}, 'LCSC3D', check,
                     electrical_policy=options.kicad_electrical_policy,
+                    model_assets=model_assets, model_mode=options.kicad_3d_mode,
                     symbol_libraries=libraries(False, 'KICAD_SYMBOL'),
                     footprint_libraries=libraries(False, 'KICAD_FOOTPRINT'), footprint_references=references)
                 artifacts.extend(separate)
                 errors.update(failures)
                 # Publish every footprint before symbols, including retained copies.
-                artifacts.sort(key=lambda a: a.format != 'KICAD_FOOTPRINT')
+                artifacts.sort(key=lambda a: {'KICAD_MODEL':0,'KICAD_FOOTPRINT':1,'KICAD_SYMBOL':2}[a.format])
             conversion_errors = set(errors)
             stage = 'write'
             written = commit_library(root, artifacts, check, overwrite=True)
@@ -58,7 +62,7 @@ def export_batch(results, entries, options, check):
                 for row in rows:
                     if row.part in artifact.parts:
                         row.files.append(path)
-                        if artifact.format not in row.completed_formats:
+                        if artifact.format in FORMATS and artifact.format not in row.completed_formats:
                             row.completed_formats.append(artifact.format)
                             log_event('INFO', 'download.format_completed', part=safe_part(row.part),
                                       format=artifact.format, bytes=len(artifact.payload))

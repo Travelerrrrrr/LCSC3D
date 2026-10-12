@@ -6,6 +6,7 @@ are flattened at 0.00127 mm tolerance. Critical unsupported geometry is rejected
 from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass
+import base64
 from decimal import ROUND_HALF_UP
 import hashlib
 import json
@@ -51,6 +52,12 @@ BODY_LAYERS = frozenset({'component_shape', 'top_component_shape', 'top_componen
 def n(value):
     result = decimal(value).quantize(D('0.000001'), rounding=ROUND_HALF_UP)
     return '0' if not result else format(result, 'f').rstrip('0').rstrip('.')
+
+
+def model_number(value):
+    """Model scale is dimensionless: preserve small positive values exactly."""
+    result = decimal(value)
+    return '0' if not result else format(result.normalize(),'f')
 
 
 def q(value):
@@ -297,11 +304,16 @@ def pad_definition(item, check):
 
 
 @traced('export.kicad_footprint', lambda component, *a, **kw: {'part': safe_part(component.part), 'format': 'KICAD_FOOTPRINT', 'stage': 'convert'}, level='INFO')
-def footprint_definition(component, name, check=lambda: None):
+def footprint_definition(component, name, check=lambda: None, *, model_assets=None, model_mode='embedded'):
+    if model_assets is None and any(m.transform for m in component.models):
+        raise DownloadError('已解析的模型缺少资源，无法写入 KiCad 封装')
     footprint = KICAD.require(component, 'footprint')
+    from model_export import resolved_models
+    models = list(resolved_models(component, model_assets)) if model_assets is not None else []
+    version = 20241229 if models and model_mode == 'embedded' else FOOTPRINT_VERSION
     description = '\n'.join(filter(None, (component.description, 'Source: ' + component.source,
                                          'LibraryLicence: ' + footprint.licence if footprint.licence else '')))
-    result = [f'(footprint {q(name)} (version {FOOTPRINT_VERSION}) (generator lcsc3d) (layer "F.Cu")',
+    result = [f'(footprint {q(name)} (version {version}) (generator lcsc3d) (layer "F.Cu")',
               f'(descr {q(description)}) (tags {q(component.part)})',
               '(fp_text reference "REF**" (at 0 0) (layer "F.SilkS") hide (effects (font (size 1 1) (thickness 0.15))))',
               f'(fp_text value {q(name)} (at 0 0) (layer "F.Fab") hide (effects (font (size 1 1) (thickness 0.15))))']
@@ -374,6 +386,29 @@ def footprint_definition(component, name, check=lambda: None):
             if item.kind != 'region' and item.stroke.width > 0:
                 for first, last in zip(path, path[1:]):
                     result.append(f'(fp_line (start {p(first, pcb=True)}) (end {p(last, pcb=True)}) {stroke} (layer {target}))')
+    if models:
+        from model_geometry import euler_xyz
+        if model_mode not in ('embedded', 'external'):
+            raise DownloadError('KiCad 模型兼容模式无效')
+        embedded = {}
+        for model,asset,raw in models:
+            check()
+            if len(model.scale) != 3 or min(model.scale) <= 0:
+                raise DownloadError('KiCad 模型缩放数据无效')
+            rotation = [[float(model.transform[i*4+j])/float(model.scale[j]) for j in range(3)] for i in range(3)]
+            angles = euler_xyz(rotation)
+            filename = model.asset_id + '.step'
+            path = ('kicad-embed://' if model_mode == 'embedded' else 'LCSC3D.3dshapes/') + filename
+            result.append(f'(model {q(path)} (offset (xyz {" ".join(n(model.transform[i*4+3]) for i in range(3))})) '
+                          f'(scale (xyz {" ".join(model_number(v) for v in model.scale)})) '
+                          f'(rotate (xyz {" ".join(n(-v) for v in angles)})))')
+            if model_mode == 'embedded' and filename not in embedded:
+                import zstandard
+                encoded = base64.b64encode(zstandard.ZstdCompressor(level=15,write_content_size=True).compress(raw)).decode('ascii')
+                embedded[filename] = f'(file (name {q(filename)}) (type model) (data |{encoded}|) (checksum {q(model.asset_id)}))'
+        if embedded:
+            result.append('(embedded_fonts no)')
+            result.append('(embedded_files '+ '\n'.join(embedded.values()) + ')')
     result.append(')')
     return ('\n'.join(result) + '\n').encode('utf-8')
 
@@ -417,7 +452,8 @@ class Artifact:
 
 
 def build_library(components, requested, name, check=lambda: None, *, electrical_policy='source',
-                  symbol_libraries=None, footprint_libraries=None, footprint_references=None):
+                  symbol_libraries=None, footprint_libraries=None, footprint_references=None,
+                  model_assets=None, model_mode='embedded'):
     """Plan names and links before producing any file; report errors per domain."""
     name = library_name(name)
     artifacts, errors, footprint_names, used_names, known = [], {}, dict(footprint_references or {}), set(), {}
@@ -429,14 +465,15 @@ def build_library(components, requested, name, check=lambda: None, *, electrical
         try:
             footprint = require_domain(component, 'footprint')
             library = footprint_libraries[component.part]
-            signature = (library.casefold(), semantic_key(footprint))
+            from model_export import model_key, resolved_models
+            signature = (library.casefold(), semantic_key(footprint), model_key(component) if model_assets is not None else ())
             target = known.get(signature)
             if target is None:
                 candidate = identifier(footprint.name, component.part + '_Footprint')
                 target, index = candidate, 2
                 while (library.casefold(), target.casefold()) in used_names:
                     target, index = candidate + '_' + str(index), index + 1
-                payload = footprint_definition(component, target, check)
+                payload = footprint_definition(component, target, check, model_assets=model_assets, model_mode=model_mode)
                 used_names.add((library.casefold(), target.casefold()))
                 known[signature] = target
                 artifacts.append(Artifact(library + '.pretty/' + target + '.kicad_mod', payload, 'KICAD_FOOTPRINT', (component.part,)))
@@ -445,6 +482,15 @@ def build_library(components, requested, name, check=lambda: None, *, electrical
                 old = artifacts[index]
                 artifacts[index] = Artifact(old.path, old.payload, old.format, old.parts + (component.part,))
             footprint_names[component.part] = PurePosixPath(library).name + ':' + target
+            if model_assets is not None and model_mode == 'external':
+                for model,asset,raw in resolved_models(component,model_assets):
+                    path = library + '.pretty/LCSC3D.3dshapes/' + model.asset_id + '.step'
+                    index = next((i for i,a in enumerate(artifacts) if a.path == path),None)
+                    if index is None:
+                        artifacts.append(Artifact(path,raw,'KICAD_MODEL',(component.part,)))
+                    elif component.part not in artifacts[index].parts:
+                        old = artifacts[index]
+                        artifacts[index] = Artifact(old.path,old.payload,old.format,old.parts+(component.part,))
         except DownloadError as exc:
             record_error(exc, 'export.kicad_conversion_failed', part=safe_part(component.part), format='KICAD_FOOTPRINT', stage='convert')
             errors[(component.part, 'KICAD_FOOTPRINT')] = str(exc)

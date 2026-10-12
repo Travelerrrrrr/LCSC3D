@@ -39,7 +39,7 @@ class MergeTests(unittest.TestCase):
         self.data = {part: fixture(part) for part in self.parts}
         self.api = NetworkApi()
         self.api.get_cad_data_of_component = lambda part: copy.deepcopy(self.data[part])
-        self.options = Options(self.root / 'export', ('SCHLIB', 'PCBLIB'), True, True, '项目符号.SchLib', '项目封装')
+        self.options = Options(self.root / 'export', ('SCHLIB', 'PCBLIB'), True, True, '项目符号.SchLib', '项目封装', bind_3d_models=False)
 
     def batch(self, **kwargs):
         return download_batch(self.parts, self.options, self.api.cancelled, api=self.api, **kwargs)

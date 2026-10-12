@@ -186,6 +186,7 @@ def footprint_signature(streams):
     digest = hashlib.sha256()
     try:
         section = component_section(streams)
+        model_refs = []
         for path in sorted(streams):
             if not path.startswith(section + '/'):
                 continue
@@ -196,7 +197,7 @@ def footprint_signature(streams):
                 records = []
                 while reader.offset < len(reader.data):
                     kind = reader.take(1)[0]
-                    if kind not in (1, 2, 3, 4, 5, 11):
+                    if kind not in (1, 2, 3, 4, 5, 11, 12):
                         return None
                     blocks = [reader.block() for _ in range(6 if kind == 2 else 2 if kind == 5 else 1)]
                     if kind == 3 and (blocks[0][0] or len(blocks[0][1]) != 31):
@@ -207,6 +208,20 @@ def footprint_signature(streams):
                             return None
                         # Our native pad layout has two randomly assigned GUIDs.
                         blocks[4] = flag, body[:126] + bytes(32) + body[158:]
+                    if kind == 12:
+                        flag, body = blocks[0]
+                        props = Reader(body[18:])
+                        parameter_flag, parameter_body = props.block()
+                        if flag or parameter_flag:
+                            return None
+                        values = parameters(parameter_body)
+                        from altium_models import _pose_key
+                        model_refs.append(_pose_key(values,body=True))
+                        # The physical identity comes from resolved payload bytes;
+                        # display names, GUIDs and weighted checksums are metadata.
+                        physical = {k:v for k,v in values.items() if k not in ('MODELID','MODEL.NAME','MODEL.CHECKSUM')}
+                        normalized = json.dumps(physical,sort_keys=True,ensure_ascii=True).encode('ascii')
+                        blocks[0] = flag,body[:18]+_block(normalized)+body[18+props.offset:]
                     records.append(bytes([kind]) + b''.join(_block(body, flag) for flag, body in blocks))
                 payload = b''.join(records)
             elif key in ('Parameters', 'WideStrings'):
@@ -220,6 +235,15 @@ def footprint_signature(streams):
                 payload = json.dumps(values, sort_keys=True, ensure_ascii=True).encode('ascii')
             encoded = key.encode('utf-8')
             digest.update(struct.pack('<I', len(encoded)) + encoded + struct.pack('<I', len(payload)) + payload)
+        if model_refs:
+            from altium_models import _model_table, model_payload_identity, _pose_key
+            table = _model_table(streams)
+            resources = {_pose_key(values):data for values,block,data in table}
+            for reference in model_refs:
+                data = resources.get(reference)
+                if data is None:
+                    return None
+                digest.update(model_payload_identity(data))
     except (DownloadError, ValueError, KeyError, IndexError, StopIteration, struct.error):
         return None
     return digest.digest()
@@ -248,8 +272,13 @@ def rename_footprint(streams, name):
 
 def indexed_component(index, name):
     section = index.sections[name.casefold()]
-    return {'/'.join(path): index.read(path) for path in index.ole.listdir()
-            if path[0].casefold() == section.casefold()}
+    result = {'/'.join(path): index.read(path) for path in index.ole.listdir()
+              if path[0].casefold() == section.casefold()}
+    if not hasattr(index, '_model_streams'):
+        index._model_streams = {'/'.join(path): index.read(path) for path in index.ole.listdir()
+                               if len(path)>2 and path[0].casefold()=='library' and path[1].casefold()=='models'}
+    result.update(index._model_streams)
+    return result
 
 
 def plan_footprints(entries, original=None, check_cancelled=lambda: None):
@@ -357,6 +386,14 @@ def append_library(original, generated, format, check_cancelled=lambda: None, *,
                             added_records += 1
                         payload = remap_fonts(payload, offset)
                     streams['/'.join([target] + path[1:])] = payload
+        if format == 'PCBLIB':
+            from altium_models import aggregate_models
+            old_models = {'/'.join(path): old.read(path) for path in old.ole.listdir()
+                          if len(path)>2 and path[0].casefold()=='library' and path[1].casefold()=='models'}
+            new_models = {'/'.join(path): new.read(path) for path in new.ole.listdir()
+                          if len(path)>2 and path[0].casefold()=='library' and path[1].casefold()=='models'}
+            model_streams, remapped = aggregate_models(old_models, [{**streams, **new_models}])
+            streams = {**streams, **remapped[0], **model_streams}
         names = old.names + added
         if format == 'SCHLIB':
             updates = {'CompCount': len(names), 'Weight': count(old.values.get('WEIGHT', 0)) + added_records,
