@@ -1,6 +1,5 @@
 """Compare frozen application modules/assets and an optional source ZIP to this checkout."""
 import argparse
-import importlib.util
 import json
 from pathlib import Path
 import types
@@ -35,15 +34,10 @@ def verify(executable, source_zip=None):
     assert 'qt_material/material.qss.template' in entries
     assert any(name.startswith('qt_material/resources/source/') and name.endswith('.svg') for name in entries)
     assert not any(name.startswith('qt_material/fonts/') for name in entries), 'Unexpected bundled fonts'
-    assert 'OCP' in pyz.toc and 'zstandard' in pyz.toc
-    ocp_root = Path(importlib.util.find_spec('OCP').origin).parent
-    cad_libraries = list((ocp_root.parent/'cadquery_ocp_novtk.libs').glob('*.dll'))
-    cad_libraries += list(ocp_root.glob('*.pyd'))
-    assert cad_libraries
-    for library in cad_libraries:
-        name = library.relative_to(ocp_root.parent).as_posix()
-        assert name in entries, name
-        assert archive.extract(entries[name]) == library.read_bytes(), name
+    assert 'zstandard' in pyz.toc
+    assert not any(name == 'OCP' or name.startswith(('OCP.', 'cadquery')) for name in pyz.toc)
+    cad_libraries = [name for name in entries if name.lower().startswith(('ocp/', 'cadquery'))]
+    assert not cad_libraries, 'Unexpected CAD kernel bundled'
     count = 0
     if source_zip:
         with zipfile.ZipFile(source_zip) as source:

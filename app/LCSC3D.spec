@@ -2,29 +2,26 @@
 # alongside the browser runtime; no external converter is needed.
 from pathlib import Path
 import sys
-import importlib.util
 from PySide6.QtCore import QLibraryInfo
 from PyInstaller.utils.hooks import collect_data_files
 
 root = Path(SPECPATH)
-ocp_libs = Path(importlib.util.find_spec('OCP').origin).parent.parent / 'cadquery_ocp_novtk.libs'
-cad_binaries = [(str(p), 'cadquery_ocp_novtk.libs') for p in ocp_libs.glob('*.dll')]
 
 a = Analysis(
     [str(root / 'launcher.py')],
     pathex=[str(root)],
-    binaries=cad_binaries,
+    binaries=[],
     datas=[(str(root / 'viewer.html'), '.'), (str(root / 'vector_viewer.html'), '.'),
            (str(Path(QLibraryInfo.path(QLibraryInfo.TranslationsPath)) / 'qtbase_zh_CN.qm'), 'assets'),
            (str(root / 'assets'), 'assets'), (str(root / 'licenses'), 'licenses')]
           + collect_data_files('qt_material', includes=['*.template', 'themes/*.xml', 'resources/source/*.svg'])
           + [(str(root.parent / 'docs/images/sponsorship' / filename), 'docs/images/sponsorship')
              for filename in ('alipay.png', 'wechat.png')],
-    hiddenimports=['OCP', 'OCP.OCP', 'zstandard.backend_c'],
+    hiddenimports=['zstandard.backend_c'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'matplotlib', 'numpy', 'pandas', 'PyQt5', 'PyQt6',
+    excludes=['OCP', 'cadquery', 'tkinter', 'matplotlib', 'numpy', 'pandas', 'PyQt5', 'PyQt6',
               'PySide6.QtQml', 'PySide6.QtQuick', 'PySide6.QtQuickWidgets',
               'PySide6.QtOpenGL'],
     noarchive=False,

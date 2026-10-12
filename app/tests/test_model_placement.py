@@ -24,7 +24,7 @@ from easyeda_import import parse_component, model_outline_center
 from eda_ir import Model3D, ModelPlacement, ModelAsset, dumps, loads
 from errors import DownloadError, Cancelled
 from model_export import resolve_models
-from model_geometry import step_bounds, rotation_zxy, euler_xyz
+from model_geometry import rotation_zxy, euler_xyz
 from altium import export_pcblib, MergedLibrary
 from library_merge import LibraryIndex, append_library
 from kicad import build_library, footprint_definition
@@ -76,15 +76,7 @@ class ModelPlacementTests(unittest.TestCase):
     def setUpClass(cls):
         cls.directory = tempfile.TemporaryDirectory(dir=temporary_directory())
         cls.folder = Path(cls.directory.name)
-        from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
-        from OCP.gp import gp_Pnt
-        from OCP.STEPControl import STEPControl_Writer,STEPControl_AsIs
-        from OCP.IFSelect import IFSelect_RetDone
-        writer = STEPControl_Writer()
-        writer.Transfer(BRepPrimAPI_MakeBox(gp_Pnt(-1,-2,-.5),2,4,3).Shape(),STEPControl_AsIs)
-        path = cls.folder/'box.step'
-        assert writer.Write(str(path)) == IFSelect_RetDone
-        cls.step = path.read_bytes()
+        cls.step = (FIXTURES/'model_offset_box.step').read_bytes()
 
     @classmethod
     def tearDownClass(cls):
@@ -117,7 +109,7 @@ class ModelPlacementTests(unittest.TestCase):
         self.assertEqual(p.position,(D(0),D('-1.1999976'),D('-.8999982')))
         self.assertEqual(p.angles,(D(0),)*3)
         self.assertEqual(loads(dumps(c)),c)
-        for name in ('ir_v1_0.json','ir_v1_1_via.json'):
+        for name in ('ir_v1_0.json','ir_v1_1_via.json','ir_v1_2_model.json'):
             old = loads((FIXTURES/name).read_text('utf-8'))
             self.assertEqual(loads(dumps(old)),old)
 
@@ -208,17 +200,27 @@ class ModelPlacementTests(unittest.TestCase):
         self.assertIsNotNone(c.footprint)
         self.assertTrue(any(d.domain=='model3d' and d.severity=='error' for d in c.diagnostics))
 
-    def test_missing_dimensions_and_nonfinite_vectors_never_default_to_zero(self):
-        for updates in ({'c_width':''},{'c_width':'0'},{'c_origin':'nan,0'},{'c_rotation':'0,inf,0'},{'z':''}):
+    def test_missing_position_and_nonfinite_vectors_never_default_to_zero(self):
+        for updates in ({'c_origin':'nan,0'},{'c_rotation':'0,inf,0'},{'z':''}):
             with self.subTest(updates=updates):
                 c = parse_component(edit_attrs(source(),**updates),'C20197')
                 self.assertIsNone(c.models[0].placement)
                 self.assertTrue(c.diagnostics)
 
-    def test_cad_worker_reads_original_step_bounds_without_obj(self):
-        result = step_bounds(self.step)
-        for actual, expected in zip(result, (-1,-2,-.5,1,2,2.5)):
-            self.assertAlmostEqual(actual, expected, places=6)
+    def test_source_dimensions_are_not_required_for_direct_placement(self):
+        for updates in ({'c_width':''},{'c_width':'0','c_height':'nan'}):
+            c,assets = self.resolved(edit_attrs(source(),**updates))
+            self.assertTrue(assets,c.diagnostics)
+            self.assertEqual(c.models[0].placement.size,())
+            self.assertEqual(c.models[0].placement.convention,'step-origin-zxy')
+
+    def test_original_step_origin_is_used_without_cad_or_subprocess(self):
+        with patch('subprocess.Popen',side_effect=AssertionError('CAD process must not run')):
+            c,assets = self.resolved(source(z='-2'),ad=True)
+            self.assertEqual(list(assets.values()),[self.step])
+            self.assertEqual(c.models[0].translation,(D(0),D(0),D('-.508')))
+            self.assertEqual(c.model_assets[0].bounds,())
+            self.assertFalse((self.root/'profile/LCSC3D/cache/step-bounds-v1').exists())
 
     def test_corrupt_step_skips_only_model(self):
         c = parse_component(source(),'C20197')
@@ -228,12 +230,11 @@ class ModelPlacementTests(unittest.TestCase):
         self.assertIsNotNone(c.footprint)
         self.assertTrue(any(d.severity=='error' and d.domain=='model3d' for d in c.diagnostics))
 
-    def test_ad_unrepresentable_resource_origin_skips_only_the_model(self):
-        # Local geometry can fit even when its translation cannot be encoded
-        # in AD's raw int32 coordinate fields. Reject before serializing 2D.
-        geometry = (9999,-2,-.5,10001,2,2.5)
-        with patch('model_export.step_bounds',return_value=geometry):
-            c,assets = self.resolved(ad=True)
+    def test_ad_unrepresentable_json_position_skips_only_the_model(self):
+        c = parse_component(source(),'C20197')
+        model = replace(c.models[0],placement=replace(c.models[0].placement,position=(D(6000),D(0),D(0))))
+        c = replace(c,models=(model,))
+        c,assets = resolve_models(c,lambda _:backend.StepPayload(self.step),prepare_altium=True)
         self.assertFalse(assets)
         self.assertIsNotNone(c.footprint)
         self.assertFalse(c.models[0].transform)
@@ -243,25 +244,25 @@ class ModelPlacementTests(unittest.TestCase):
         c,assets = self.resolved(source('90,0,90','-2'))
         self.assertTrue(assets,c.diagnostics)
         m = c.models[0].transform
-        # Source anchor (0,0,-.5) goes to (0,0,-.508); +X becomes +Z.
+        # Untouched STEP origin goes to the JSON Z position; +X becomes +Z.
         def apply(point):
             return tuple(sum(float(m[4*i+j])*point[j] for j in range(3))+float(m[4*i+3]) for i in range(3))
-        for actual,wanted in zip(apply((0,0,-.5)),(0,0,-.508)):
+        for actual,wanted in zip(apply((0,0,0)),(0,0,-.508)):
             self.assertAlmostEqual(actual,wanted,places=6)
-        for actual,wanted in zip(apply((1,0,-.5)),(0,0,.492)):
+        for actual,wanted in zip(apply((1,0,0)),(0,0,.492)):
             self.assertAlmostEqual(actual,wanted,places=6)
         self.assertFalse(any(d.severity=='warning' for d in c.diagnostics))
         self.assertEqual(loads(dumps(c)),c)
 
-    def test_far_source_origin_is_warned_without_correction(self):
+    def test_valid_source_offsets_and_negative_height_are_preserved_without_geometry_warnings(self):
         data = source()
         c,assets = self.resolved(edit_attrs(data,c_origin='400,299.5'))
         self.assertTrue(assets)
-        self.assertTrue(any(d.code=='model_far_from_footprint' for d in c.diagnostics))
+        self.assertFalse(any(d.severity in ('warning','error') for d in c.diagnostics))
         self.assertNotEqual(c.models[0].translation[:2],(D(0),D(0)))
         c,assets = self.resolved(source(z='-1000'))
         self.assertTrue(assets)
-        self.assertTrue(any(d.code=='model_far_from_footprint' for d in c.diagnostics))
+        self.assertFalse(any(d.severity in ('warning','error') for d in c.diagnostics))
         self.assertEqual(c.models[0].placement.position[2],D('-254'))
 
     def test_source_dimensions_never_rescale_original_step_or_placement(self):
@@ -291,22 +292,43 @@ class ModelPlacementTests(unittest.TestCase):
         message = next(d.message for d in c.diagnostics if d.code=='model_library_resolved')
         self.assertNotIn('核对',message)
 
-    def test_step_length_units_are_read_in_mm_without_rewriting_payload(self):
+    def test_step_units_are_preserved_for_target_eda_without_geometry_interpretation(self):
         self.assertIn(b'SI_UNIT(.MILLI.,.METRE.)',self.step)
         centimetres = self.step.replace(b'SI_UNIT(.MILLI.,.METRE.)',b'SI_UNIT(.CENTI.,.METRE.)')
         c,assets = resolve_models(parse_component(source(),'C20197'),
             lambda _:backend.StepPayload(centimetres),prepare_altium=True)
         self.assertEqual(list(assets.values()),[centimetres],c.diagnostics)
-        for actual,expected in zip(c.model_assets[0].bounds,(-10,-20,-5,10,20,25)):
-            self.assertAlmostEqual(float(actual),expected,places=5)
+        self.assertEqual(c.model_assets[0].bounds,())
+        self.assertEqual(c.models[0].translation,(D(0),)*3)
         self.assertEqual(c.models[0].scale,(D(1),)*3)
 
     def test_ir_rejects_dangling_assets_and_missing_capability(self):
         c,_ = self.resolved()
         for invalid in (replace(c,model_assets=()), replace(c,required_features=('local-mm-y-up',)),
+                        replace(c,required_features=tuple(f for f in c.required_features if f!='model-direct-placement')),
                         replace(c,model_assets=(replace(c.model_assets[0],bounds=(D(0),)*6),))):
             with self.assertRaises(DownloadError):
                 dumps(invalid)
+
+    def test_direct_placement_requires_explicit_target_support(self):
+        from eda_targets import ALTIUM
+        c,_ = self.resolved()
+        self.assertEqual(c.schema_version,'1.3')
+        target = replace(ALTIUM,features=ALTIUM.features-{'model-direct-placement'})
+        with self.assertRaisesRegex(DownloadError,'model-direct-placement'):
+            target.require(c,'footprint')
+
+    def test_ad_body_proxy_does_not_change_raw_origin_pose(self):
+        from altium_inspect import pcb, Reader, parameters
+        c,assets = self.resolved(source('20,30,40','-2'),ad=True)
+        raw = export_pcblib(c,c.part,model_assets=assets)
+        body = next(b for kind,b in pcb(raw)[2] if kind==12)
+        params = parameters(Reader(body[18:]).block()[1])
+        self.assertEqual(D(params['MODEL.2D.X'].removesuffix('mil')),D(0))
+        self.assertEqual(D(params['MODEL.2D.Y'].removesuffix('mil')),D(0))
+        self.assertAlmostEqual(float(D(params['MODEL.3D.DZ'].removesuffix('mil'))*D('.0254')),-.508)
+        self.assertEqual(params['STANDOFFHEIGHT'],'0.0000000000mil')
+        self.assertEqual(params['OVERALLHEIGHT'],'0.0000000000mil')
 
     def test_cancellation_is_not_a_model_warning(self):
         with self.assertRaises(Cancelled):

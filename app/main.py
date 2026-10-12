@@ -46,7 +46,7 @@ from branding import BrandLogo
 from international_store import storefront_url
 from app_paths import data_directory, configure_runtime_paths, updates_directory
 
-VERSION = '2.4.0-demo.3'
+VERSION = '2.4.0-demo.4'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
@@ -2120,7 +2120,7 @@ class MainWindow(FramelessMainWindow):
             'Lib「合并」「追加」互斥，勾选后显示配置。未勾选「独立导出器件」时，3D 文件集中到 SchLib 旁的“库名_3D”文件夹；仅有 PcbLib 时跟随其名称。<br>'
             '「追加」仅指定 PCB 工程时，可分别设置 3D、SchLib、PcbLib 的目录和库名；独立器件目录留空时使用工程所在文件夹。<br>在追加配置页指定已有库和工程后，点击「将指定库导入到PCB工程」直接导入，无须下载器件。<br>'
             '相同 footprint 自动复用并同步符号引用；同名不同内容加序号区分。Lib 文件和库内名称不自动追加器件编号。<br>'
-            '「封装关联 3D 模型」默认开启，保留 STEP 原始尺寸，按官方位置和角度放置；AD PcbLib 内嵌 STEP。无需另勾 STEP 下载。导出不依赖 OBJ，不进行几何比对或模型缩放。模型参数无效或 STEP 无法读取时跳过模型，保留二维封装并提醒。<br>'
+            '「封装关联 3D 模型」默认开启，保留 STEP 原始尺寸，按官方位置和角度放置；AD PcbLib 内嵌 STEP。无需另勾 STEP 下载。导出直接使用 STEP 原点和官方位置、角度，不依赖 OBJ 或 CAD 内核，不自动居中、贴底或缩放。模型参数无效或文件不完整时跳过模型，保留二维封装并提醒。<br>'
             '未合并的文件单独保存到“器件名_编号”目录，AD 库文件按元件型号命名；模型与 AD 库下载时覆盖已有同名文件。<br>'
             '3D 预览由 LCSC3D 在本地渲染官方模型；拖动旋转，滚轮缩放，右键拖动平移。<br><br>'
             '右侧上方可切换「3D 模型 / 符号 / 封装 / 商品图片」，无需先下载。<br>'

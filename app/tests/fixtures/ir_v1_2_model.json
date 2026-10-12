@@ -1,0 +1,232 @@
+{
+  "@type": "Component",
+  "source_id": "",
+  "extensions": [],
+  "part": "C1",
+  "title": "",
+  "description": "",
+  "source": "JLCEDA/EasyEDA Official Library",
+  "source_url": "",
+  "footprint_name": "",
+  "has_footprint": true,
+  "symbol": null,
+  "footprint": {
+    "@type": "Footprint",
+    "source_id": "",
+    "extensions": [],
+    "name": "BOX",
+    "items": [
+      {
+        "@type": "Pad",
+        "source_id": "",
+        "extensions": [],
+        "number": "1",
+        "shape": "rect",
+        "center": {
+          "@type": "Point",
+          "source_id": "",
+          "extensions": [],
+          "x": {
+            "@decimal": "0"
+          },
+          "y": {
+            "@decimal": "0"
+          }
+        },
+        "copper_center": {
+          "@type": "Point",
+          "source_id": "",
+          "extensions": [],
+          "x": {
+            "@decimal": "0"
+          },
+          "y": {
+            "@decimal": "0"
+          }
+        },
+        "size": {
+          "@type": "Point",
+          "source_id": "",
+          "extensions": [],
+          "x": {
+            "@decimal": "1"
+          },
+          "y": {
+            "@decimal": "1"
+          }
+        },
+        "vertices": [],
+        "rotation": {
+          "@decimal": "0"
+        },
+        "layer": "top_copper",
+        "drill": {
+          "@decimal": "0"
+        },
+        "slot_length": {
+          "@decimal": "0"
+        },
+        "drill_rotation": {
+          "@decimal": "0"
+        },
+        "plated": true,
+        "paste_margin": {
+          "@decimal": "0"
+        },
+        "solder_margin": {
+          "@decimal": "0"
+        },
+        "mechanical_hole": false
+      }
+    ],
+    "licence": ""
+  },
+  "models": [
+    {
+      "@type": "Model3D",
+      "source_id": "",
+      "extensions": [],
+      "identifier": "synthetic",
+      "name": "box",
+      "translation": [],
+      "rotation": [],
+      "scale": [
+        {
+          "@decimal": "1"
+        },
+        {
+          "@decimal": "1"
+        },
+        {
+          "@decimal": "1"
+        }
+      ],
+      "placement": {
+        "@type": "ModelPlacement",
+        "source_id": "",
+        "extensions": [],
+        "position": [
+          {
+            "@decimal": "0"
+          },
+          {
+            "@decimal": "0"
+          },
+          {
+            "@decimal": "0"
+          }
+        ],
+        "angles": [
+          {
+            "@decimal": "0"
+          },
+          {
+            "@decimal": "0"
+          },
+          {
+            "@decimal": "0"
+          }
+        ],
+        "size": [
+          {
+            "@decimal": "2"
+          },
+          {
+            "@decimal": "4"
+          }
+        ],
+        "convention": "center-bottom-zxy-uniform"
+      },
+      "asset_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "transform": [
+        {
+          "@decimal": "1"
+        },
+        {
+          "@decimal": "0"
+        },
+        {
+          "@decimal": "0"
+        },
+        {
+          "@decimal": "0"
+        },
+        {
+          "@decimal": "0"
+        },
+        {
+          "@decimal": "1"
+        },
+        {
+          "@decimal": "0"
+        },
+        {
+          "@decimal": "0"
+        },
+        {
+          "@decimal": "0"
+        },
+        {
+          "@decimal": "0"
+        },
+        {
+          "@decimal": "1"
+        },
+        {
+          "@decimal": "0"
+        },
+        {
+          "@decimal": "0"
+        },
+        {
+          "@decimal": "0"
+        },
+        {
+          "@decimal": "0"
+        },
+        {
+          "@decimal": "1"
+        }
+      ]
+    }
+  ],
+  "model_assets": [
+    {
+      "@type": "ModelAsset",
+      "source_id": "",
+      "extensions": [],
+      "identifier": "synthetic",
+      "name": "box",
+      "format": "STEP",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reference_sha256": "",
+      "bounds": [
+        {
+          "@decimal": "-1"
+        },
+        {
+          "@decimal": "-2"
+        },
+        {
+          "@decimal": "-0.5"
+        },
+        {
+          "@decimal": "1"
+        },
+        {
+          "@decimal": "2"
+        },
+        {
+          "@decimal": "2.5"
+        }
+      ],
+      "source_sha256": ""
+    }
+  ],
+  "diagnostics": [],
+  "schema_version": "1.2",
+  "required_features": [
+    "local-mm-y-up",
+    "model-placement"
+  ]
+}

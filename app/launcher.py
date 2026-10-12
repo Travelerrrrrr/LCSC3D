@@ -8,10 +8,7 @@ from app_logging import install_exception_hooks
 try:
     install_exception_hooks()
     configure_runtime_paths()
-    if len(sys.argv) == 3 and sys.argv[1] == '--model-geometry':
-        from model_geometry import worker
-        code = worker(sys.argv[2])
-    elif len(sys.argv) == 3 and sys.argv[1] == '--apply-update':
+    if len(sys.argv) == 3 and sys.argv[1] == '--apply-update':
         from updater import apply_update
         code = apply_update(sys.argv[2])
     else:

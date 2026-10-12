@@ -17,8 +17,9 @@ from typing import get_args, get_origin, get_type_hints
 
 from errors import DownloadError, EdaError
 
-SCHEMA_VERSION = '1.2'
-CORE_FEATURES = frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias', 'model-placement'})
+SCHEMA_VERSION = '1.3'
+CORE_FEATURES = frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias',
+                           'model-placement', 'model-direct-placement'})
 # Open vocabulary: readers preserve future/source-specific values verbatim.
 # `power` records an undirected source declaration; it is not `power_in`.
 PIN_ELECTRICAL_TYPES = frozenset({'unspecified', 'input', 'output', 'bidirectional',
@@ -175,12 +176,11 @@ class Footprint(Record):
 
 @dataclass(frozen=True)
 class ModelPlacement(Record):
-    """Requested placement of a normalized model, in local right-handed mm.
+    """Requested model pose in local right-handed mm.
 
-    Normalize the unrotated resource to XY centre/minimum Z; apply uniform
-    min(size.x / width, size.y / height), then Z, X, Y rotations, then position.
-    These are source-viewer semantics. Original-size STEP export uses only
-    position and angles; size remains source metadata, not an export scale.
+    New imports use step-origin-zxy: rotate around the untouched STEP origin,
+    then translate. No centering, bottom alignment or scaling is inferred.
+    The default convention and size field remain for historical IR readers.
     """
     position: tuple[Decimal, ...] = ()
     angles: tuple[Decimal, ...] = ()  # X, Y, Z degrees; applied Z then X then Y.
@@ -195,7 +195,7 @@ class ModelAsset(Record):
     format: str = 'STEP'
     sha256: str = ''
     reference_sha256: str = ''  # Legacy OBJ comparison digest; empty for original STEP export.
-    bounds: tuple[Decimal, ...] = ()  # xmin, ymin, zmin, xmax, ymax, zmax in mm.
+    bounds: tuple[Decimal, ...] = ()  # Legacy mm bounds; empty means unknown, never zero-sized.
     source_sha256: str = ''  # Original STEP if an export-ready scaled copy is used.
 
 
@@ -325,7 +325,8 @@ def validate(component):
     for asset in component.model_assets:
         if (asset.format != 'STEP' or len(asset.sha256) != 64 or
                 any(c not in '0123456789abcdef' for c in asset.sha256) or
-                len(asset.bounds) != 6 or any(asset.bounds[i+3] <= asset.bounds[i] for i in range(3))):
+                (asset.bounds and (len(asset.bounds) != 6 or any(asset.bounds[i+3] <= asset.bounds[i] for i in range(3))))
+                or (not asset.bounds and 'model-direct-placement' not in component.required_features)):
             raise DownloadError('IR 模型资源元数据无效')
         if asset.sha256 in assets:
             raise DownloadError('IR 模型资源重复')
@@ -333,7 +334,8 @@ def validate(component):
     for model in component.models:
         if model.placement is not None:
             p = model.placement
-            if len(p.position) != 3 or len(p.angles) != 3 or len(p.size) != 2 or min(p.size) <= 0:
+            size_valid = (not p.size and p.convention == 'step-origin-zxy') or (len(p.size) == 2 and min(p.size) > 0)
+            if len(p.position) != 3 or len(p.angles) != 3 or not size_valid:
                 raise DownloadError('IR 模型放置参数无效')
         if model.transform and (len(model.transform) != 16 or not model.asset_id or
                 model.transform[12:] != (D(0), D(0), D(0), D(1))):

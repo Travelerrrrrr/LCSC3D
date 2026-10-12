@@ -9,6 +9,9 @@ for name in ('qt-material', 'Jinja2', 'MarkupSafe'):
     dist = distribution(name)
     source = next(p for p in dist.files if 'license' in str(p).lower() and p.name.lower().startswith('license'))
     shutil.copyfile(dist.locate_file(source), root / (name + '-LICENSE.txt'))
+dist = distribution('zstandard')
+source = next(p for p in dist.files if str(p).endswith('/licenses/LICENSE'))
+shutil.copyfile(dist.locate_file(source), root / 'python-zstandard-LICENSE.txt')
 for name, target in [('pyinstaller', 'PyInstaller-COPYING.txt'), ('certifi', 'certifi-LICENSE.txt'), ('olefile', 'olefile-LICENSE.txt')]:
     dist = distribution(name)
     source = next(p for p in dist.files if ('/licenses/' in str(p) or name == 'olefile') and ('COPYING' in str(p) or 'LICENSE.txt' in str(p)))

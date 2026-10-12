@@ -42,10 +42,11 @@ def verify(exe,fixtures,root):
     assert not any(cwd.iterdir()),'Unexpected files in current working directory'
     assert {p.name for p in executable.parent.iterdir()}=={'LCSC3D.exe'},'Unexpected files next to EXE'
     assert not list((root/'LocalAppData/LCSC3D/temp').glob('model-geometry-*')),'Worker temporary directory leaked'
+    assert not (root/'LocalAppData/LCSC3D/cache/step-bounds-v1').exists(),'Unexpected geometry cache'
     assert executable.read_bytes()==exe.read_bytes()
     summary = {'success':True,'version':report['version'],'frozen':True,
         'cases':len(report['cases']),'seconds':round(time.monotonic()-started,2),
-        'system_path_only':True,'clean_exe_and_cwd':True,'worker_temp_cleaned':True,
+        'system_path_only':True,'clean_exe_and_cwd':True,'no_geometry_cache':True,
         'detailed_report':str(destination/'model-verification.json')}
     (root/'delivery-verification.json').write_text(json.dumps(summary,indent=2),'utf-8')
     print(json.dumps(summary))

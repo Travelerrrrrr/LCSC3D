@@ -62,14 +62,14 @@ class TargetCapabilities:
 
 ALTIUM = TargetCapabilities(
     'AD', ('SchLib binary 5.0', 'PcbLib binary 6.0'),
-    frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias', 'model-placement'}),
+    frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias', 'model-placement', 'model-direct-placement'}),
     frozenset({'rect', 'ellipse', 'polyline', 'polygon', 'path', 'text'}),
     frozenset({'rect', 'ellipse', 'polyline', 'path', 'region', 'text'}),
     frozenset({'rect', 'ellipse', 'oval', 'octagon', 'polygon'}), append_existing=True, model_placement=True, mechanical_footprints=False)
 
 KICAD = TargetCapabilities(
     'KiCad 8+', ('symbol 20211014', 'footprint 20240108', 'footprint 20241229 (embedded models, KiCad 9+)'),
-    frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias', 'model-placement'}),
+    frozenset({'local-mm-y-up', 'symbol-units', 'pad-copper-drill', 'through-vias', 'model-placement', 'model-direct-placement'}),
     frozenset({'rect', 'ellipse', 'polyline', 'polygon', 'path', 'text'}),
     frozenset({'rect', 'ellipse', 'polyline', 'polygon', 'path', 'region', 'text'}),
     frozenset({'rect', 'ellipse', 'oval', 'octagon', 'polygon'}), model_placement=True)

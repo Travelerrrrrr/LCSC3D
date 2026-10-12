@@ -417,15 +417,12 @@ def import_models(data, package, head):
                 diagnostics.append(Diagnostic('model3d','info','model_origin_normalized',
                     '已按标准版放置规则更新模型原点',source_id=identity))
             angles = vector(attrs.get('c_rotation'),3)
-            if any(k not in attrs or str(attrs[k]).strip() == '' for k in ('z','c_width','c_height')):
-                raise DownloadError('3D 模型高度或尺寸参数缺失')
+            if 'z' not in attrs or str(attrs['z']).strip() == '':
+                raise DownloadError('3D 模型高度参数缺失')
             if 'x' not in head or 'y' not in head:
                 raise DownloadError('封装原点缺失，无法确定 3D 放置')
-            size = (length(attrs['c_width']),length(attrs['c_height']))
-            if min(size) <= 0:
-                raise DownloadError('3D 模型声明尺寸必须大于零')
             placement = ModelPlacement(((x-decimal(head['x']))*UNIT,(decimal(head['y'])-y)*UNIT,
-                                        length(attrs['z'])),angles,size)
+                                        length(attrs['z'])),angles,convention='step-origin-zxy')
             models[-1] = replace(model,placement=placement)
         except (DownloadError, ValueError, TypeError, KeyError) as exc:
             issue('invalid_model_placement', str(exc), identity)

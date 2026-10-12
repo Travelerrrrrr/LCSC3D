@@ -13,6 +13,7 @@ import uuid
 import zlib
 
 from errors import DownloadError
+from eda_ir import Pad
 from model_export import resolved_models
 from model_geometry import euler_xyz
 
@@ -72,6 +73,24 @@ def _outline(box, angles, offset):
     return [(cz*a-sz*b+offset[0],sz*a+cz*b+offset[1]) for a,b in corners],low[2]+offset[2],high[2]+offset[2]
 
 
+def _footprint_outline(component):
+    """A 2D body proxy from pads; never used to move or resize the STEP model."""
+    points = []
+    for pad in component.footprint.items:
+        if not isinstance(pad, Pad):
+            continue
+        angle = math.radians(float(pad.rotation))
+        c, s = math.cos(angle), math.sin(angle)
+        x, y = float(pad.center.x), float(pad.center.y)
+        dx, dy = float(pad.size.x)/2, float(pad.size.y)/2
+        points.extend((x+c*a-s*b, y+s*a+c*b) for a in (-dx,dx) for b in (-dy,dy))
+    left = min((p[0] for p in points), default=-.5)
+    right = max((p[0] for p in points), default=.5)
+    bottom = min((p[1] for p in points), default=-.5)
+    top = max((p[1] for p in points), default=.5)
+    return [(left,bottom),(right,bottom),(right,top),(left,top)]
+
+
 def embed_models(component, streams, section, payloads, check):
     import altium as a
     entries, records = {}, []
@@ -92,7 +111,11 @@ def embed_models(component, streams, section, payloads, check):
                     'ROTX':angles[0],'ROTY':angles[1],'ROTZ':angles[2],'DZ':_raw(offset[2]),
                     'CHECKSUM':checksum if checksum < 2**31 else checksum-2**32,'NAME':name}
         entries.setdefault(model_id,(a._parameters(metadata),zlib.compress(raw)))
-        outline,low,high = _outline(tuple(float(v)*scale for v in asset.bounds),angles,offset)
+        if asset.bounds:  # Preserve supplied historical IR bounds without reading geometry.
+            outline,low,high = _outline(tuple(float(v)*scale for v in asset.bounds),angles,offset)
+        else:
+            outline = _footprint_outline(component)
+            low = high = 0.  # Unknown physical heights; the embedded model supplies the solid.
         fields = {'V7_LAYER':'MECHANICAL1','NAME':'','KIND':0,'SUBPOLYINDEX':-1,'UNIONINDEX':0,
                   'ARCRESOLUTION':'0.5mil','ISSHAPEBASED':'FALSE','CAVITYHEIGHT':'0mil',
                   'STANDOFFHEIGHT':_mil(low),'OVERALLHEIGHT':_mil(high),'BODYPROJECTION':0,
