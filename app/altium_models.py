@@ -14,7 +14,7 @@ import zlib
 
 from errors import DownloadError
 from model_export import resolved_models
-from model_geometry import euler_xyz, scaled_step
+from model_geometry import euler_xyz
 
 MM_PER_RAW = .00000254
 
@@ -77,13 +77,13 @@ def embed_models(component, streams, section, payloads, check):
     entries, records = {}, []
     for model,asset,original in resolved_models(component,payloads):
         check()
-        if len(model.scale) != 3 or len(set(model.scale)) != 1 or model.scale[0] <= 0:
-            raise DownloadError('AD 模型需要已验证的统一缩放比例')
+        if model.scale != (Decimal(1),)*3:
+            raise DownloadError('AD 模型必须保持 STEP 原始尺寸')
         scale = float(model.scale[0])
         rotation = [[float(model.transform[i*4+j])/scale for j in range(3)] for i in range(3)]
         angles = tuple(round(v,9) for v in euler_xyz(rotation))
         offset = tuple(_raw(model.transform[i*4+3])*MM_PER_RAW for i in range(3))
-        raw = scaled_step(original,scale,check)
+        raw = original
         digest = hashlib.sha256(raw).hexdigest()
         checksum = model_checksum(raw)
         model_id = '{' + str(uuid.uuid5(uuid.NAMESPACE_URL,'lcsc3d:step:'+digest+repr((angles,_raw(offset[2]))))).upper() + '}'

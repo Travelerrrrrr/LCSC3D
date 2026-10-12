@@ -179,7 +179,8 @@ class ModelPlacement(Record):
 
     Normalize the unrotated resource to XY centre/minimum Z; apply uniform
     min(size.x / width, size.y / height), then Z, X, Y rotations, then position.
-    This is explicit source-adapter output, never inferred by an exporter.
+    These are source-viewer semantics. Original-size STEP export uses only
+    position and angles; size remains source metadata, not an export scale.
     """
     position: tuple[Decimal, ...] = ()
     angles: tuple[Decimal, ...] = ()  # X, Y, Z degrees; applied Z then X then Y.
@@ -193,7 +194,7 @@ class ModelAsset(Record):
     name: str = ''
     format: str = 'STEP'
     sha256: str = ''
-    reference_sha256: str = ''  # OBJ used to verify the Standard geometry basis.
+    reference_sha256: str = ''  # Legacy OBJ comparison digest; empty for original STEP export.
     bounds: tuple[Decimal, ...] = ()  # xmin, ymin, zmin, xmax, ymax, zmax in mm.
     source_sha256: str = ''  # Original STEP if an export-ready scaled copy is used.
 

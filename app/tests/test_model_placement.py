@@ -13,7 +13,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import zlib
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -24,7 +24,7 @@ from easyeda_import import parse_component, model_outline_center
 from eda_ir import Model3D, ModelPlacement, ModelAsset, dumps, loads
 from errors import DownloadError, Cancelled
 from model_export import resolve_models
-from model_geometry import inspect_models, scaled_step, rotation_zxy, euler_xyz, _distance_squared, _scale_units
+from model_geometry import step_bounds, rotation_zxy, euler_xyz
 from altium import export_pcblib, MergedLibrary
 from library_merge import LibraryIndex, append_library
 from kicad import build_library, footprint_definition
@@ -101,7 +101,7 @@ class ModelPlacementTests(unittest.TestCase):
 
     def resolved(self, data=None, *, ad=False):
         c = parse_component(data or source(),'C20197')
-        return resolve_models(c,lambda ref:backend.StepPayload(self.step,identifier=ref.uuid),lambda _:OBJ,prepare_altium=ad)
+        return resolve_models(c,lambda ref:backend.StepPayload(self.step,identifier=ref.uuid),prepare_altium=ad)
 
     def api(self, data=None):
         api = backend.NetworkApi(threading.Event(),use_cache=False)
@@ -215,32 +215,24 @@ class ModelPlacementTests(unittest.TestCase):
                 self.assertIsNone(c.models[0].placement)
                 self.assertTrue(c.diagnostics)
 
-    def test_triangle_distance_checks_surface_not_vertex_density(self):
-        self.assertAlmostEqual(_distance_squared((.2,.2,1),(0,0,0),(1,0,0),(0,1,0)),1)
-        self.assertAlmostEqual(_distance_squared((.2,.2,0),(0,0,0),(1,0,0),(0,1,0)),0)
-        self.assertAlmostEqual(_distance_squared((2,0,0),(0,0,0),(1,0,0),(0,1,0)),1)
+    def test_cad_worker_reads_original_step_bounds_without_obj(self):
+        result = step_bounds(self.step)
+        for actual, expected in zip(result, (-1,-2,-.5,1,2,2.5)):
+            self.assertAlmostEqual(actual, expected, places=6)
 
-    def test_cad_worker_accepts_geometry_with_different_file_origins(self):
-        result = inspect_models(self.step,OBJ)
-        self.assertTrue(result['compatible'],result)
-        self.assertAlmostEqual(result['bounds'][2],-.5,places=6)
-        self.assertEqual(result['obj_bounds'],[10.,20.,30.,12.,24.,33.])
-
-    def test_coordinate_mismatch_skips_model_but_keeps_footprint(self):
+    def test_corrupt_step_skips_only_model(self):
         c = parse_component(source(),'C20197')
-        different = OBJ.replace('12 24','16 24').replace('12 20','16 20')
-        c,assets = resolve_models(c,lambda _:backend.StepPayload(self.step),lambda _:different)
+        c,assets = resolve_models(c,lambda _:backend.StepPayload(b'ISO-10303-21; broken'))
         self.assertFalse(assets)
         self.assertFalse(c.models[0].transform)
         self.assertIsNotNone(c.footprint)
-        self.assertIn('几何基准',c.diagnostics[-1].message)
+        self.assertTrue(any(d.severity=='error' and d.domain=='model3d' for d in c.diagnostics))
 
     def test_ad_unrepresentable_resource_origin_skips_only_the_model(self):
         # Local geometry can fit even when its translation cannot be encoded
         # in AD's raw int32 coordinate fields. Reject before serializing 2D.
-        geometry = {'compatible':True,'bounds':[9999,-2,-.5,10001,2,2.5],
-                    'obj_bounds':[10,20,30,12,24,33]}
-        with patch('model_export.inspect_models',return_value=geometry):
+        geometry = (9999,-2,-.5,10001,2,2.5)
+        with patch('model_export.step_bounds',return_value=geometry):
             c,assets = self.resolved(ad=True)
         self.assertFalse(assets)
         self.assertIsNotNone(c.footprint)
@@ -272,47 +264,42 @@ class ModelPlacementTests(unittest.TestCase):
         self.assertTrue(any(d.code=='model_far_from_footprint' for d in c.diagnostics))
         self.assertEqual(c.models[0].placement.position[2],D('-254'))
 
-    def test_uniform_scale_uses_minimum_ratio(self):
-        data = edit_attrs(source(),c_width=str(D(4)/D('.254')),c_height=str(D(12)/D('.254')))
-        c,assets = self.resolved(data)
-        self.assertEqual(c.models[0].scale,(D(2),)*3)
+    def test_source_dimensions_never_rescale_original_step_or_placement(self):
+        baseline,_ = self.resolved(source('20,30,40','-2'))
+        for factor in (D('.999998'),D(2),D('1e-7')):
+            data = edit_attrs(source('20,30,40','-2'),c_width=str(D(2)*factor/D('.254')),
+                              c_height=str(D(4)*factor/D('.254')))
+            for ad in (False, True):
+                with self.subTest(factor=factor, ad=ad):
+                    c,assets = self.resolved(data,ad=ad)
+                    self.assertEqual(c.models[0].scale,(D(1),)*3)
+                    self.assertEqual(c.models[0].transform,baseline.models[0].transform)
+                    self.assertEqual(list(assets.values()),[self.step])
+                    self.assertEqual(c.model_assets[0].sha256,hashlib.sha256(self.step).hexdigest())
+                    self.assertEqual(c.model_assets[0].source_sha256,c.model_assets[0].sha256)
+                    self.assertEqual(c.model_assets[0].reference_sha256,'')
+                    if ad:
+                        raw = export_pcblib(c,c.part,model_assets=assets)
+                        with olefile.OleFileIO(io.BytesIO(raw)) as ole:
+                            self.assertEqual(zlib.decompress(ole.openstream('Library/Models/0').read()),self.step)
 
-    def test_ad_scaled_resource_is_deterministic_and_original_unchanged(self):
-        import model_geometry
-        first = scaled_step(self.step,2)
-        with model_geometry._LOCK:
-            model_geometry._CACHE.clear()
-        second = scaled_step(self.step,2)
-        self.assertEqual(first,second)
-        self.assertNotEqual(first,self.step)
-        self.assertIn(b'CONVERSION_BASED_UNIT',first)
-        data = edit_attrs(source(),c_width=str(D(4)/D('.254')),c_height=str(D(8)/D('.254')))
-        c,assets = self.resolved(data,ad=True)
-        self.assertTrue(assets,c.diagnostics)
+    def test_fallback_step_is_original_and_never_claims_obj_verification(self):
+        c = parse_component(source(),'C20197')
+        c,assets = resolve_models(c,lambda _:backend.StepPayload(self.step,used_library=True,identifier='fallback'))
+        self.assertEqual(list(assets.values()),[self.step])
+        self.assertEqual(c.model_assets[0].identifier,'fallback')
+        message = next(d.message for d in c.diagnostics if d.code=='model_library_resolved')
+        self.assertNotIn('核对',message)
+
+    def test_step_length_units_are_read_in_mm_without_rewriting_payload(self):
+        self.assertIn(b'SI_UNIT(.MILLI.,.METRE.)',self.step)
+        centimetres = self.step.replace(b'SI_UNIT(.MILLI.,.METRE.)',b'SI_UNIT(.CENTI.,.METRE.)')
+        c,assets = resolve_models(parse_component(source(),'C20197'),
+            lambda _:backend.StepPayload(centimetres),prepare_altium=True)
+        self.assertEqual(list(assets.values()),[centimetres],c.diagnostics)
+        for actual,expected in zip(c.model_assets[0].bounds,(-10,-20,-5,10,20,25)):
+            self.assertAlmostEqual(float(actual),expected,places=5)
         self.assertEqual(c.models[0].scale,(D(1),)*3)
-        self.assertEqual(c.model_assets[0].source_sha256,hashlib.sha256(self.step).hexdigest())
-
-    def test_scaling_ignores_unit_tokens_inside_strings_and_comments(self):
-        trap = b"#999999=DESCRIPTIVE_REPRESENTATION_ITEM('fake; #88=', 'it''s LENGTH_UNIT() SI_UNIT($,.METRE.)');\n"
-        comment = b"/* #999998=(LENGTH_UNIT() CONTEXT_DEPENDENT_UNIT('fake')); */\n"
-        source_data = self.step.replace(b'ENDSEC;\nEND-ISO', trap+comment+b'ENDSEC;\nEND-ISO')
-        self.assertIn(trap,source_data)
-        scaled = _scale_units(source_data,2)
-        self.assertIn(trap,scaled)
-        self.assertIn(comment,scaled)
-        self.assertIn(b'CONVERSION_BASED_UNIT',scaled)
-        self.assertEqual(_scale_units(source_data,2),scaled)
-
-    def test_scaling_rejects_existing_conversion_units_even_when_outer_box_matches(self):
-        scaled = _scale_units(self.step,2)
-        with self.assertRaisesRegex(DownloadError,'非 SI'):
-            _scale_units(scaled,2)
-        # A conversion context for an interior assembly part can be invisible
-        # in the final bounding box; reject the context, not just bad bounds.
-        extra = b"#999990=(CONVERSION_BASED_UNIT('inch',#999991) LENGTH_UNIT() NAMED_UNIT(#999992));\n"
-        mixed = self.step.replace(b'ENDSEC;\nEND-ISO',extra+b'ENDSEC;\nEND-ISO')
-        with self.assertRaisesRegex(DownloadError,'非 SI'):
-            _scale_units(mixed,2)
 
     def test_ir_rejects_dangling_assets_and_missing_capability(self):
         c,_ = self.resolved()
@@ -323,7 +310,7 @@ class ModelPlacementTests(unittest.TestCase):
 
     def test_cancellation_is_not_a_model_warning(self):
         with self.assertRaises(Cancelled):
-            resolve_models(parse_component(source(),'C20197'),lambda _:None,lambda _:None,
+            resolve_models(parse_component(source(),'C20197'),lambda _:None,
                            lambda:(_ for _ in ()).throw(Cancelled()))
 
     def test_embedded_kicad_payload_can_be_independently_decompressed(self):
@@ -353,12 +340,12 @@ class ModelPlacementTests(unittest.TestCase):
         self.assertIn('(version 20240108)',footprint.read_text('utf-8'))
         self.assertEqual(model.parent.parent,footprint.parent)
 
-    def test_kicad_dimensionless_scale_preserves_small_positive_values(self):
+    def test_kicad_writes_unit_scale_even_for_tiny_source_dimensions(self):
         data = edit_attrs(source(),c_width=str(D('2e-7')/D('.254')),c_height=str(D('4e-7')/D('.254')))
         c,assets = self.resolved(data)
         raw = footprint_definition(c,'Small',model_assets=assets).decode()
         got = tuple(map(D,re.search(r'\(scale \(xyz ([^)]+)\)',raw).group(1).split()))
-        self.assertEqual(got,(D('1e-7'),)*3)
+        self.assertEqual(got,(D(1),)*3)
 
     @unittest.skipUnless(sys.platform=='win32','Native CFB writer')
     def test_ad_dedup_uses_content_and_pose_instead_of_compression_or_guid(self):
@@ -419,12 +406,23 @@ class ModelPlacementTests(unittest.TestCase):
         self.assertFalse(errors)
         self.assertEqual(sum(a.format=='KICAD_FOOTPRINT' for a in artifacts),2)
 
-    def test_backend_gets_models_without_standalone_step_selection(self):
-        result = backend.download_part('C20197',backend.Options(self.root/'out',('KICAD_FOOTPRINT',)),self.api())
+    def test_backend_binds_original_step_without_requesting_obj(self):
+        for fmt in ('PCBLIB','KICAD_FOOTPRINT'):
+            api = self.api()
+            api.get_raw_3d_model_obj = Mock(side_effect=AssertionError('unexpected OBJ request'))
+            result = backend.download_part('C20197',backend.Options(self.root/fmt,(fmt,)),api)
+            self.assertEqual(result.status,'成功',result.message)
+            api.get_raw_3d_model_obj.assert_not_called()
+            self.assertFalse(any(p.endswith('.step') for p in result.files))
+            self.assertTrue(result.files)
+
+    def test_explicit_obj_download_is_still_available_with_model_binding(self):
+        api = self.api()
+        api.get_raw_3d_model_obj = Mock(return_value=OBJ)
+        result = backend.download_part('C20197',backend.Options(self.root/'out',('PCBLIB','OBJ')),api)
         self.assertEqual(result.status,'成功',result.message)
-        self.assertTrue(any(p.endswith('.kicad_mod') for p in result.files))
-        self.assertFalse(any(p.endswith('.step') for p in result.files))
-        self.assertIn('kicad-embed://',Path(result.files[0]).read_text('utf-8'))
+        api.get_raw_3d_model_obj.assert_called_once_with('test-model')
+        self.assertEqual(next(Path(p) for p in result.files if p.endswith('.obj')).read_text('utf-8'),OBJ)
 
     def test_disabled_binding_does_not_request_model_resources(self):
         api = self.api()

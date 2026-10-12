@@ -713,19 +713,17 @@ def download_part(part: str, options: Options, api: NetworkApi,
     model_assets = None
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix='model-format') as pool:
         step = submit_logged(pool, component_step_payload, data, model, api) if model and ('STEP' in options.formats or bind_models) else None
-        obj = submit_logged(pool, api.get_raw_3d_model_obj, model.uuid) if model and ('OBJ' in options.formats or bind_models) else None
+        obj = submit_logged(pool, api.get_raw_3d_model_obj, model.uuid) if model and 'OBJ' in options.formats else None
         if bind_models:
             from model_export import resolve_models
-            notify('核对 3D 模型放置',title)
+            notify('准备 3D 模型',title)
             def fetch_step(reference):
                 if model and reference.uuid == model.uuid and step is not None:
                     return step.result()
                 if len(component.models) > 1:
                     return StepPayload(api.get_step_3d_model(reference.uuid),identifier=reference.uuid)
                 return component_step_payload(data,reference,api)
-            def fetch_obj(identifier):
-                return obj.result() if model and identifier == model.uuid and obj is not None else api.get_raw_3d_model_obj(identifier)
-            component,model_assets = resolve_models(component,fetch_step,fetch_obj,api.check_cancelled,
+            component,model_assets = resolve_models(component,fetch_step,api.check_cancelled,
                                                    prepare_altium='PCBLIB' in options.formats)
             for diagnostic in component.diagnostics:
                 if diagnostic.domain != 'model3d':

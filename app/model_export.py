@@ -1,4 +1,4 @@
-"""Resolve resources and verified placements before invoking any EDA writer."""
+"""Place original-size STEP resources using source positions and rotations."""
 from dataclasses import replace
 import hashlib
 import math
@@ -6,7 +6,7 @@ import math
 from eda_ir import D, Pad, ModelAsset, Diagnostic
 from errors import DownloadError, Cancelled
 from model3d import ModelReference
-from model_geometry import inspect_models, rotation_zxy, transform_bounds, scaled_step
+from model_geometry import step_bounds, rotation_zxy, transform_bounds
 from app_logging import record_error
 
 
@@ -14,7 +14,7 @@ def model_diagnostic(severity, code, message, model=None):
     return Diagnostic('model3d',severity,code,message,source_id=model.source_id if model else '')
 
 
-def resolve_models(component, step_fetch, obj_fetch, check=lambda: None, *, prepare_altium=False):
+def resolve_models(component, step_fetch, check=lambda: None, *, prepare_altium=False):
     """Keep each failed placement unresolved; successful 2D domains survive."""
     assets, payloads, models = {}, {}, []
     diagnostics = list(component.diagnostics)
@@ -37,43 +37,25 @@ def resolve_models(component, step_fetch, obj_fetch, check=lambda: None, *, prep
             step = step_fetch(reference)
             if not step.data:
                 raise DownloadError('官方 STEP 模型不可用')
-            obj = obj_fetch(model.identifier)
-            if not obj:
-                raise DownloadError('官方 OBJ 基准模型不可用，无法核对 STEP 放置')
-            geometry = inspect_models(step.data,obj,check)
-            if not geometry['compatible']:
-                raise DownloadError('STEP 与官方预览模型的几何基准不一致，已跳过关联')
-            box, ob = geometry['bounds'],geometry['obj_bounds']
-            scale = min(float(placement.size[i])/(ob[i+3]-ob[i]) for i in range(2))
-            if not math.isfinite(scale) or not 0 < scale <= 10000:
-                raise DownloadError('模型缩放比例超出支持范围')
+            box = step_bounds(step.data,check)
             rotation = rotation_zxy(placement.angles)
             anchor = ((box[0]+box[3])/2,(box[1]+box[4])/2,box[2])
-            offset = [float(placement.position[i])-scale*sum(rotation[i][j]*anchor[j] for j in range(3)) for i in range(3)]
-            matrix = tuple(D(str(scale*rotation[i][j] if j<3 else offset[i])) for i in range(3) for j in range(4)) + (D(0),D(0),D(0),D(1))
+            offset = [float(placement.position[i])-sum(rotation[i][j]*anchor[j] for j in range(3)) for i in range(3)]
+            matrix = tuple(D(str(rotation[i][j] if j<3 else offset[i])) for i in range(3) for j in range(4)) + (D(0),D(0),D(0),D(1))
             if any(abs(v)>10_000_000 for v in matrix):
                 raise DownloadError('模型放置超出目标坐标范围')
-            original_digest = hashlib.sha256(step.data).hexdigest()
             payload = step.data
-            resource_box = box
-            resource_scale = scale
             if prepare_altium:
                 if any(abs(v) > 5454 for v in (*offset,*transform_bounds(box,matrix))):
                     raise DownloadError('模型放置超出 AD 坐标范围，已跳过关联')
-                payload = scaled_step(payload,scale,check)
-                resource_box = tuple(v*scale for v in box)
-                resource_scale = 1.
-                matrix = tuple(D(str(rotation[i][j] if j<3 else offset[i])) for i in range(3) for j in range(4)) + (D(0),D(0),D(0),D(1))
             digest = hashlib.sha256(payload).hexdigest()
             assets[digest] = ModelAsset(getattr(step,'identifier','') or model.identifier,model.name,'STEP',digest,
-                                       hashlib.sha256(obj.encode('utf-8')).hexdigest(),tuple(D(str(v)) for v in resource_box),original_digest)
+                                       '',tuple(D(str(v)) for v in box),digest)
             payloads[digest] = payload
             resolved = replace(model,translation=tuple(D(str(v)) for v in offset),rotation=placement.angles,
-                               scale=(D(str(resource_scale)),)*3,asset_id=digest,transform=matrix)
-            if scale < .5 or scale > 2:
-                diagnostics.append(model_diagnostic('warning','unusual_model_scale','官方模型缩放比例明显偏离原尺寸，已按官方参数放置',model))
+                               scale=(D(1),)*3,asset_id=digest,transform=matrix)
             if pad_bounds:
-                b = transform_bounds(resource_box,matrix)
+                b = transform_bounds(box,matrix)
                 span = max(pad_bounds[2]-pad_bounds[0],pad_bounds[3]-pad_bounds[1],1.)
                 distance = math.hypot((b[0]+b[3]-pad_bounds[0]-pad_bounds[2])/2,
                                       (b[1]+b[4]-pad_bounds[1]-pad_bounds[3])/2)
@@ -86,7 +68,7 @@ def resolve_models(component, step_fetch, obj_fetch, check=lambda: None, *, prep
                 if model_span > span*20 or model_span < span/50:
                     diagnostics.append(model_diagnostic('warning','model_size_mismatch','官方模型与封装尺寸严重不符，已保留原放置参数',model))
             if step.used_library:
-                diagnostics.append(model_diagnostic('info','model_library_resolved','使用备用 STEP，并已核对官方预览模型的几何基准',model))
+                diagnostics.append(model_diagnostic('info','model_library_resolved','使用官方 3D 库备用 STEP，保留模型原始尺寸',model))
         except Cancelled:
             raise
         except Exception as exc:

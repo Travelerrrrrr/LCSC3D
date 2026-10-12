@@ -1,7 +1,7 @@
 """Offline frozen-app exercise of real STEP placement, GUI and resource output.
 
-The explicitly selected folder supplies fixtures/C2765186.json, source.step
-and source.obj. Reports and exported libraries stay in that same folder.
+The explicitly selected folder supplies fixtures/C2765186.json and source.step.
+Reports and exported libraries stay in that same folder. OBJ is never requested.
 """
 import base64
 import copy
@@ -26,7 +26,6 @@ def start(window, folder):
     root.mkdir(parents=True,exist_ok=True)
     source = json.loads((root/'fixtures/C2765186.json').read_text('utf-8'))
     step = (root/'fixtures/source.step').read_bytes()
-    obj = (root/'fixtures/source.obj').read_text('utf-8-sig')
     data = {p:copy.deepcopy(source) for p in ('C2765186','C900001','C900002','C900003','C900004')}
     for part in data:
         doc = data[part]['packageDetail']['dataStr']
@@ -59,7 +58,7 @@ def start(window, folder):
             return step
         def get_raw_3d_model_obj(self,identifier):
             self.check_cancelled()
-            return obj
+            raise AssertionError('Footprint export must not request OBJ')
 
     main.NetworkApi = OfflineApi
     window.request_component_info = lambda:None
@@ -68,7 +67,7 @@ def start(window, folder):
     cases = [('ad','ad',False,False,'embedded',['C2765186']),
              ('ad-merge','ad',True,False,'embedded',['C2765186','C900001']),
              ('ad-copies','ad',True,True,'embedded',['C2765186','C900001']),
-             ('ad-scaled','ad',False,False,'embedded',['C900004']),
+             ('ad-original-size','ad',False,False,'embedded',['C900004']),
              ('kicad-embedded','kicad',False,False,'embedded',['C2765186']),
              ('kicad-external','kicad',False,False,'external',['C2765186']),
              ('kicad-copies','kicad',True,True,'embedded',['C2765186','C900001']),
@@ -144,9 +143,7 @@ def start(window, folder):
                             assert count>0
                             for i in range(count):
                                 payload = zlib.decompress(ole.openstream('Library/Models/'+str(i)).read())
-                                assert b'ISO-10303-21' in payload[:64]
-                                if state['name']=='ad-scaled':
-                                    assert b'CONVERSION_BASED_UNIT' in payload
+                                assert payload==step
                                 model_count+=1
                     elif path.suffix=='.kicad_mod':
                         text = path.read_text('utf-8')
