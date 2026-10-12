@@ -1,4 +1,5 @@
 # Local tooling, research, generated releases and verification data.
+AGENTS.md
 /.codex/
 /.claude/
 /work/
