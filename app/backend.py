@@ -24,7 +24,8 @@ from app_logging import (log_event, record_error, traced, log_context, submit_lo
                          safe_part, network_target)
 from store_diagnostics import record_request_error
 from app_paths import temporary_directory, replace_file
-from model3d import document, model_reference
+from model3d import (ModelReference, document, model_reference,
+                     model_library_reference, model_library_asset)
 from altium import export_schlib, export_pcblib, export_linked_schlib, export_linked_pcblib, MergedLibrary
 from library_merge import read_library, append_library
 from altium_project import commit_user_file, add_libraries_to_project, read_project
@@ -43,6 +44,8 @@ COMPONENT_ENDPOINTS = ('https://lceda.cn/api/products/{part}/components',
                        'https://easyeda.com/api/products/{part}/components')
 ENDPOINT_3D_MODEL = 'https://modules.easyeda.com/3dmodel/{uuid}'
 ENDPOINT_3D_MODEL_STEP = 'https://modules.easyeda.com/qAxj6KHrDKw4blvCG8QJPs7Y/{uuid}'
+MODEL_LIBRARY_ENDPOINTS = ('https://lceda.cn/api/components/{uuid}',
+                           'https://easyeda.com/api/components/{uuid}')
 RESOURCE_REQUEST_ATTEMPTS = 5
 RESOURCE_RETRY_BACKOFF = 5.0
 RESOURCE_MAX_AUTOMATIC_WAIT = 120.0
@@ -336,6 +339,47 @@ class NetworkApi:
     def get_step_3d_model(self, uuid: str) -> bytes | None:
         return self._model_payload(uuid, ENDPOINT_3D_MODEL_STEP, 'step')
 
+    @traced('resources.model_library')
+    def get_3d_library_model(self, uuid: str) -> ModelReference | None:
+        if not isinstance(uuid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', uuid):
+            raise DownloadError('3D 库编号不受支持')
+        key = 'model-library:' + uuid
+        self.check_cancelled()
+        raw = PAYLOAD_CACHE.get(key) if self.use_cache else None
+        if raw is not None:
+            log_event('DEBUG', 'resources.cache_hit', resource='model_library')
+            return model_library_asset(json.loads(raw))
+        failures, last_error = [], None
+        for label, template in zip(('国内接口', '国际接口'), MODEL_LIBRARY_ENDPOINTS):
+            self.check_cancelled()
+            try:
+                raw = self.fetch(template.format(uuid=uuid), optional=True)
+                if raw is None:
+                    failures.append(label + '：3D 库记录不存在或已移除')
+                    continue
+                try:
+                    data = json.loads(raw)
+                except (ValueError, UnicodeDecodeError) as exc:
+                    raise DownloadError('官方 3D 库接口返回了无法识别的数据') from exc
+                if not isinstance(data, dict) or not data.get('success') or not isinstance(data.get('result'), dict):
+                    raise DownloadError('官方 3D 库记录不可用')
+                library = data['result']
+                if library.get('uuid') != uuid:
+                    raise DownloadError('官方 3D 库编号与请求不一致')
+                reference = model_library_asset(library)
+                self.check_cancelled()
+                if self.use_cache:
+                    PAYLOAD_CACHE.put(key, json.dumps(library, ensure_ascii=False).encode('utf-8'), 600)
+                return reference
+            except DownloadError as exc:
+                record_error(exc, 'resources.model_library_mirror_failed', level='WARNING', host=network_target(template))
+                last_error = exc
+                failures.append(label + '：' + str(exc))
+        self.check_cancelled()
+        if last_error is not None:
+            raise DownloadError('官方 3D 库查询失败：' + '；'.join(failures)) from last_error
+        return None
+
     @traced('resources.model', lambda self, uuid, template, kind: {'format': kind.upper()})
     def _model_payload(self, uuid, template, kind):
         if not isinstance(uuid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', uuid):
@@ -344,11 +388,13 @@ class NetworkApi:
         self.check_cancelled()
         raw = PAYLOAD_CACHE.get(key) if self.use_cache else None
         if raw is None:
-            last_error = None
-            for endpoint in (template.replace('modules.easyeda.com', 'modules.lceda.cn'), template):
+            failures, last_error = [], None
+            for label, endpoint in (('国内接口', template.replace('modules.easyeda.com', 'modules.lceda.cn')),
+                                    ('国际接口', template)):
                 try:
                     raw = self.fetch(endpoint.format(uuid=uuid), optional=True)
                     if raw is None:
+                        failures.append(label + '：文件不存在或已移除')
                         continue
                     if kind == 'step' and b'ISO-10303-21' not in raw[:2048]:
                         raise DownloadError('STEP 接口未返回有效的 STEP 文件')
@@ -362,11 +408,53 @@ class NetworkApi:
                 except (DownloadError, UnicodeDecodeError) as exc:
                     record_error(exc, 'resources.model_mirror_failed', level='WARNING', host=network_target(endpoint))
                     last_error = exc
+                    failures.append(label + '：' + str(exc))
                     raw = None
             if raw is None and last_error is not None:
-                raise DownloadError(str(last_error)) from last_error
+                raise DownloadError('；'.join(failures)) from last_error
         self.check_cancelled()
         return raw.decode('utf-8-sig') if kind == 'obj' and raw is not None else raw
+
+
+@dataclass(frozen=True)
+class StepPayload:
+    data: bytes | None
+    used_library: bool = False
+
+
+@traced('resources.component_step', lambda component, model, api: {'format': 'STEP'})
+def component_step_payload(component: dict, model: ModelReference, api: NetworkApi) -> StepPayload:
+    """Keep the explicit asset first; resolve the linked library only on failure."""
+    api.check_cancelled()
+    try:
+        payload = api.get_step_3d_model(model.uuid)
+        if payload:
+            return StepPayload(payload)
+        primary_error = DownloadError('文件不存在或已移除')
+    except DownloadError as exc:
+        primary_error = exc
+    api.check_cancelled()
+    try:
+        library = model_library_reference(component)
+        if library is None:
+            raise DownloadError('封装没有备用 3D 库关联')
+        log_event('INFO', 'resources.step_fallback_started', model_id=model.uuid, library_id=library.uuid)
+        reference = api.get_3d_library_model(library.uuid)
+        api.check_cancelled()
+        if reference is None:
+            raise DownloadError('官方 3D 库记录不存在或已移除')
+        if reference.uuid == model.uuid:
+            raise DownloadError('备用关联指向相同的模型资源')
+        log_event('DEBUG', 'resources.step_fallback_resolved', library_id=library.uuid, model_id=reference.uuid)
+        payload = api.get_step_3d_model(reference.uuid)
+        api.check_cancelled()
+        if not payload:
+            raise DownloadError('备用 STEP 文件不存在或已移除')
+        log_event('INFO', 'resources.step_fallback_succeeded', model_id=reference.uuid, bytes=len(payload))
+        return StepPayload(payload, used_library=True)
+    except DownloadError as exc:
+        record_error(exc, 'resources.step_fallback_failed', level='WARNING')
+        raise DownloadError(f'主模型 STEP：{primary_error}；备用关联：{exc}') from exc
 
 
 @dataclass
@@ -592,7 +680,7 @@ def download_part(part: str, options: Options, api: NetworkApi,
               'merge' if options.merged_paths() else 'individual',
               model_layout='component' if model_folder == folder else 'library',
               individual_formats=[fmt for fmt in options.merged_paths() if options.keeps_individual(fmt)])
-    completed, errors = [], []
+    completed, errors, notes = [], [], []
     model, model_error = None, ''
     try:
         model = model_reference(data)
@@ -615,7 +703,7 @@ def download_part(part: str, options: Options, api: NetworkApi,
         if libraries and fmt in libraries and options.keeps_individual(fmt) and path.resolve() in reserved:
             raise DownloadError('独立导出与指定库路径相同，请关闭“独立导出器件”或另选保存目录')
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix='model-format') as pool:
-        step = submit_logged(pool, api.get_step_3d_model, model.uuid) if model and 'STEP' in options.formats else None
+        step = submit_logged(pool, component_step_payload, data, model, api) if model and 'STEP' in options.formats else None
         obj = submit_logged(pool, api.get_raw_3d_model_obj, model.uuid) if model and 'OBJ' in options.formats else None
         for fmt in options.formats:
             api.check_cancelled()
@@ -656,7 +744,10 @@ def download_part(part: str, options: Options, api: NetworkApi,
                     errors.append(f'{fmt}：' + (model_error or '官方库中没有关联的 3D 模型'))
                     continue
                 elif fmt == 'STEP':
-                    payload = step.result()
+                    resource = step.result()
+                    payload = resource.data
+                    if resource.used_library:
+                        notes.append('STEP 使用官方 3D 库备用关联，坐标以文件为准')
                 else:
                     raw_obj = obj.result()
                     payload = raw_obj.encode('utf-8') if raw_obj else None
@@ -680,12 +771,12 @@ def download_part(part: str, options: Options, api: NetworkApi,
                 errors.append(f'{fmt}：{exc}')
     if completed:
         result.status = '部分完成' if errors else '成功'
-        result.message = '；'.join(['已保存 ' + ' / '.join(completed)] + errors)
+        result.message = '；'.join(['已保存 ' + ' / '.join(completed)] + errors + notes)
     else:
-        result.message = '；'.join(errors) or '没有可保存的文件'
+        result.message = '；'.join(errors + notes) or '没有可保存的文件'
     if result.pending_formats:
         result.status = '等待合并'
-        result.message = '；'.join((['已保存 ' + ' / '.join(completed)] if completed else []) + errors)
+        result.message = '；'.join((['已保存 ' + ' / '.join(completed)] if completed else []) + errors + notes)
     result.completed_formats = completed[:]
     result.export_errors = errors[:]
     log_event('INFO' if not errors else 'WARNING', 'download.part_result', status=result.status,

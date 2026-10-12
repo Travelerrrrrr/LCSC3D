@@ -2203,6 +2203,7 @@ def main():
     parser.add_argument('--self-test-settings', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-backups', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-export', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-resources', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-kicad', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--capture-docs', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-material', metavar='FOLDER', help=argparse.SUPPRESS)
@@ -2236,7 +2237,7 @@ def main():
     logging.getLogger().setLevel(logging.ERROR)
     test_destination = next((value for value in (args.self_test, args.self_test_ad, args.self_test_favorites,
                                                   args.self_test_store_live, args.self_test_settings, args.self_test_backups,
-                                                  args.self_test_export, args.self_test_kicad,
+                                                  args.self_test_export, args.self_test_resources, args.self_test_kicad,
                                                   args.capture_docs, args.self_test_material) if value), None)
     configure_logging('DEBUG' if test_destination else initial_log_level(SETTINGS_PATH), version=VERSION,
                       directory=Path(test_destination) / 'logs' if test_destination else None)
@@ -2270,6 +2271,10 @@ def main():
     if args.self_test_export:
         from export_selftest import start
         start(window, args.self_test_export)
+        return app.exec()
+    if args.self_test_resources:
+        from resource_selftest import start
+        start(window, args.self_test_resources)
         return app.exec()
     if args.self_test_kicad:
         from kicad_selftest import start

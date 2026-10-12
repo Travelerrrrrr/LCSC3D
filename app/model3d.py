@@ -55,6 +55,29 @@ def model_reference(component: dict) -> ModelReference | None:
     return None
 
 
+@traced('model.library_reference')
+def model_library_reference(component: dict) -> ModelReference | None:
+    """Read the 3D library record ID, which may differ from the file asset ID."""
+    package = document(component.get('packageDetail'))
+    head = document(document(package.get('dataStr')).get('head'))
+    uuid = head.get('uuid_3d')
+    if not uuid:
+        return None
+    params = document(head.get('c_para'))
+    return _reference(uuid, params.get('3DModel') or package.get('title'))
+
+
+@traced('model.library_asset')
+def model_library_asset(library: dict) -> ModelReference:
+    """Resolve a type-16 official library to its actual model file ID."""
+    if not isinstance(library, dict) or str(library.get('docType')) != '16':
+        raise DownloadError('官方 3D 库记录类型不受支持')
+    head = document(document(library.get('dataStr')).get('head'))
+    if not head.get('uuid'):
+        raise DownloadError('官方 3D 库没有关联模型文件')
+    return _reference(head['uuid'], library.get('title'))
+
+
 def _reference(uuid, name):
     if not isinstance(uuid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', uuid):
         raise DownloadError('3D 模型编号不受支持')
