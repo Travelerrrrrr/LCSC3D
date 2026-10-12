@@ -1,5 +1,6 @@
 # Local tooling, research, generated releases and verification data.
 AGENTS.md
+GLOSSARY.md
 /.codex/
 /.claude/
 /work/
