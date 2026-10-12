@@ -329,6 +329,51 @@ def import_footprint(data, part, check):
                      tuple(items), str(head.get('licence') or ''))
 
 
+def model_outline_center(node):
+    """Reproduce Standard moveOutline's pre-move SVG group bbox centre.
+
+    Published model outlines use untransformed polyline children. The group
+    transform itself is deliberately excluded, just as SVG getBBox excludes
+    the queried element's own transform. Never substitute the pad centre.
+    Unsupported/absent outline geometry leaves the declared origin in use.
+    """
+    children = node.get('childNodes')
+    if not isinstance(children, list) or not children:
+        return None
+    pending, vertices, count = list(children), [], 0
+    while pending:
+        child = pending.pop()
+        count += 1
+        if count > 1024 or not isinstance(child, dict):
+            return None
+        attrs = child.get('attrs')
+        if not isinstance(attrs, dict) or attrs.get('transform') or attrs.get('style') or attrs.get('display'):
+            return None
+        kind = child.get('nodeName')
+        if kind == 'g':
+            nested = child.get('childNodes')
+            if not isinstance(nested, list):
+                return None
+            pending.extend(nested)
+        elif kind in ('polyline', 'polygon'):
+            try:
+                vertices.extend(points(attrs.get('points', '')))
+            except (DownloadError, TypeError):
+                return None
+            if len(vertices) > 200000:
+                return None
+        else:
+            return None
+    if not vertices:
+        return None
+    low = tuple(min(p[i] for p in vertices) for i in range(2))
+    high = tuple(max(p[i] for p in vertices) for i in range(2))
+    if any(a >= b for a, b in zip(low, high)):
+        return None
+    # hn.toFixed(..., 4): Math.round(value * 10000) / 10000.
+    return tuple(D(str(math.floor((a + (b-a)/2) * 10000 + .5) / 10000)) for a, b in zip(low, high))
+
+
 def import_models(data, package, head):
     """Parse each explicit Standard model node, retaining failures per node."""
     models, diagnostics = [], []
@@ -363,6 +408,14 @@ def import_models(data, package, head):
                     raise DownloadError('3D 模型放置参数缺失或格式无效')
                 return tuple(decimal(v.strip()) for v in value.split(','))
             x,y = vector(attrs.get('c_origin'),2)
+            outline_center = model_outline_center(node)
+            # Differences within the source's 4-decimal grid are round-off.
+            # Larger differences are stale c_origin values: the Standard PCB
+            # placement path rewrites them from the model's own outline.
+            if outline_center and any(abs(a-b) > D('.0001') for a,b in zip((x,y),outline_center)):
+                x,y = outline_center
+                diagnostics.append(Diagnostic('model3d','info','model_origin_normalized',
+                    '已按标准版放置规则更新模型原点',source_id=identity))
             angles = vector(attrs.get('c_rotation'),3)
             if any(k not in attrs or str(attrs[k]).strip() == '' for k in ('z','c_width','c_height')):
                 raise DownloadError('3D 模型高度或尺寸参数缺失')

@@ -11,6 +11,7 @@ ENGLISH = {
     '复制元件编号': 'Copy part numbers',
     '复制详情': 'Copy details',
     '核对 3D 模型放置': 'Verifying 3D model placement',
+    '已按标准版放置规则更新模型原点': 'Model origin updated using Standard PCB placement rules',
     '无关联 3D 模型': 'No associated 3D model',
     '模型缺少已验证的放置参数，已跳过关联': 'Model has no verified placement; attachment skipped',
     '官方关联了模型，但缺少可解释的放置参数': 'An official model is linked, but its placement cannot be interpreted',

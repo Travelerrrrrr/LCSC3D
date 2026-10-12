@@ -42,7 +42,8 @@ class IRTests(unittest.TestCase):
                 first = parse_component(case['data'], case['part'])
                 second = loads(dumps(first))
                 self.assertEqual(first, second)
-                self.assertFalse(second.diagnostics)
+                expected = [('model3d','info','model_origin_normalized')] if case['part'] in ('C57113','C83790') else []
+                self.assertEqual([(d.domain,d.severity,d.code) for d in second.diagnostics],expected)
                 old_pins = schematic(export_schlib(case['data'], case['part']))[2]
                 new_pins = schematic(export_schlib(second, case['part']))[2]
                 self.assertEqual(old_pins, new_pins)

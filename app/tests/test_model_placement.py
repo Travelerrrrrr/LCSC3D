@@ -20,7 +20,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import backend
 from app_logging import close_logging
 from app_paths import temporary_directory
-from easyeda_import import parse_component
+from easyeda_import import parse_component, model_outline_center
 from eda_ir import Model3D, ModelPlacement, ModelAsset, dumps, loads
 from errors import DownloadError, Cancelled
 from model_export import resolve_models
@@ -120,6 +120,57 @@ class ModelPlacementTests(unittest.TestCase):
         for name in ('ir_v1_0.json','ir_v1_1_via.json'):
             old = loads((FIXTURES/name).read_text('utf-8'))
             self.assertEqual(loads(dumps(old)),old)
+
+    def test_standard_pcb_placement_rebases_stale_public_model_origins(self):
+        cases = json.loads((FIXTURES/'model_origin_cases.json').read_text('utf-8'))['cases']
+        for case in cases:
+            with self.subTest(part=case['part']):
+                before = json.dumps(case['component'],ensure_ascii=False)
+                c = parse_component(case['component'],case['part'])
+                self.assertIsNotNone(c.footprint)
+                self.assertTrue(any(d.code=='model_origin_normalized' and d.severity=='info' for d in c.diagnostics))
+                p = c.models[0].placement
+                self.assertLess(max(abs(v) for v in p.position[:2]),D('.0001'))
+                self.assertEqual(p.angles[2],{'C2861386':D(0),'C57113':D(90),'C83790':D(180)}[case['part']])
+                raw = json.loads(c.models[0].extensions[0].payload)['placements'][0]['c_origin']
+                self.assertNotEqual(raw,'4000,3000')
+                self.assertEqual(json.dumps(case['component'],ensure_ascii=False),before)
+                self.assertEqual(loads(dumps(c)),c)
+
+    def test_c2861386_resolved_export_has_no_spurious_far_placement(self):
+        case = json.loads((FIXTURES/'model_origin_cases.json').read_text('utf-8'))['cases'][0]
+        c,assets = self.resolved(case['component'])
+        self.assertTrue(assets,c.diagnostics)
+        self.assertEqual(c.models[0].placement.position,(D(0),D(0),D(0)))
+        self.assertFalse(any(d.code=='model_far_from_footprint' for d in c.diagnostics))
+        self.assertEqual((c.models[0].transform[3],c.models[0].transform[7]),(D(0),D(0)))
+        text = footprint_definition(c,'CorrectOrigin',model_assets=assets).decode()
+        offset = tuple(map(D,re.search(r'\(offset \(xyz ([^)]+)\)',text).group(1).split()))
+        self.assertEqual(offset[:2],(D(0),D(0)))
+
+    def test_outline_origin_preserves_deliberate_offset_and_all_outline_children(self):
+        data = source('10,20,30','-2')
+        doc = data['packageDetail']['dataStr']
+        node = json.loads(doc['shape'][-1].partition('~')[2])
+        x,y = D(str(doc['head']['x'])),D(str(doc['head']['y']))
+        # The model outline is deliberately offset from the footprint. Its own
+        # display scaling does not participate in SVG getBBox on that group.
+        node['attrs']['transform'] = 'scale(2) translate(123, 456)'
+        node['childNodes'] = [{'nodeName':'polyline','attrs':{'points':f'{x+48} {y-32} {x+49} {y-31}'}},
+                              {'nodeName':'polyline','attrs':{'points':f'{x+51} {y-29} {x+52} {y-28}'}}]
+        doc['shape'][-1] = 'SVGNODE~'+json.dumps(node)
+        c = parse_component(data,'C20197')
+        p = c.models[0].placement
+        self.assertEqual(p.position,(D('12.7'),D('7.62'),D('-.508')))
+        self.assertEqual(p.angles,(D(10),D(20),D(30)))
+
+    def test_unknown_outline_geometry_does_not_guess_a_new_origin(self):
+        for child in ({'nodeName':'path','attrs':{'d':'M 0 0 L 10 10'}},
+                      {'nodeName':'polyline','attrs':{'points':'0 0 10 10','transform':'translate(5,6)'}},
+                      {'nodeName':'polyline','attrs':{'points':'nan 0 10 10'}},
+                      {'nodeName':'polyline','attrs':{'points':'0 0 10 0'}}):
+            self.assertIsNone(model_outline_center({'childNodes':[child]}))
+        self.assertIsNone(model_outline_center({'childNodes':[]}))
 
     def test_all_explicit_nodes_survive_and_malformed_node_keeps_2d(self):
         data = source()
