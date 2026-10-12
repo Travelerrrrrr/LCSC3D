@@ -1,0 +1,1056 @@
+"""Download official models and export native AD symbol/footprint libraries."""
+from __future__ import annotations
+
+import gzip
+import json
+import os
+import re
+import ssl
+import tempfile
+import threading
+import time
+from collections import OrderedDict
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlsplit
+
+from lcsc3d.core.errors import Cancelled, DownloadError
+from lcsc3d.services.download_progress import BatchProgress
+from lcsc3d.core.app_settings import proxy_for_url, proxy_mode
+from lcsc3d.eda.symbol_style import normalize_symbol_style
+from lcsc3d.core.app_logging import (log_event, record_error, traced, log_context, submit_logged,
+                         safe_part, network_target)
+from lcsc3d.services.store_diagnostics import record_request_error
+from lcsc3d.core.app_paths import temporary_directory, replace_file
+from lcsc3d.models.model3d import (ModelReference, document, model_reference,
+                     model_library_reference, model_library_asset)
+from lcsc3d.eda.altium import export_schlib, export_pcblib, export_linked_schlib, export_linked_pcblib, MergedLibrary
+from lcsc3d.eda.library_merge import read_library, append_library
+from lcsc3d.eda.altium_project import commit_user_file, add_libraries_to_project, read_project
+from lcsc3d.eda.easyeda_import import parse_component
+from lcsc3d.eda.kicad import FORMATS as KICAD_FORMATS, library_name as kicad_library_name
+from lcsc3d.eda.kicad_export import export_batch as export_kicad_batch
+import certifi
+import urllib3
+from urllib3.util import Retry, Timeout
+
+SVG_ENDPOINTS = (
+    'https://lceda.cn/api/products/{part}/svgs',
+    'https://easyeda.com/api/products/{part}/svgs',
+)
+COMPONENT_ENDPOINTS = ('https://lceda.cn/api/products/{part}/components',
+                       'https://easyeda.com/api/products/{part}/components')
+ENDPOINT_3D_MODEL = 'https://modules.easyeda.com/3dmodel/{uuid}'
+ENDPOINT_3D_MODEL_STEP = 'https://modules.easyeda.com/qAxj6KHrDKw4blvCG8QJPs7Y/{uuid}'
+MODEL_LIBRARY_ENDPOINTS = ('https://lceda.cn/api/components/{uuid}',
+                           'https://easyeda.com/api/components/{uuid}')
+RESOURCE_REQUEST_ATTEMPTS = 5
+RESOURCE_RETRY_BACKOFF = 5.0
+RESOURCE_MAX_AUTOMATIC_WAIT = 120.0
+
+
+class ResourceCooldowns:
+    """Share server backoff across downloads, metadata and preview API instances."""
+    def __init__(self):
+        self.deadlines = {}
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def origin(url):
+        parsed = urlsplit(url)
+        return parsed.scheme, parsed.hostname, parsed.port
+
+    def defer(self, url, seconds):
+        now = time.monotonic()
+        origin = self.origin(url)
+        with self.lock:
+            self.deadlines = {key: deadline for key, deadline in self.deadlines.items() if deadline > now}
+            self.deadlines[origin] = max(self.deadlines.get(origin, now), now + seconds)
+
+    def wait(self, url, cancelled):
+        origin = self.origin(url)
+        while True:
+            if cancelled.is_set():
+                raise Cancelled()
+            with self.lock:
+                delay = self.deadlines.get(origin, 0) - time.monotonic()
+            if delay <= 0:
+                return
+            if delay > RESOURCE_MAX_AUTOMATIC_WAIT:
+                # Do not retry early or leave a worker waiting for an unbounded header.
+                raise DownloadError('服务器要求较长时间后重试，请稍后重新下载')
+            if cancelled.wait(delay):
+                raise Cancelled()
+
+
+RESOURCE_COOLDOWNS = ResourceCooldowns()
+
+
+class PayloadCache:
+    """A bounded, process-local cache; model UUIDs identify immutable payloads."""
+    def __init__(self, max_bytes=16 * 1024 * 1024):
+        self.max_bytes = max_bytes
+        self.size = 0
+        self.items = OrderedDict()
+        self.lock = threading.Lock()
+
+    def get(self, key):
+        with self.lock:
+            entry = self.items.pop(key, None)
+            if entry is None:
+                return None
+            expires, value = entry
+            if expires < time.monotonic():
+                self.size -= len(value)
+                return None
+            self.items[key] = entry
+            return value
+
+    def put(self, key, value, ttl):
+        if len(value) > self.max_bytes:
+            return
+        with self.lock:
+            old = self.items.pop(key, None)
+            if old:
+                self.size -= len(old[1])
+            self.items[key] = (time.monotonic() + ttl, value)
+            self.size += len(value)
+            while self.size > self.max_bytes:
+                _, (_, removed) = self.items.popitem(last=False)
+                self.size -= len(removed)
+
+
+PAYLOAD_CACHE = PayloadCache()
+
+
+@lru_cache(maxsize=1)
+def shared_ssl_context():
+    context = ssl.create_default_context()
+    context.load_verify_locations(cafile=certifi.where())
+    return context
+
+
+@lru_cache(maxsize=4)
+def connection_pool(proxy=None):
+    kwargs = dict(num_pools=8, maxsize=6, block=True, ssl_context=shared_ssl_context())
+    return urllib3.ProxyManager(proxy, **kwargs) if proxy else urllib3.PoolManager(**kwargs)
+
+
+def parse_part_numbers(text: str) -> tuple[list[str], list[str], int]:
+    """Accept multiline/comma/space-separated IDs; preserve order, deduplicate."""
+    ids, invalid, seen = [], [], set()
+    duplicates = 0
+    for token in re.split(r'[\s,;，；、|]+', text.strip()):
+        token = token.strip('\"\'[]()')
+        if not token:
+            continue
+        if not re.fullmatch(r'[cC][0-9]+', token):
+            if token not in invalid:
+                invalid.append(token)
+            continue
+        part = token.upper()
+        if part in seen:
+            duplicates += 1
+        else:
+            seen.add(part)
+            ids.append(part)
+    return ids, invalid, duplicates
+
+
+def safe_filename(name: str) -> str:
+    clean = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name).strip(' .')[:115]
+    if not clean:
+        return 'model'
+    if re.fullmatch(r'(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])', clean, re.I):
+        return '_' + clean
+    return clean
+
+
+@traced('file.write', lambda path, data: {'format': path.suffix.lower(), 'bytes': len(data)})
+def atomic_write(path: Path, data: bytes) -> None:
+    """Replace complete files only. Partial downloads never become final files."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix='.lcsc-', suffix='.tmp', dir=temporary_directory())
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        replace_file(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+class NetworkApi:
+    """Official component/model APIs with bounded requests and cancellation."""
+    def __init__(self, cancelled: threading.Event | None = None, use_cache=True):
+        self.cancelled = cancelled or threading.Event()
+        self.headers = {'User-Agent': 'LCSC3D/2.4.0-demo.2', 'Accept-Encoding': 'gzip',
+                        'Accept': '*/*'}
+        self.use_cache = use_cache
+
+    def check_cancelled(self):
+        if self.cancelled.is_set():
+            raise Cancelled()
+
+    @traced('resources.request', lambda self, url, **kw: {'host': network_target(url)})
+    def fetch(self, url: str, optional: bool = False) -> bytes | None:
+        transient_failures = 0
+        for attempt in range(RESOURCE_REQUEST_ATTEMPTS):
+            self.check_cancelled()
+            RESOURCE_COOLDOWNS.wait(url, self.cancelled)
+            proxy = proxy_for_url(url, 'store')
+            response = None
+            shared_backoff = False
+            try:
+                log_event('DEBUG', 'resources.request_started', operation='元件资源请求',
+                          proxy_mode=proxy_mode('store'), using_proxy=proxy is not None, attempt=attempt + 1)
+                response = connection_pool(proxy).request('GET', url, headers=self.headers, preload_content=False,
+                    timeout=Timeout(connect=6, read=18), pool_timeout=18,
+                    # urllib3 otherwise raises on 429/503 + Retry-After with status=0,
+                    # or sleeps internally without observing our cancellation event.
+                    retries=Retry(total=2, connect=0, read=0, status=0, redirect=2,
+                                  respect_retry_after_header=False))
+                if optional and response.status in (404, 410):
+                    log_event('WARNING', 'resources.unavailable', status=response.status)
+                    return None
+                if response.status >= 400:
+                    log_event('WARNING', 'resources.http_rejected', status=response.status, attempt=attempt + 1)
+                    if response.status == 429 or (response.status == 503 and response.headers.get('Retry-After')):
+                        delay = None
+                        try:
+                            delay = Retry(retry_after_max=float('inf')).get_retry_after(response)
+                        except (urllib3.exceptions.InvalidHeader, ValueError, OverflowError):
+                            log_event('WARNING', 'resources.retry_after_invalid', status=response.status)
+                        delay = delay if delay and delay > 0 else RESOURCE_RETRY_BACKOFF * 2 ** attempt
+                        RESOURCE_COOLDOWNS.defer(url, delay)
+                        shared_backoff = True
+                        log_event('WARNING', 'resources.rate_limited', status=response.status,
+                                  attempt=attempt + 1, retry_seconds=delay)
+                        if attempt == RESOURCE_REQUEST_ATTEMPTS - 1:
+                            raise DownloadError(f'服务器繁忙或请求过于频繁（HTTP {response.status}），请稍后重试')
+                    else:
+                        transient_failures += 1
+                        if response.status < 500 or transient_failures >= 2 or attempt == RESOURCE_REQUEST_ATTEMPTS - 1:
+                            raise DownloadError(f'服务器返回 HTTP {response.status}')
+                else:
+                    chunks = []
+                    while True:
+                        self.check_cancelled()
+                        block = response.read(64 * 1024, decode_content=True)
+                        if not block:
+                            break
+                        chunks.append(block)
+                    raw = b''.join(chunks)
+                    status = response.status
+                    response.release_conn()
+                    response = None
+                    body = gzip.decompress(raw) if raw.startswith(b'\x1f\x8b') else raw
+                    log_event('DEBUG', 'resources.request_completed', bytes=len(body), status=status)
+                    return body
+            except (urllib3.exceptions.HTTPError, TimeoutError, OSError) as exc:
+                self.check_cancelled()
+                record_error(exc, 'resources.attempt_failed', level='WARNING', attempt=attempt + 1)
+                transient_failures += 1
+                if transient_failures >= 2 or attempt == RESOURCE_REQUEST_ATTEMPTS - 1:
+                    record_request_error(exc, '元件资源请求')
+                    raise DownloadError(f'网络请求失败：{getattr(exc, "reason", exc)}') from exc
+            finally:
+                if response is not None:
+                    response.close()
+                    response.release_conn()
+            # Responses must be closed/released before another worker waits for a slot.
+            if not shared_backoff and self.cancelled.wait(0.7):
+                raise Cancelled()
+        raise DownloadError('网络请求失败')
+
+    @traced('resources.component', lambda self, lcsc_id: {'part': safe_part(lcsc_id)})
+    def get_info_from_easyeda_api(self, lcsc_id: str) -> dict:
+        if not re.fullmatch(r'C[0-9]+', lcsc_id):
+            raise DownloadError('请使用有效的立创 C 编号')
+        key = 'component:' + lcsc_id
+        raw = PAYLOAD_CACHE.get(key) if self.use_cache else None
+        if raw is not None:
+            log_event('DEBUG', 'resources.cache_hit', resource='component')
+            self.check_cancelled()
+            return json.loads(raw)
+        for template in COMPONENT_ENDPOINTS:
+            self.check_cancelled()
+            try:
+                raw = self.fetch(template.format(part=lcsc_id))
+                try:
+                    data = json.loads(raw or b'{}')
+                except (ValueError, UnicodeDecodeError) as exc:
+                    raise DownloadError('接口返回了无法识别的数据，请稍后重试') from exc
+                if not isinstance(data, dict) or not data.get('success') or not isinstance(data.get('result'), dict) or not data['result']:
+                    raise DownloadError('未找到器件，请核对立创 C 编号')
+                data['source_url'] = template.format(part=lcsc_id)
+                if self.use_cache:
+                    PAYLOAD_CACHE.put(key, json.dumps(data, ensure_ascii=False).encode('utf-8'), 600)
+                return data
+            except DownloadError as exc:
+                record_error(exc, 'resources.mirror_failed', level='WARNING', host=network_target(template))
+                last_error = exc
+        raise last_error
+
+    @traced('resources.cad_parse', lambda self, part: {'part': safe_part(part)})
+    def get_cad_data_of_component(self, part: str) -> dict:
+        response = self.get_info_from_easyeda_api(part)
+        data = dict(response['result'])
+        data['_source_url'] = response.get('source_url', '')
+        for key in ('dataStr', 'packageDetail'):
+            if data.get(key):
+                data[key] = document(data[key])
+        if data.get('packageDetail'):
+            package = dict(data['packageDetail'])
+            package['dataStr'] = document(package.get('dataStr'))
+            data['packageDetail'] = package
+        return data
+
+    @traced('resources.svg', lambda self, part: {'part': safe_part(part)})
+    def get_svg_data_of_component(self, part: str) -> dict:
+        """Fetch storefront SVGs; use the official mirror if the first host fails."""
+        if not re.fullmatch(r'C[0-9]+', part):
+            raise DownloadError('请使用有效的立创 C 编号')
+        for template in SVG_ENDPOINTS:
+            self.check_cancelled()
+            url = template.format(part=part)
+            try:
+                raw = self.fetch(url)
+                try:
+                    data = json.loads(raw or b'{}')
+                except (ValueError, UnicodeDecodeError) as exc:
+                    raise DownloadError('官方 SVG 接口返回了无法识别的数据') from exc
+                if not isinstance(data, dict) or not data.get('success') or not isinstance(data.get('result'), list):
+                    raise DownloadError('未找到官方 SVG 预览，请核对立创 C 编号')
+                self.check_cancelled()
+                return {**data, 'source_url': url}
+            except DownloadError as exc:
+                record_error(exc, 'resources.svg_mirror_failed', level='WARNING', host=network_target(template))
+                last_error = exc
+        raise DownloadError(f'官方 SVG 预览获取失败：{last_error}') from last_error
+
+    def get_raw_3d_model_obj(self, uuid: str) -> str | None:
+        return self._model_payload(uuid, ENDPOINT_3D_MODEL, 'obj')
+
+    def get_model_origin(self, uuid: str):
+        """Reuse a tiny session-local anchor; never retain parsed mesh geometry."""
+        from lcsc3d.models.model_geometry import ModelOrigin, obj_origin
+        self.check_cancelled()
+        key = 'model-origin-v1:' + uuid
+        cached = PAYLOAD_CACHE.get(key) if self.use_cache else None
+        if cached is not None:
+            item = json.loads(cached)
+            return ModelOrigin(tuple(item['position']), item['sha256'])
+        origin = obj_origin(self.get_raw_3d_model_obj(uuid), self.check_cancelled)
+        if self.use_cache:
+            PAYLOAD_CACHE.put(key, json.dumps(dict(position=origin.position, sha256=origin.sha256)).encode('utf-8'), 86400)
+        return origin
+
+    def get_step_3d_model(self, uuid: str) -> bytes | None:
+        return self._model_payload(uuid, ENDPOINT_3D_MODEL_STEP, 'step')
+
+    @traced('resources.model_library')
+    def get_3d_library_model(self, uuid: str) -> ModelReference | None:
+        if not isinstance(uuid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', uuid):
+            raise DownloadError('3D 库编号不受支持')
+        key = 'model-library:' + uuid
+        self.check_cancelled()
+        raw = PAYLOAD_CACHE.get(key) if self.use_cache else None
+        if raw is not None:
+            log_event('DEBUG', 'resources.cache_hit', resource='model_library')
+            return model_library_asset(json.loads(raw))
+        failures, last_error = [], None
+        for label, template in zip(('国内接口', '国际接口'), MODEL_LIBRARY_ENDPOINTS):
+            self.check_cancelled()
+            try:
+                raw = self.fetch(template.format(uuid=uuid), optional=True)
+                if raw is None:
+                    failures.append(label + '：3D 库记录不存在或已移除')
+                    continue
+                try:
+                    data = json.loads(raw)
+                except (ValueError, UnicodeDecodeError) as exc:
+                    raise DownloadError('官方 3D 库接口返回了无法识别的数据') from exc
+                if not isinstance(data, dict) or not data.get('success') or not isinstance(data.get('result'), dict):
+                    raise DownloadError('官方 3D 库记录不可用')
+                library = data['result']
+                if library.get('uuid') != uuid:
+                    raise DownloadError('官方 3D 库编号与请求不一致')
+                reference = model_library_asset(library)
+                self.check_cancelled()
+                if self.use_cache:
+                    PAYLOAD_CACHE.put(key, json.dumps(library, ensure_ascii=False).encode('utf-8'), 600)
+                return reference
+            except DownloadError as exc:
+                record_error(exc, 'resources.model_library_mirror_failed', level='WARNING', host=network_target(template))
+                last_error = exc
+                failures.append(label + '：' + str(exc))
+        self.check_cancelled()
+        if last_error is not None:
+            raise DownloadError('官方 3D 库查询失败：' + '；'.join(failures)) from last_error
+        return None
+
+    @traced('resources.model', lambda self, uuid, template, kind: {'format': kind.upper()})
+    def _model_payload(self, uuid, template, kind):
+        if not isinstance(uuid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', uuid):
+            raise DownloadError('3D 模型编号不受支持')
+        key = kind + ':' + uuid
+        self.check_cancelled()
+        raw = PAYLOAD_CACHE.get(key) if self.use_cache else None
+        if raw is None:
+            failures, last_error = [], None
+            for label, endpoint in (('国内接口', template.replace('modules.easyeda.com', 'modules.lceda.cn')),
+                                    ('国际接口', template)):
+                try:
+                    raw = self.fetch(endpoint.format(uuid=uuid), optional=True)
+                    if raw is None:
+                        failures.append(label + '：文件不存在或已移除')
+                        continue
+                    if kind == 'step' and b'ISO-10303-21' not in raw[:2048]:
+                        raise DownloadError('STEP 接口未返回有效的 STEP 文件')
+                    if kind == 'obj':
+                        text = raw.decode('utf-8-sig')
+                        if '<html' in text[:300].lower() or '<!doctype' in text[:300].lower():
+                            raise DownloadError('OBJ 接口返回了网页，请稍后重试')
+                    if self.use_cache:
+                        PAYLOAD_CACHE.put(key, raw, 3600)
+                    break
+                except (DownloadError, UnicodeDecodeError) as exc:
+                    record_error(exc, 'resources.model_mirror_failed', level='WARNING', host=network_target(endpoint))
+                    last_error = exc
+                    failures.append(label + '：' + str(exc))
+                    raw = None
+            if raw is None and last_error is not None:
+                raise DownloadError('；'.join(failures)) from last_error
+        self.check_cancelled()
+        return raw.decode('utf-8-sig') if kind == 'obj' and raw is not None else raw
+
+
+@dataclass(frozen=True)
+class StepPayload:
+    data: bytes | None
+    used_library: bool = False
+    identifier: str = field(default='', compare=False)
+
+
+@traced('resources.component_step', lambda component, model, api: {'format': 'STEP'})
+def component_step_payload(component: dict, model: ModelReference, api: NetworkApi) -> StepPayload:
+    """Keep the explicit asset first; resolve the linked library only on failure."""
+    api.check_cancelled()
+    try:
+        payload = api.get_step_3d_model(model.uuid)
+        if payload:
+            return StepPayload(payload, identifier=model.uuid)
+        primary_error = DownloadError('文件不存在或已移除')
+    except DownloadError as exc:
+        primary_error = exc
+    api.check_cancelled()
+    try:
+        library = model_library_reference(component)
+        if library is None:
+            raise DownloadError('封装没有备用 3D 库关联')
+        log_event('INFO', 'resources.step_fallback_started', model_id=model.uuid, library_id=library.uuid)
+        reference = api.get_3d_library_model(library.uuid)
+        api.check_cancelled()
+        if reference is None:
+            raise DownloadError('官方 3D 库记录不存在或已移除')
+        if reference.uuid == model.uuid:
+            raise DownloadError('备用关联指向相同的模型资源')
+        log_event('DEBUG', 'resources.step_fallback_resolved', library_id=library.uuid, model_id=reference.uuid)
+        payload = api.get_step_3d_model(reference.uuid)
+        api.check_cancelled()
+        if not payload:
+            raise DownloadError('备用 STEP 文件不存在或已移除')
+        log_event('INFO', 'resources.step_fallback_succeeded', model_id=reference.uuid, bytes=len(payload))
+        return StepPayload(payload, used_library=True, identifier=reference.uuid)
+    except DownloadError as exc:
+        record_error(exc, 'resources.step_fallback_failed', level='WARNING')
+        raise DownloadError(f'主模型 STEP：{primary_error}；备用关联：{exc}') from exc
+
+
+@dataclass
+class Options:
+    destination: Path
+    formats: tuple[str, ...] = ('STEP',)
+    merge_schlib: bool = False
+    merge_pcblib: bool = False
+    schlib_name: str = 'LCSC3D'
+    pcblib_name: str = 'LCSC3D'
+    keep_schlib: bool = False
+    keep_pcblib: bool = False
+    schlib_target: str = ''
+    pcblib_target: str = ''
+    project_path: str = ''
+    append_mode: bool = False
+    keep_individual: bool = False
+    import_existing_to_project: bool = False
+    project_schlib_directory: str = ''
+    project_pcblib_directory: str = ''
+    project_model_directory: str = ''
+    project_schlib_name: str = ''
+    project_pcblib_name: str = ''
+    individual_directory: str = ''
+    symbol_style: str = 'jlc'
+    kicad_merge: bool = False
+    kicad_library_name: str = 'LCSC3D'
+    kicad_merge_symbols: bool | None = None
+    kicad_merge_footprints: bool | None = None
+    kicad_electrical_policy: str = 'source'
+    kicad_symbol_name: str = ''
+    kicad_footprint_name: str = ''
+    keep_kicad_symbols: bool = False
+    keep_kicad_footprints: bool = False
+    bind_3d_models: bool = True
+    kicad_3d_mode: str = 'embedded'
+
+    def __post_init__(self):
+        self.symbol_style = normalize_symbol_style(self.symbol_style)
+        if self.kicad_3d_mode not in ('embedded', 'external'):
+            raise DownloadError('请选择 KiCad 9/10 内嵌模式或 KiCad 8 兼容模式')
+        # The demo.1 combined switch remains a supported caller contract.
+        if self.kicad_merge_symbols is None:
+            self.kicad_merge_symbols = self.kicad_merge
+        if self.kicad_merge_footprints is None:
+            self.kicad_merge_footprints = self.kicad_merge
+        if any(fmt in KICAD_FORMATS for fmt in self.formats):
+            if self.append_mode:
+                raise DownloadError('KiCad 不支持追加已有库，请关闭 AD 追加模式')
+            for fmt, name in self.kicad_names().items():
+                if fmt in self.formats:
+                    kicad_library_name(name)
+        if self.append_mode:
+            targets = self.existing_targets()
+            if targets:
+                # Selecting just one library must never generate its unselected counterpart.
+                self.formats = tuple(fmt for fmt in self.formats if fmt in ('STEP', 'OBJ')) + tuple(targets)
+            self.merge_schlib = 'SCHLIB' in self.formats
+            self.merge_pcblib = 'PCBLIB' in self.formats
+
+    def existing_targets(self):
+        return {fmt: Path(path).expanduser().resolve()
+                for fmt, path in (('SCHLIB', self.schlib_target), ('PCBLIB', self.pcblib_target)) if path}
+
+    def kicad_names(self):
+        names = {'KICAD_SYMBOL': self.kicad_symbol_name or self.kicad_library_name,
+                 'KICAD_FOOTPRINT': self.kicad_footprint_name or self.kicad_library_name}
+        for fmt, suffix in (('KICAD_SYMBOL', '.kicad_sym'), ('KICAD_FOOTPRINT', '.pretty')):
+            if names[fmt].lower().endswith(suffix):
+                names[fmt] = names[fmt][:-len(suffix)]
+        return names
+
+    def output_root(self):
+        if self.append_mode:
+            targets = self.existing_targets()
+            if self.keep_individual and (targets or self.project_path):
+                if self.individual_directory:
+                    return Path(self.individual_directory).expanduser().resolve()
+                if self.project_path:
+                    return Path(self.project_path).expanduser().resolve().parent
+            if targets:
+                return next(iter(targets.values())).parent
+            if self.project_path:
+                return Path(self.project_path).expanduser().resolve().parent
+            raise DownloadError('请在“追加”中选择已有库或 PCB 工程')
+        return self.destination
+
+    def merged_paths(self):
+        if self.append_mode:
+            targets = self.existing_targets()
+            if targets:
+                return targets
+            self.output_root()  # Reject append mode without a library or project.
+            root = Path(self.project_path).expanduser().resolve().parent
+            name = Path(self.project_path).stem
+            return {fmt: (Path(directory).expanduser().resolve() if directory else root)
+                    / library_filename(custom_name or name, fmt)
+                    for fmt, directory, custom_name in (
+                        ('SCHLIB', self.project_schlib_directory, self.project_schlib_name),
+                        ('PCBLIB', self.project_pcblib_directory, self.project_pcblib_name))
+                    if fmt in self.formats}
+        return {fmt: Path(target).expanduser().resolve() if target else self.destination / library_filename(name, fmt)
+                for fmt, enabled, name, target in (('SCHLIB', self.merge_schlib, self.schlib_name, self.schlib_target),
+                                                  ('PCBLIB', self.merge_pcblib, self.pcblib_name, self.pcblib_target))
+                if enabled and fmt in self.formats}
+
+    def keeps_individual(self, format):
+        if self.append_mode:
+            return self.keep_individual
+        return self.keep_schlib if format == 'SCHLIB' else self.keep_pcblib
+
+    def model_folder(self, component_folder):
+        if self.append_mode and self.project_path and not self.existing_targets() and self.project_model_directory:
+            root = Path(self.project_model_directory).expanduser().resolve()
+            return root / component_folder.name if self.keep_individual else root
+        paths = self.merged_paths()
+        if paths and not any(self.keeps_individual(fmt) for fmt in paths):
+            library = paths.get('SCHLIB') or paths['PCBLIB']
+            return library.with_name(library.stem + '_3D')
+        combined = [(fmt, keep) for fmt, merge, keep in (
+            ('KICAD_SYMBOL', self.kicad_merge_symbols, self.keep_kicad_symbols),
+            ('KICAD_FOOTPRINT', self.kicad_merge_footprints, self.keep_kicad_footprints)) if merge and fmt in self.formats]
+        if combined and not any(keep for _, keep in combined):
+            return self.destination / (self.kicad_names()[combined[0][0]] + '_3D')
+        return component_folder
+
+    def imports_project(self):
+        return bool(self.project_path and (not self.append_mode or not self.existing_targets()
+                                           or self.import_existing_to_project))
+
+    def appends_to(self, fmt, path):
+        # Explicit existing-library targets also express append intent in the
+        # legacy API. Normal merge paths never imply an append.
+        return fmt in self.existing_targets() or self.append_mode and path.exists()
+
+
+def library_filename(name, format):
+    """Accept a filename, never a path; avoid silent rename or device writes."""
+    suffix = {'SCHLIB': '.SchLib', 'PCBLIB': '.PcbLib'}[format]
+    name = str(name).strip()
+    if name.lower().endswith(suffix.lower()):
+        name = name[:-len(suffix)]
+    if (not name or name.endswith((' ', '.')) or len(name.encode('utf-16le')) > 230
+            or re.search(r'[<>:"/\\|?*\x00-\x1f]', name)
+            or re.fullmatch(r'(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³])', name.split('.')[0], re.I)):
+        raise DownloadError(f'请填写有效的合并 {suffix} 文件名（不含路径或 Windows 禁用字符）')
+    return name + suffix
+
+
+@traced('export.import_existing', level='INFO')
+def import_existing_libraries(options, check_cancelled=lambda: None):
+    targets = options.existing_targets()
+    if not options.append_mode or not targets or not options.project_path:
+        raise DownloadError('请在“追加”中指定已有库和 PCB 工程')
+    for fmt, path in targets.items():
+        check_cancelled()
+        read_library(path, fmt)
+    check_cancelled()
+    read_project(options.project_path)
+    result = add_libraries_to_project(options.project_path, list(targets.values()), check_cancelled)
+    log_event('INFO', 'export.existing_import_completed', formats=list(targets), added=result['added'], skipped=result['skipped'])
+    return result
+
+
+@dataclass
+class Result:
+    part: str
+    status: str
+    title: str = ''
+    model: str = ''
+    message: str = ''
+    files: list[str] = field(default_factory=list)
+    folder: str = ''
+    store_url: str = ''
+    pending_formats: list[str] = field(default_factory=list)
+    completed_formats: list[str] = field(default_factory=list)
+    export_errors: list[str] = field(default_factory=list)
+    model_diagnostics: list[dict] = field(default_factory=list)
+
+
+@traced('component.lookup', lambda part, api: {'part': safe_part(part)})
+def get_component_metadata(part: str, api: NetworkApi) -> dict[str, str]:
+    """Read the part title and linked model name without downloading model files."""
+    api.check_cancelled()
+    data = api.get_cad_data_of_component(part)
+    api.check_cancelled()
+    title = str(data.get('title') or '').strip()
+    model_name = ''
+    try:
+        model = model_reference(data)
+        if model:
+            model_name = model.name
+    except (DownloadError, KeyError, TypeError, ValueError, IndexError, AttributeError) as exc:
+        # A missing/malformed 3D association must not hide a valid part title.
+        record_error(exc, 'component.model_reference_invalid', level='WARNING')
+    api.check_cancelled()
+    return {'title': title, 'model': model_name}
+
+
+@traced('download.part', lambda part, options, *a, **kw: {'part': safe_part(part), 'formats': options.formats}, level='INFO')
+def download_part(part: str, options: Options, api: NetworkApi,
+                  progress: Callable[[str, str], None] | None = None, *, libraries=None, merge_lock=None,
+                  deferred_outputs=None, kicad_entries=None, on_progress=None) -> Result:
+    # A direct one-part request uses the same merge/commit semantics as a batch.
+    if libraries is None and (options.merged_paths() or any(fmt in KICAD_FORMATS for fmt in options.formats)):
+        return download_batch([part], options, getattr(api, 'cancelled', None),
+                              (lambda index, phase, title: progress(phase, title)) if progress else None,
+                              api=api, workers=1, on_progress=on_progress)[0]
+    if not options.formats or any(fmt not in ('STEP', 'OBJ', 'SCHLIB', 'PCBLIB', *KICAD_FORMATS) for fmt in options.formats):
+        raise DownloadError('请选择模型、AD 或 KiCad 元件库格式')
+    notify = progress or (lambda phase, title: None)
+    advance = on_progress or (lambda fraction: None)
+    notify('查询器件', '')
+    advance(.02)
+    data = api.get_cad_data_of_component(part)
+    advance(.10)
+    library_formats = ('SCHLIB', 'PCBLIB', *KICAD_FORMATS)
+    domains = tuple(domain for domain, formats in (('symbol', ('SCHLIB', 'KICAD_SYMBOL')),
+                    ('footprint', ('PCBLIB', 'KICAD_FOOTPRINT'))) if any(fmt in options.formats for fmt in formats))
+    component = parse_component(data, part, api.check_cancelled, domains=domains) if domains else None
+    advance(.15)
+    title = str(data.get('title') or '').strip()
+    product_id = (data.get('szlcsc') or data.get('lcsc') or {}).get('id')
+    store_url = f'https://item.szlcsc.com/{product_id}.html' if product_id else f'https://so.szlcsc.com/global.html?k={part}'
+    result = Result(part, '失败', title=title, store_url=store_url)
+    api.check_cancelled()
+    component_name = safe_filename(title or '未命名器件')
+    folder = options.output_root() / f'{component_name}_{part}'
+    model_folder = options.model_folder(folder)
+    result.folder = str(folder)
+    log_event('INFO', 'download.output_layout', mode='append' if options.append_mode else
+              'merge' if options.merged_paths() else 'individual',
+              model_layout='component' if model_folder == folder else 'library',
+              individual_formats=[fmt for fmt in options.merged_paths() if options.keeps_individual(fmt)])
+    completed, errors, notes = [], [], []
+    model, model_error = None, ''
+    try:
+        model = model_reference(data)
+    except (DownloadError, KeyError, TypeError, ValueError, IndexError) as exc:
+        record_error(exc, 'download.model_reference_failed')
+        model_error = '器件模型信息缺失或格式不受支持：' + str(exc)
+    if not model and not any(fmt in library_formats for fmt in options.formats):
+        result.status = '失败' if model_error else '无模型'
+        result.message = model_error or '官方库中没有关联的 3D 模型'
+        log_event('WARNING', 'download.part_result', status=result.status, reason='invalid_model' if model_error else 'no_model')
+        return result
+    result.model = model.name if model else ''
+
+    basename = f'{part}_{safe_filename(model.name)}' if model else part
+    paths = {fmt: (folder / f'{component_name}.SchLib' if fmt == 'SCHLIB' else
+                   folder / f'{component_name}.PcbLib' if fmt == 'PCBLIB' else
+                   model_folder / f'{basename}.{fmt.lower()}') for fmt in options.formats if fmt not in KICAD_FORMATS}
+    reserved = {path.resolve() for path in options.merged_paths().values()}
+    for fmt, path in paths.items():
+        if libraries and fmt in libraries and options.keeps_individual(fmt) and path.resolve() in reserved:
+            raise DownloadError('独立导出与指定库路径相同，请关闭“独立导出器件”或另选保存目录')
+    bind_models = options.bind_3d_models and component is not None and component.footprint is not None and any(
+        fmt in options.formats for fmt in ('PCBLIB','KICAD_FOOTPRINT'))
+    model_assets = None
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix='model-format') as pool:
+        step = submit_logged(pool, component_step_payload, data, model, api) if model and ('STEP' in options.formats or bind_models) else None
+        obj = submit_logged(pool, api.get_raw_3d_model_obj, model.uuid) if model and 'OBJ' in options.formats else None
+        if bind_models:
+            from lcsc3d.models.model_export import resolve_models
+            notify('准备 3D 模型',title)
+            def fetch_step(reference):
+                if model and reference.uuid == model.uuid and step is not None:
+                    return step.result()
+                if len(component.models) > 1:
+                    return StepPayload(api.get_step_3d_model(reference.uuid),identifier=reference.uuid)
+                return component_step_payload(data,reference,api)
+            def fetch_origin(reference):
+                if obj is not None and model and reference.uuid == model.uuid:
+                    from lcsc3d.models.model_geometry import obj_origin
+                    return obj_origin(obj.result(), api.check_cancelled)
+                return api.get_model_origin(reference.uuid)
+            component,model_assets = resolve_models(component,fetch_step,api.check_cancelled,
+                prepare_altium='PCBLIB' in options.formats, origin_fetch=fetch_origin)
+            advance(.40)
+            for diagnostic in component.diagnostics:
+                if diagnostic.domain != 'model3d':
+                    continue
+                result.model_diagnostics.append({'severity':diagnostic.severity,'code':diagnostic.code,
+                                                  'message':diagnostic.message,'source_id':diagnostic.source_id})
+                (errors if diagnostic.severity == 'error' else notes).append('3D：'+diagnostic.message)
+                log_event('WARNING' if diagnostic.severity in ('warning','error') else 'INFO',
+                          'export.model_diagnostic',part=part,domain='model3d',code=diagnostic.code,
+                          source_id=diagnostic.source_id,stage='model_placement')
+        for format_index, fmt in enumerate(options.formats):
+            api.check_cancelled()
+            advance(.40 + .40 * format_index / len(options.formats))
+            if fmt in KICAD_FORMATS:
+                notify('准备导出 KiCad 元件库', title)
+                log_event('INFO', 'download.format_started', format=fmt, stage='convert')
+                with merge_lock:
+                    kicad_entries[part] = (component, folder, model_assets or {})
+                result.pending_formats.append(fmt)
+                continue
+            path = paths[fmt]
+            notify({'SCHLIB': '导出 AD 符号库', 'PCBLIB': '导出 AD 封装库'}.get(fmt, f'下载 {fmt}'), title)
+            stage = 'convert' if fmt in ('SCHLIB', 'PCBLIB') else 'download'
+            log_event('INFO', 'download.format_started', format=fmt, stage=stage)
+            try:
+                if libraries and fmt in libraries:
+                    with merge_lock:
+                        libraries[fmt].add(component, part, api.check_cancelled, model_assets=model_assets)
+                    result.pending_formats.append(fmt)
+                    if not options.keeps_individual(fmt):
+                        continue
+                if fmt in ('SCHLIB', 'PCBLIB') and deferred_outputs is not None:
+                    # Resolve shared/existing footprint names before writing either
+                    # member of an independent pair (or a non-merged symbol).
+                    with merge_lock:
+                        deferred_outputs.setdefault(part, {})[fmt] = (path, component, model_assets)
+                    if fmt not in result.pending_formats:
+                        result.pending_formats.append(fmt)
+                    continue
+                if fmt == 'SCHLIB':
+                    exporter = export_linked_schlib if options.merge_pcblib and 'PCBLIB' in options.formats else export_schlib
+                    payload = exporter(component, part, api.check_cancelled, symbol_style=options.symbol_style)
+                elif fmt == 'PCBLIB':
+                    exporter = export_linked_pcblib if options.merge_pcblib else export_pcblib
+                    payload = exporter(component, part, api.check_cancelled, model_assets=model_assets)
+                elif not model:
+                    log_event('WARNING', 'download.format_unavailable', format=fmt, reason='no_model')
+                    errors.append(f'{fmt}：' + (model_error or '官方库中没有关联的 3D 模型'))
+                    continue
+                elif fmt == 'STEP':
+                    resource = step.result()
+                    payload = resource.data
+                    if resource.used_library:
+                        notes.append('STEP 使用官方 3D 库备用关联，坐标以文件为准')
+                else:
+                    raw_obj = obj.result()
+                    payload = raw_obj.encode('utf-8') if raw_obj else None
+                api.check_cancelled()
+                if not payload:
+                    log_event('WARNING', 'download.format_unavailable', format=fmt, reason='empty_resource')
+                    errors.append(f'{fmt} 不可用')
+                else:
+                    stage = 'write'
+                    with log_context(format=fmt):
+                        atomic_write(path, payload)
+                    completed.append(fmt)
+                    result.files.append(str(path))
+                    result.folder = str(path.parent)
+                    log_event('INFO', 'download.format_completed', format=fmt, bytes=len(payload))
+            except Cancelled:
+                log_event('INFO', 'download.format_cancelled', format=fmt, stage=stage)
+                raise
+            except Exception as exc:
+                record_error(exc, 'download.format_failed', format=fmt, stage=stage)
+                errors.append(f'{fmt}：{exc}')
+            finally:
+                advance(.40 + .40 * (format_index + 1) / len(options.formats))
+    if completed:
+        result.status = '部分完成' if errors else '成功'
+        result.message = '；'.join(['已保存 ' + ' / '.join(completed)] + errors + notes)
+    else:
+        result.message = '；'.join(errors + notes) or '没有可保存的文件'
+    if result.pending_formats:
+        result.status = '等待合并'
+        result.message = '；'.join((['已保存 ' + ' / '.join(completed)] if completed else []) + errors + notes)
+    result.completed_formats = completed[:]
+    result.export_errors = errors[:]
+    log_event('INFO' if not errors else 'WARNING', 'download.part_result', status=result.status,
+              completed_formats=completed, failure_count=len(errors))
+    return result
+
+
+@traced('download.batch', lambda parts, options, *a, **kw: {'count': len(parts), 'formats': options.formats}, level='INFO')
+def download_batch(parts, options, cancelled=None, progress=None, on_result=None, api=None, workers=3, on_progress=None):
+    """Download with bounded concurrency; callbacks may finish out of row order."""
+    if not parts:
+        return []
+    cancelled = cancelled or threading.Event()
+    api = api or NetworkApi(cancelled, use_cache=False)
+    results = [None] * len(parts)
+    tracker = BatchProgress(parts, on_progress)
+    merged_paths = options.merged_paths()
+    if options.append_mode and not merged_paths:
+        raise DownloadError('请至少选择一种 AD 库格式以加入工程')
+    log_event('INFO', 'download.export_plan', mode='append' if options.append_mode else
+              'merge' if merged_paths or any(fmt in options.formats and merge for fmt, merge in (
+                  ('KICAD_SYMBOL', options.kicad_merge_symbols), ('KICAD_FOOTPRINT', options.kicad_merge_footprints))) else 'individual', formats=options.formats,
+              existing_formats=list(options.existing_targets()), project_selected=bool(options.project_path),
+              import_project=options.imports_project(),
+              individual_formats=[fmt for fmt in merged_paths if options.keeps_individual(fmt)])
+    libraries = {fmt: MergedLibrary(fmt, merge_pcb='PCBLIB' in merged_paths,
+                                   symbol_style=options.symbol_style) for fmt in merged_paths}
+    merge_lock = threading.Lock()
+    kicad_entries = {}
+    deferred_outputs = {} if 'PCBLIB' in merged_paths else None
+    originals, target_errors = {}, {}
+    for fmt, path in merged_paths.items():
+        if options.appends_to(fmt, path):
+            try:
+                originals[fmt] = read_library(path, fmt)
+            except Exception as exc:
+                record_error(exc, 'download.append_target_invalid', format=fmt, stage='read')
+                target_errors[fmt] = str(exc)
+
+    def run(index, part):
+        try:
+            if cancelled.is_set():
+                raise Cancelled()
+            return download_part(part, options, api,
+                (lambda status, title: progress(index, status, title)) if progress else None,
+                **({'on_progress': lambda fraction: tracker.advance(part, fraction)} if on_progress else {}),
+                **({'libraries': libraries, 'merge_lock': merge_lock, 'deferred_outputs': deferred_outputs,
+                    'kicad_entries': kicad_entries} if libraries or any(fmt in KICAD_FORMATS for fmt in options.formats) else {}))
+        except Cancelled:
+            log_event('INFO', 'download.part_cancelled', part=safe_part(part))
+            return Result(part, '已取消', message='任务已取消；已保存的完整文件保留')
+        except Exception as exc:
+            record_error(exc, 'download.part_failed', part=safe_part(part))
+            return Result(part, '失败', message=str(exc))
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='model-part') as pool:
+        remaining = iter(enumerate(parts))
+        pending = {}
+
+        def fill_workers():
+            while len(pending) < workers:
+                item = next(remaining, None)
+                if item is None:
+                    break
+                index, part = item
+                pending[submit_logged(pool, run, index, part)] = index
+
+        fill_workers()
+        while pending:
+            finished, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for future in finished:
+                index = pending.pop(future)
+                result = results[index] = future.result()
+                if result.status != '已取消':
+                    tracker.advance(result.part, .80 if result.pending_formats else .95)
+                if on_result:
+                    on_result(index, result)
+            fill_workers()
+    footprint_names = {}
+    # Symbols must reference the final deduplicated footprint names.
+    for fmt in sorted(merged_paths, key=lambda fmt: fmt != 'PCBLIB'):
+        path = merged_paths[fmt]
+        action = '追加' if options.appends_to(fmt, path) else '合并'
+        members = [(index, result) for index, result in enumerate(results) if fmt in result.pending_formats]
+        if not members:
+            continue
+        error = ''
+        skipped = []
+        stage = 'read'
+        try:
+            if cancelled.is_set():
+                raise Cancelled()
+            if fmt in target_errors:
+                raise DownloadError(target_errors[fmt])
+            for index, result in members:
+                if progress:
+                    progress(index, '正在' + action + ' ' + fmt, result.title)
+            stage = 'build'
+            for _, result in members:
+                tracker.advance(result.part, .85)
+            payload = libraries[fmt].build([result.part for _, result in members], api.check_cancelled,
+                                          original=originals.get(fmt), footprint_names=footprint_names)
+            if fmt == 'PCBLIB':
+                footprint_names = dict(libraries[fmt].footprint_names)
+            if fmt in originals:
+                stage = 'append'
+                payload, skipped = append_library(originals[fmt], payload, fmt, api.check_cancelled)
+            if cancelled.is_set():
+                raise Cancelled()
+            stage = 'write'
+            for _, result in members:
+                tracker.advance(result.part, .90)
+            if fmt in originals:
+                commit_user_file(path, originals[fmt], payload, api.check_cancelled)
+            else:
+                if options.append_mode and path.exists():
+                    raise DownloadError('目标库在处理期间已出现，请重新执行追加；保留当前文件')
+                atomic_write(path, payload)
+            log_event('INFO', 'download.library_committed', format=fmt, mode='append' if fmt in originals else 'merge',
+                      count=len(members), skipped=len(skipped), bytes=len(payload))
+        except Cancelled:
+            log_event('INFO', 'download.library_cancelled', format=fmt, stage=stage)
+            error = action + '已取消，原库保留'
+        except Exception as exc:
+            record_error(exc, 'download.merge_failed', format=fmt, stage=stage,
+                         mode='append' if options.appends_to(fmt, path) else 'merge')
+            error = action + '失败：' + str(exc)
+        for _, result in members:
+            if not error:
+                tracker.advance(result.part, .95)
+                result.files.append(str(path))
+                if fmt not in result.completed_formats:
+                    result.completed_formats.append(fmt)
+                if not any(Path(file).parent == Path(result.folder) for file in result.files):
+                    result.folder = str(path.parent)
+            result.message = '；'.join(filter(None, (result.message,
+                f'{fmt}：{error}' if error else f'已{action} {fmt} → {path.name}（{len(members)} 个元件）')))
+            if error:
+                result.export_errors.append(f'{fmt}：{error}')
+            elif skipped:
+                result.message += f'；原库保留 {len(skipped)} 个同名条目，未重复追加'
+            if not error and fmt == 'PCBLIB' and libraries[fmt].reused_count:
+                result.message += f'；已复用 {libraries[fmt].reused_count} 个相同 footprint'
+    for result in results:
+        for fmt, (path, data, model_assets) in (deferred_outputs or {}).get(result.part, {}).items():
+            if fmt not in result.pending_formats:
+                continue
+            stage = 'convert'
+            try:
+                if cancelled.is_set():
+                    raise Cancelled()
+                exporter = export_linked_schlib if fmt == 'SCHLIB' else export_linked_pcblib
+                payload = exporter(data, result.part, api.check_cancelled,
+                                   footprint_name=footprint_names.get(result.part),
+                                   **({'symbol_style': options.symbol_style} if fmt == 'SCHLIB' else {'model_assets':model_assets}))
+                api.check_cancelled()
+                stage = 'write'
+                with log_context(part=safe_part(result.part), format=fmt):
+                    atomic_write(path, payload)
+                tracker.advance(result.part, .96)
+                result.files.append(str(path))
+                result.folder = str(path.parent)
+                if fmt not in result.completed_formats:
+                    result.completed_formats.append(fmt)
+                result.message = '；'.join(filter(None, (result.message, '已独立导出 ' + fmt)))
+                log_event('INFO', 'download.individual_library_completed', part=safe_part(result.part),
+                          format=fmt, bytes=len(payload))
+            except Cancelled:
+                result.export_errors.append(fmt + '：独立导出已取消')
+                result.message += '；' + result.export_errors[-1]
+                log_event('INFO', 'download.individual_library_cancelled', part=safe_part(result.part), format=fmt, stage=stage)
+            except Exception as exc:
+                record_error(exc, 'download.format_failed', part=safe_part(result.part), format=fmt, stage=stage)
+                result.export_errors.append(f'{fmt}：{exc}')
+                result.message += '；' + result.export_errors[-1]
+    if kicad_entries:
+        export_kicad_batch(results, kicad_entries, options, api.check_cancelled,
+                          on_progress=tracker.advance if on_progress else None)
+    project_error = ''
+    project_files = list(dict.fromkeys(file for result in results for file in result.files
+                                      if Path(file).suffix.lower() in ('.schlib', '.pcblib')
+                                      and (Path(file).suffix[1:].upper() not in merged_paths or
+                                           Path(file) == merged_paths[Path(file).suffix[1:].upper()])))
+    import_project = options.imports_project()
+    if import_project and project_files and not cancelled.is_set():
+        try:
+            imported = add_libraries_to_project(options.project_path, project_files, api.check_cancelled)
+            log_event('INFO', 'download.project_completed', added=imported['added'], skipped=imported['skipped'])
+        except Exception as exc:
+            record_error(exc, 'library.project_import_failed')
+            project_error = '加入 PCB 工程失败：' + str(exc)
+    for index, result in enumerate(results):
+        def output_order(file):
+            fmt = {'.kicad_sym':'KICAD_SYMBOL','.kicad_mod':'KICAD_FOOTPRINT'}.get(
+                Path(file).suffix.lower(),Path(file).suffix[1:].upper())
+            return Path(file) in merged_paths.values(), options.formats.index(fmt) if fmt in options.formats else len(options.formats), file
+        result.files.sort(key=output_order)
+        pending = bool(result.pending_formats)
+        if pending:
+            result.pending_formats.clear()
+            result.status = ('成功' if set(result.completed_formats) == set(options.formats) and not result.export_errors else
+                             '部分完成' if result.files else '已取消' if cancelled.is_set() else '失败')
+            log_event('INFO', 'download.merge_result', part=safe_part(result.part), status=result.status)
+        has_libraries = any(file in project_files for file in result.files)
+        if import_project and has_libraries:
+            if project_error or cancelled.is_set():
+                result.status = '部分完成'
+                result.message += '；' + (project_error or '加入 PCB 工程已取消')
+            else:
+                result.message += '；库已加入 PCB 工程'
+        if pending or import_project and has_libraries:
+            if on_result:
+                on_result(index, result)
+    log_event('INFO', 'download.batch_result', count=len(results),
+              succeeded=sum(r.status == '成功' for r in results),
+              partial=sum(r.status == '部分完成' for r in results),
+              failed=sum(r.status in ('失败', '无模型') for r in results),
+              cancelled=sum(r.status == '已取消' for r in results))
+    tracker.finish(cancelled=cancelled.is_set() or any(r.status == '已取消' for r in results))
+    return results

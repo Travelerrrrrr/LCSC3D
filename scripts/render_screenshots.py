@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'app'))
-import main
-from library_preview import build_library_preview
+from lcsc3d.ui import main
+from lcsc3d.ui.library_preview import build_library_preview
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication

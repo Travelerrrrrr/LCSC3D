@@ -1,0 +1,308 @@
+"""Native storefront photo gallery with original pixels, thumbnails and zoom."""
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from lcsc3d.core.i18n import text as ui_text, message as ui_message
+from PySide6.QtCore import Qt, QTimer, QSize, Signal, QPoint
+from PySide6.QtGui import QIcon, QImage, QPainter, QKeySequence, QPixmap, QShortcut
+from PySide6.QtWidgets import (QGraphicsScene, QGraphicsView, QHBoxLayout, QListWidget, QListWidgetItem, QVBoxLayout, QSplitter)
+from lcsc3d.ui.localized_widgets import (QDialog, QLabel, QPushButton)
+
+from lcsc3d.core.errors import Cancelled
+from lcsc3d.ui.ui_components import title_block
+from lcsc3d.services.store import StoreError, check_cancelled
+from lcsc3d.core.app_logging import traced, log_event, record_error, safe_part
+
+
+def load_search_thumbnails(requests, client_factory, cancelled, progress):
+    """Load distinct public URLs with bounded concurrency; never touch widgets."""
+    def fetch(url, rows):
+        check_cancelled(cancelled)
+        image = QImage()
+        try:
+            payload = client_factory().image(url, cancelled)
+            check_cancelled(cancelled)
+            image.loadFromData(payload)
+        except Cancelled:
+            raise
+        except Exception:
+            pass  # One unavailable photo must not block the rest of the page.
+        if not image.isNull():
+            image = image.scaled(128, 128, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            square = QImage(128, 128, QImage.Format_ARGB32_Premultiplied)
+            square.fill(Qt.white)
+            painter = QPainter(square)
+            painter.drawImage(QPoint((128 - image.width()) // 2, (128 - image.height()) // 2), image)
+            painter.end()
+            image = square
+        return url, rows, image
+
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix='store-thumbnail') as pool:
+        futures = [pool.submit(fetch, url, rows) for url, rows in requests.items()]
+        try:
+            for future in as_completed(futures):
+                check_cancelled(cancelled)
+                url, rows, image = future.result()
+                for row in rows:
+                    progress(row, (url, image))
+        finally:
+            for future in futures:
+                future.cancel()
+
+
+class ProductImage(QLabel):
+    clicked = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.setTextFormat(Qt.PlainText)
+        self.setAlignment(Qt.AlignCenter)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.original = QPixmap()
+
+    def set_image(self, pixmap):
+        self.original = pixmap
+        self._resize_image()
+
+    def clear(self):
+        self.original = QPixmap()
+        super().clear()
+
+    def _resize_image(self):
+        if not self.original.isNull():
+            self.setPixmap(self.original.scaled(self.contentsRect().size() - QSize(12, 12),
+                                               Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._resize_image()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self.clicked.emit()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+
+class PhotoView(QGraphicsView):
+    zoom_changed = Signal(float)
+
+    def __init__(self):
+        super().__init__()
+        self.canvas = QGraphicsScene(self)
+        self.setScene(self.canvas)
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
+        self.setObjectName('photoCanvas')
+        self.photo = None
+        self.fitted = True
+
+    @property
+    def zoom(self):
+        return self.transform().m11()
+
+    def set_photo(self, pixmap):
+        self.canvas.clear()
+        self.photo = self.canvas.addPixmap(pixmap)
+        self.canvas.setSceneRect(self.photo.boundingRect())
+        self.fit_photo()
+
+    def clear_photo(self):
+        self.canvas.clear()
+        self.photo = None
+        self.resetTransform()
+
+    def fit_photo(self):
+        self.fitted = True
+        if self.photo:
+            self.resetTransform()
+            self.fitInView(self.photo, Qt.KeepAspectRatio)
+            self.zoom_changed.emit(self.zoom)
+
+    def set_zoom(self, zoom):
+        if self.photo:
+            log_event('DEBUG', 'image.zoom', zoom=round(float(zoom), 3))
+            zoom = max(0.01, min(32.0, zoom))
+            self.fitted = False
+            self.scale(zoom / self.zoom, zoom / self.zoom)
+            self.zoom_changed.emit(self.zoom)
+
+    def wheelEvent(self, event):
+        if self.photo:
+            self.set_zoom(self.zoom * (1.25 if event.angleDelta().y() > 0 else 0.8))
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        self.fit_photo()
+        event.accept()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.fitted:
+            self.fit_photo()
+
+
+class ImageGallery(QDialog):
+    activity_finished = Signal()
+    closed = Signal()
+
+    def __init__(self, parent, product, client, jobs_factory):
+        super().__init__(parent)
+        self.part = product['part']
+        self.urls = product.get('images') or ([product['image']] if product.get('image') else [])
+        self.thumb_urls = product.get('thumbnails') or self.urls
+        self.client = client
+        self.jobs = jobs_factory(self)
+        self.jobs.idle.connect(self.activity_finished)
+        self.cache = {}
+        self.setWindowTitle(ui_message('商品原图 · {0} · {1}', self.part, product.get('title', '')))
+        self.resize(1080, 780)
+        self.setMinimumSize(600, 460)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 18)
+        layout.setSpacing(16)
+        layout.addWidget(title_block(product.get('title') or self.part, self.part, large=True))
+        controls = QHBoxLayout()
+        self.previous = QPushButton(ui_text('上一张'))
+        self.previous.clicked.connect(lambda: self.select_offset(-1))
+        controls.addWidget(self.previous)
+        self.position = QLabel('')
+        controls.addWidget(self.position)
+        self.next = QPushButton(ui_text('下一张'))
+        self.next.clicked.connect(lambda: self.select_offset(1))
+        controls.addWidget(self.next)
+        controls.addStretch()
+        self.minus = QPushButton(ui_text('缩小'))
+        self.plus = QPushButton(ui_text('放大'))
+        self.actual = QPushButton(ui_text('原始大小'))
+        self.fit = QPushButton(ui_text('适应窗口'))
+        for button in (self.minus, self.plus, self.actual, self.fit):
+            controls.addWidget(button)
+        self.scale_label = QLabel('')
+        controls.addWidget(self.scale_label)
+        self.view = PhotoView()
+        self.view.zoom_changed.connect(lambda value: self.scale_label.setText(ui_message('{0:.0f}%', value * 100)))
+        self.minus.clicked.connect(lambda: self.view.set_zoom(self.view.zoom / 1.25))
+        self.plus.clicked.connect(lambda: self.view.set_zoom(self.view.zoom * 1.25))
+        self.actual.clicked.connect(lambda: self.view.set_zoom(1))
+        self.fit.clicked.connect(self.view.fit_photo)
+        self.gallery_splitter = QSplitter(Qt.Horizontal)
+        self.gallery_splitter.setChildrenCollapsible(False)
+        self.gallery_splitter.setHandleWidth(12)
+        self.thumbnails = QListWidget()
+        self.thumbnails.setObjectName('thumbnailStrip')
+        self.thumbnails.setFlow(QListWidget.TopToBottom)
+        self.thumbnails.setWrapping(False)
+        self.thumbnails.setIconSize(QSize(76, 76))
+        self.thumbnails.setMinimumWidth(128)
+        self.thumbnails.setMaximumWidth(160)
+        for index, _ in enumerate(self.urls):
+            item = QListWidgetItem(ui_message('{0}', index + 1))
+            item.setTextAlignment(Qt.AlignCenter)
+            item.setSizeHint(QSize(96, 92))
+            self.thumbnails.addItem(item)
+        self.thumbnails.currentRowChanged.connect(self.load_image)
+        self.gallery_splitter.addWidget(self.thumbnails)
+        self.gallery_splitter.addWidget(self.view)
+        self.gallery_splitter.setStretchFactor(1, 1)
+        self.gallery_splitter.setSizes([144, 900])
+        layout.addWidget(self.gallery_splitter, 1)
+        layout.addLayout(controls)
+        self.status = QLabel(ui_text('点击缩略图切换 · 滚轮缩放 · 拖动平移 · 双击适应窗口'))
+        self.status.setObjectName('muted')
+        self.status.setWordWrap(True)
+        self.status.setTextFormat(Qt.PlainText)
+        layout.addWidget(self.status)
+        self.shortcuts = []
+        for key, callback in ((Qt.Key_Left, lambda: self.select_offset(-1)),
+                              (Qt.Key_Right, lambda: self.select_offset(1))):
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.activated.connect(callback)
+            self.shortcuts.append(shortcut)
+        QTimer.singleShot(0, self.begin)
+
+    @traced('image.gallery_open', lambda self: {'part': safe_part(self.part), 'image_count': len(self.urls)})
+    def begin(self):
+        if not self.isVisible() or not self.urls:
+            return
+        self.thumbnails.setCurrentRow(0)
+        self.jobs.start('thumbnails', self.fetch_thumbnails, lambda _: None, lambda _: None, self.thumbnail_loaded)
+
+    def fetch_thumbnails(self, stop, progress):
+        for index, url in enumerate(self.thumb_urls[:len(self.urls)]):
+            check_cancelled(stop)
+            try:
+                data = self.client.image(url, stop)
+                progress(index, data)
+            except Cancelled:
+                raise
+            except StoreError as exc:
+                record_error(exc, 'image.thumbnail_failed', level='WARNING', index=index, part=safe_part(self.part))
+                continue
+
+    def thumbnail_loaded(self, index, data):
+        pixmap = QPixmap()
+        if data and pixmap.loadFromData(data):
+            self.thumbnails.item(index).setIcon(QIcon(pixmap))
+        else:
+            log_event('WARNING', 'image.thumbnail_decode_failed', index=index, part=safe_part(self.part))
+
+    def select_offset(self, offset):
+        row = self.thumbnails.currentRow() + offset
+        if 0 <= row < len(self.urls):
+            self.thumbnails.setCurrentRow(row)
+
+    @traced('image.select', lambda self, index: {'part': safe_part(self.part), 'index': index})
+    def load_image(self, index):
+        if not 0 <= index < len(self.urls):
+            return
+        self.jobs.cancel('original')
+        self.view.clear_photo()
+        self.position.setText(ui_message('{0} / {1}', index + 1, len(self.urls)))
+        self.previous.setEnabled(index > 0)
+        self.next.setEnabled(index + 1 < len(self.urls))
+        self.scale_label.clear()
+        self.status.setText(ui_text('正在加载商品原图…'))
+        if index in self.cache:
+            log_event('DEBUG', 'image.cache_hit', index=index)
+            self.show_photo(index, self.cache[index])
+        else:
+            self.jobs.start('original', lambda stop, progress: self.client.image(self.urls[index], stop),
+                            lambda data: self.image_loaded(index, data), self.image_failed)
+
+    def image_loaded(self, index, data):
+        pixmap = QPixmap()
+        if not data or not pixmap.loadFromData(data):
+            log_event('ERROR', 'image.decode_failed', index=index, part=safe_part(self.part), bytes=len(data or b''))
+            self.image_failed(StoreError(ui_text('商品原图加载失败，请重新选择图片重试。')))
+            return
+        self.cache[index] = pixmap
+        self.show_photo(index, pixmap)
+
+    def show_photo(self, index, pixmap):
+        log_event('DEBUG', 'image.displayed', index=index, part=safe_part(self.part),
+                  width=pixmap.width(), height=pixmap.height())
+        if index == self.thumbnails.currentRow():
+            self.view.set_photo(pixmap)
+            self.status.setText(ui_message('原图 {0} × {1} · 滚轮缩放 · 拖动平移 · 双击适应窗口', pixmap.width(), pixmap.height()))
+
+    def image_failed(self, error):
+        record_error(error, 'image.display_failed', part=safe_part(self.part))
+        self.status.setText(str(error))
+
+    def closeEvent(self, event):
+        self.jobs.cancel_all()
+        event.accept()
+        self.closed.emit()
+
+    def reject(self):
+        self.close()

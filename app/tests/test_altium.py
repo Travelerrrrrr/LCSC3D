@@ -9,10 +9,10 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from altium import export_schlib, export_pcblib
-from backend import Options, download_part
-from errors import Cancelled, DownloadError
-from eda_geometry import path_points
+from lcsc3d.eda.altium import export_schlib, export_pcblib
+from lcsc3d.services.backend import Options, download_part
+from lcsc3d.core.errors import Cancelled, DownloadError
+from lcsc3d.eda.eda_geometry import path_points
 
 if sys.platform == 'win32':
     from altium_inspect import schematic, pcb
@@ -203,8 +203,8 @@ class LibraryTests(unittest.TestCase):
                              {data['title'] + '.SchLib', data['title'] + '.PcbLib'})
             for file in result.files:
                 Path(file).write_bytes(b'old library')
-            with patch('backend.export_schlib', wraps=export_schlib) as schlib, \
-                 patch('backend.export_pcblib', wraps=export_pcblib) as pcblib:
+            with patch('lcsc3d.services.backend.export_schlib', wraps=export_schlib) as schlib, \
+                 patch('lcsc3d.services.backend.export_pcblib', wraps=export_pcblib) as pcblib:
                 refreshed = download_part('C2765186', options, Api(data))
             self.assertEqual(refreshed.status, '成功', refreshed.message)
             self.assertEqual(refreshed.files, result.files)
@@ -215,7 +215,7 @@ class LibraryTests(unittest.TestCase):
 
     def test_missing_model_does_not_block_libraries_in_mixed_selection(self):
         data = fixture()
-        with tempfile.TemporaryDirectory() as folder, patch('backend.model_reference', return_value=None):
+        with tempfile.TemporaryDirectory() as folder, patch('lcsc3d.services.backend.model_reference', return_value=None):
             result = download_part('C2765186', Options(Path(folder), ('STEP', 'SCHLIB', 'PCBLIB'), bind_3d_models=False), Api(data))
             self.assertEqual(result.status, '部分完成')
             self.assertEqual(len(result.files), 2)

@@ -11,14 +11,14 @@ from unittest.mock import patch
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import backend
-from altium import MergedLibrary
-from altium_project import commit_user_file
-from app_settings import Preferences, get_preferences, set_preferences
-from app_logging import close_logging
-from backups import (backup_directory, create_backup, list_backups, prepare_restore,
+from lcsc3d.services import backend
+from lcsc3d.eda.altium import MergedLibrary
+from lcsc3d.eda.altium_project import commit_user_file
+from lcsc3d.core.app_settings import Preferences, get_preferences, set_preferences
+from lcsc3d.core.app_logging import close_logging
+from lcsc3d.services.backups import (backup_directory, create_backup, list_backups, prepare_restore,
                      restore_backup, clear_backups)
-from errors import DownloadError, Cancelled
+from lcsc3d.core.errors import DownloadError, Cancelled
 
 
 class BackupTests(unittest.TestCase):
@@ -119,7 +119,7 @@ class BackupTests(unittest.TestCase):
             if path.name == 'metadata.json':
                 raise PermissionError('locked')
             original_write(path, payload)
-        with patch('backend.atomic_write', side_effect=fail_metadata), self.assertRaises(PermissionError):
+        with patch('lcsc3d.services.backend.atomic_write', side_effect=fail_metadata), self.assertRaises(PermissionError):
             commit_user_file(self.target, self.original, self.changed)
         self.assertEqual(self.target.read_bytes(), self.original)
         self.assertEqual(list(backup_directory().iterdir()), [])
@@ -132,7 +132,7 @@ class BackupTests(unittest.TestCase):
             if path == self.target:
                 raise PermissionError('locked')
             original_write(path, payload)
-        with patch('backend.atomic_write', side_effect=fail_target), self.assertRaises(PermissionError):
+        with patch('lcsc3d.services.backend.atomic_write', side_effect=fail_target), self.assertRaises(PermissionError):
             restore_backup(plan)
         self.assertEqual(self.target.read_bytes(), self.changed)
         self.assertEqual(len(list_backups()), 2)
@@ -206,7 +206,7 @@ class BackupUiTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
-        import main
+        from lcsc3d.ui import main
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.root = Path(folder.name).resolve()

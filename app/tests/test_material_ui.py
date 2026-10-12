@@ -11,11 +11,11 @@ from PySide6.QtCore import Qt, QEvent, QPoint, QPointF, QObject
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest, QSignalSpy
 from PySide6.QtWidgets import QApplication
-from app_settings import Preferences
-from app_theme import theme_manager
-from app_paths import data_directory
-from app_logging import close_logging
-import main
+from lcsc3d.core.app_settings import Preferences
+from lcsc3d.ui.app_theme import theme_manager
+from lcsc3d.core.app_paths import data_directory
+from lcsc3d.core.app_logging import close_logging
+from lcsc3d.ui import main
 
 
 class MaterialUiTests(unittest.TestCase):

@@ -80,7 +80,7 @@ def startup(executable, runs):
 
 def downloads(runs):
     sys.path.insert(0, str(ROOT / 'app'))
-    import backend
+    from lcsc3d.services import backend
     samples = []
     for index in range(runs):
         with tempfile.TemporaryDirectory(prefix='LCSC3D-benchmark-') as folder:

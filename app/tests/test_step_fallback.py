@@ -12,10 +12,10 @@ import threading
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import backend
-from app_logging import close_logging, configure_logging
-from errors import Cancelled, DownloadError
-from model3d import ModelReference, model_library_reference, model_library_asset
+from lcsc3d.services import backend
+from lcsc3d.core.app_logging import close_logging, configure_logging
+from lcsc3d.core.errors import Cancelled, DownloadError
+from lcsc3d.models.model3d import ModelReference, model_library_reference, model_library_asset
 from test_backend import STEP, OBJ
 
 PRIMARY = ModelReference('USB model', 'primary-asset')
@@ -39,7 +39,7 @@ class StepFallbackTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
         self.addCleanup(close_logging)
-        cache = patch('backend.PAYLOAD_CACHE', backend.PayloadCache())
+        cache = patch('lcsc3d.services.backend.PAYLOAD_CACHE', backend.PayloadCache())
         cache.start()
         self.addCleanup(cache.stop)
         self.api = backend.NetworkApi(use_cache=False)
@@ -224,8 +224,8 @@ class StepFallbackTests(unittest.TestCase):
         thread.start()
         try:
             base = 'http://127.0.0.1:' + str(server.server_port)
-            with patch('backend.ENDPOINT_3D_MODEL_STEP', base + '/step/{uuid}'), \
-                    patch('backend.MODEL_LIBRARY_ENDPOINTS', (base + '/library/{uuid}', base + '/mirror-library/{uuid}')), \
+            with patch('lcsc3d.services.backend.ENDPOINT_3D_MODEL_STEP', base + '/step/{uuid}'), \
+                    patch('lcsc3d.services.backend.MODEL_LIBRARY_ENDPOINTS', (base + '/library/{uuid}', base + '/mirror-library/{uuid}')), \
                     patch.object(self.api, 'get_cad_data_of_component', return_value=COMPONENT):
                 result = backend.download_part('C48800488', backend.Options(self.folder / 'exports', bind_3d_models=False), self.api)
         finally:

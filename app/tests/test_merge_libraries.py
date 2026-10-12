@@ -13,10 +13,10 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from altium import export_schlib, export_pcblib, MergedLibrary
-from backend import NetworkApi, Options, download_batch, library_filename
-from errors import DownloadError
-from app_logging import close_logging
+from lcsc3d.eda.altium import export_schlib, export_pcblib, MergedLibrary
+from lcsc3d.services.backend import NetworkApi, Options, download_batch, library_filename
+from lcsc3d.core.errors import DownloadError
+from lcsc3d.core.app_logging import close_logging
 from altium_inspect import schematic, pcb, Reader, parameters, merged_pcb_section
 import olefile
 
@@ -165,12 +165,12 @@ class MergeTests(unittest.TestCase):
         self.options.destination.mkdir()
         old = self.options.destination / '项目封装.PcbLib'
         old.write_bytes(b'old footprint')
-        from backend import atomic_write
+        from lcsc3d.services.backend import atomic_write
         def write(path, data):
             if path.suffix == '.PcbLib':
                 raise PermissionError('locked')
             atomic_write(path, data)
-        with patch('backend.atomic_write', side_effect=write):
+        with patch('lcsc3d.services.backend.atomic_write', side_effect=write):
             results = self.batch()
         self.assertEqual([r.status for r in results], ['部分完成'] * 3)
         self.assertTrue(all('合并失败' in r.message and len(r.files) == 1 for r in results))

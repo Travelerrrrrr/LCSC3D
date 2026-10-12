@@ -5,8 +5,8 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from errors import Cancelled, DownloadError
-from model3d import ModelReference, model_reference, read_obj
+from lcsc3d.core.errors import Cancelled, DownloadError
+from lcsc3d.models.model3d import ModelReference, model_reference, read_obj
 from test_backend import OBJ
 
 

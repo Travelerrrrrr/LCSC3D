@@ -10,13 +10,13 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import backend
-from altium import MergedLibrary, _block, _parameters, _string_block
-from compound_storage import compound_file
-from library_merge import append_library, LibraryIndex, Reader, parameters
-from altium_project import add_libraries_to_project, commit_user_file
-from app_logging import close_logging
-from errors import DownloadError, Cancelled
+from lcsc3d.services import backend
+from lcsc3d.eda.altium import MergedLibrary, _block, _parameters, _string_block
+from lcsc3d.eda.compound_storage import compound_file
+from lcsc3d.eda.library_merge import append_library, LibraryIndex, Reader, parameters
+from lcsc3d.eda.altium_project import add_libraries_to_project, commit_user_file
+from lcsc3d.core.app_logging import close_logging
+from lcsc3d.core.errors import DownloadError, Cancelled
 from altium_inspect import schematic, pcb, merged_pcb_section
 import olefile
 
@@ -185,7 +185,7 @@ class LibraryIntegrationTests(unittest.TestCase):
             if path.parent.name.endswith('C2040'):
                 raise PermissionError('locked')
             original_write(path, payload)
-        with patch('backend.atomic_write', side_effect=write):
+        with patch('lcsc3d.services.backend.atomic_write', side_effect=write):
             result = backend.download_batch(['C2040'], options, api=api)[0]
         self.assertEqual(result.status, '部分完成')
         self.assertEqual(len(result.files), 1)
@@ -234,7 +234,7 @@ class LibraryIntegrationTests(unittest.TestCase):
             if path == target:
                 raise PermissionError('locked')
             original_write(path, payload)
-        with patch('backend.atomic_write', side_effect=write), self.assertRaises(PermissionError):
+        with patch('lcsc3d.services.backend.atomic_write', side_effect=write), self.assertRaises(PermissionError):
             add_libraries_to_project(target, [lib])
         self.assertEqual(target.read_bytes(), b'[Design]\nNew=user change\n')
 

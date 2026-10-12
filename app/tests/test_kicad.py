@@ -15,14 +15,14 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from eda_ir import Pin, Pad, Point, Graphic, D, Component, Symbol, SymbolUnit, dumps
-from easyeda_import import parse_component
-from errors import DownloadError, Cancelled
-from kicad import FORMATS, ELECTRICAL_TYPES, build_library, symbol_definition, footprint_definition
-from library_files import commit_library
-import library_files
-import backend
-from app_logging import close_logging
+from lcsc3d.eda.eda_ir import Pin, Pad, Point, Graphic, D, Component, Symbol, SymbolUnit, dumps
+from lcsc3d.eda.easyeda_import import parse_component
+from lcsc3d.core.errors import DownloadError, Cancelled
+from lcsc3d.eda.kicad import FORMATS, ELECTRICAL_TYPES, build_library, symbol_definition, footprint_definition
+from lcsc3d.eda.library_files import commit_library
+from lcsc3d.eda import library_files
+from lcsc3d.services import backend
+from lcsc3d.core.app_logging import close_logging
 from test_eda_ir import fixture, FIXTURES
 
 
@@ -257,7 +257,7 @@ class KiCadTests(unittest.TestCase):
 
     def test_via_footprints_export_merge_reuse_and_ad_append_without_losing_holes(self):
         from altium_inspect import pcb
-        from library_merge import LibraryIndex
+        from lcsc3d.eda.library_merge import LibraryIndex
         self.api.get_cad_data_of_component=lambda part: fixture('C31966')
         for formats in (FORMATS,('SCHLIB','PCBLIB')):
             root=self.root/formats[0]
@@ -303,7 +303,7 @@ class KiCadTests(unittest.TestCase):
             def fail_symbol(source,target):
                 if target.suffix == '.kicad_sym': raise error
                 original_replace(source,target)
-            with patch('library_files.replace_file',side_effect=fail_symbol), self.assertRaises(type(error)):
+            with patch('lcsc3d.eda.library_files.replace_file',side_effect=fail_symbol), self.assertRaises(type(error)):
                 commit_library(root,artifacts,overwrite=True)
             self.assertEqual(before,{p.relative_to(root):p.read_bytes() for p in root.rglob('*') if p.is_file()})
 
@@ -329,7 +329,7 @@ class KiCadTests(unittest.TestCase):
                 if count == 2:
                     raise error
                 original(source, target)
-            with patch('library_files._move_new', side_effect=move), self.assertRaises(type(error)):
+            with patch('lcsc3d.eda.library_files._move_new', side_effect=move), self.assertRaises(type(error)):
                 commit_library(root, artifacts)
             self.assertEqual(list(root.iterdir()), [])
             self.assertFalse(list((self.root / 'profile/LCSC3D/temp').glob('library-*')))
@@ -349,7 +349,7 @@ class KiCadTests(unittest.TestCase):
             if target.name == 'Second.kicad_sym':
                 raise OSError('simulated final-symbol failure')
             original(source, target)
-        with patch('library_files._move_new', side_effect=fail_last), self.assertRaises(OSError):
+        with patch('lcsc3d.eda.library_files._move_new', side_effect=fail_last), self.assertRaises(OSError):
             commit_library(root, artifacts)
         self.assertEqual(preserved.read_bytes(), b'original model')
         self.assertEqual(set(root.rglob('*')), {existing, preserved})
@@ -402,14 +402,14 @@ class KiCadTests(unittest.TestCase):
                     self.assertLessEqual(float(height), 1.27)
 
     def test_artifact_path_escape_is_rejected_before_any_write(self):
-        from kicad import Artifact
+        from lcsc3d.eda.kicad import Artifact
         root = self.root / 'out'
         with self.assertRaises(DownloadError):
             commit_library(root, [Artifact('../escape.kicad_sym', b'bad', 'KICAD_SYMBOL', ('C1',))])
         self.assertFalse((self.root / 'escape.kicad_sym').exists())
 
     def test_pin_label_visibility_uses_native_controls_without_losing_identity(self):
-        from eda_ir import Component, Symbol, SymbolUnit
+        from lcsc3d.eda.eda_ir import Component, Symbol, SymbolUnit
         first = Pin(number='1', name='HIDDEN', connection=Point(D(-2), D(0)), name_visible=False, number_visible=False)
         second = Pin(number='2', name='VISIBLE', connection=Point(D(-2), D(-2)), body=Point(D(0), D(-2)))
         component = Component(part='C1', symbol=Symbol(name='Probe', units=(SymbolUnit(items=(first, second)),)))

@@ -7,9 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from errors import Cancelled
-from favorites_selftest import fixture_png
-from store_images import load_search_thumbnails
+from lcsc3d.core.errors import Cancelled
+from lcsc3d.selftests.favorites_selftest import fixture_png
+from lcsc3d.ui.store_images import load_search_thumbnails
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 

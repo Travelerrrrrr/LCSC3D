@@ -15,11 +15,11 @@ import urllib.error
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from errors import Cancelled
-from favorites import RequestWorker
-from store import MemorySession, PASSPORT, StoreClient, StoreError
-from store_diagnostics import MAX_LOG_BYTES, record_request_error
-from app_logging import configure_logging, close_logging
+from lcsc3d.core.errors import Cancelled
+from lcsc3d.ui.favorites import RequestWorker
+from lcsc3d.services.store import MemorySession, PASSPORT, StoreClient, StoreError
+from lcsc3d.services.store_diagnostics import MAX_LOG_BYTES, record_request_error
+from lcsc3d.core.app_logging import configure_logging, close_logging
 
 
 class IsolatedDiagnostics(unittest.TestCase):
@@ -185,7 +185,7 @@ class StoreDiagnosticsTests(IsolatedDiagnostics):
 
     def test_read_only_profile_does_not_mask_the_request_error(self):
         close_logging()
-        with patch('app_logging.SafeFileHandler', side_effect=PermissionError('private profile path')):
+        with patch('lcsc3d.core.app_logging.SafeFileHandler', side_effect=PermissionError('private profile path')):
             self.assertFalse(record_request_error(ValueError('private input'), 'qr'))
 
     def test_cancelled_worker_produces_no_result_or_diagnostics(self):

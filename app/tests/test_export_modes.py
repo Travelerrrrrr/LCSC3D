@@ -11,14 +11,14 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import backend
-import main
-from altium import MergedLibrary
+from lcsc3d.services import backend
+from lcsc3d.ui import main
+from lcsc3d.eda.altium import MergedLibrary
 from altium_inspect import schematic, pcb, merged_pcb_section
-from app_logging import configure_logging, close_logging
-from errors import DownloadError, Cancelled
-from export_targets import ExportTargetsDialog
-from library_merge import LibraryIndex
+from lcsc3d.core.app_logging import configure_logging, close_logging
+from lcsc3d.core.errors import DownloadError, Cancelled
+from lcsc3d.ui.export_targets import ExportTargetsDialog
+from lcsc3d.eda.library_merge import LibraryIndex
 from test_backend import STEP, OBJ
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtTest import QTest
@@ -342,7 +342,7 @@ class ExportMatrixTests(ExportFixture):
         original = project.read_bytes()
         options = backend.Options(self.root / 'unused', (), append_mode=True, **targets,
                                   project_path=str(project), import_existing_to_project=True, bind_3d_models=False)
-        with patch('backend.add_libraries_to_project', side_effect=PermissionError('locked')):
+        with patch('lcsc3d.services.backend.add_libraries_to_project', side_effect=PermissionError('locked')):
             row = backend.download_batch(['C2040'], options, api=self.api)[0]
         self.assertEqual(row.status, '部分完成')
         self.assertIn('加入 PCB 工程失败', row.message)

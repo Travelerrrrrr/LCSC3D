@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import main
+from lcsc3d.ui import main
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QApplication
 

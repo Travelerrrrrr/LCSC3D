@@ -1,0 +1,431 @@
+"""Exercise settings and logs in an isolated folder in the frozen app."""
+import json
+from pathlib import Path
+import sys
+import time
+import zipfile
+from dataclasses import replace
+
+from PySide6.QtCore import QTimer, QObject, Slot, QUrl, Qt, QEvent
+from PySide6.QtGui import QDesktopServices, QColor, QPalette, QKeyEvent
+from PySide6.QtWidgets import QApplication, QColorDialog
+
+from lcsc3d.core.app_settings import Preferences, get_preferences, set_preferences
+from lcsc3d.core.app_logging import get_log_directory, log_event, set_log_level, configure_logging
+
+
+def start(window, destination):
+    main = sys.modules[window.__class__.__module__]
+    destination = Path(destination).resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    QApplication.instance().setQuitOnLastWindowClosed(False)
+    # Measure the final popup, independent of Windows' transient animation.
+    QApplication.setEffectEnabled(Qt.UI_AnimateCombo, False)
+    original_path = main.SETTINGS_PATH
+    main.SETTINGS_PATH = destination / 'LCSC3D-settings.json'
+    window.settings_enabled = True
+    window.path_input.setText('下载目录')
+    report = {'version': main.VERSION, 'frozen': bool(getattr(sys, 'frozen', False)),
+              'isolated_settings': True, 'saved_session_accessed': False}
+
+    class DirectoryReceiver(QObject):
+        @Slot(QUrl)
+        def opened(self, url):
+            report['opened_bundle_directory'] = url.toLocalFile()
+
+    receiver = DirectoryReceiver(window)
+    QDesktopServices.setUrlHandler('file', receiver, 'opened')
+
+    class RepositoryReceiver(QObject):
+        @Slot(QUrl)
+        def opened(self, url):
+            address = url.toString()
+            report['opened_repository' if address.startswith('https://github.com/') else 'opened_storefront'] = address
+
+    repository_receiver = RepositoryReceiver(window)
+    QDesktopServices.setUrlHandler('https', repository_receiver, 'opened')
+
+    def finish(error=''):
+        QDesktopServices.unsetUrlHandler('file')
+        QDesktopServices.unsetUrlHandler('https')
+        report.update(success=not error, error=error)
+        (destination / 'settings-verification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+        window.settings_enabled = False
+        main.SETTINGS_PATH = original_path
+        window.close()
+        QApplication.instance().exit(1 if error else 0)
+
+    def verify_font_popup(dialog, appearance):
+        combo = dialog.font_combo
+        original = combo.currentIndex()
+        combo.showPopup()
+        QApplication.processEvents()
+        view = combo.view()
+        popup = combo.popup_frame
+        try:
+            assert popup.isVisible()
+            assert popup.window() is window and not popup.isWindow()
+            assert popup.width() <= combo.width() + 2, 'Font popup wider than its field'
+            assert popup.height() <= 8 * view.sizeHintForRow(0) + 4, 'Font popup exceeds eight rows'
+            assert view.sizeHintForRow(0) >= view.fontMetrics().height(), 'Font row clips its text'
+            assert view.verticalScrollBar().isVisible()
+            assert view.verticalScrollBar().maximum() > 0
+            assert view.viewport().rect().contains(view.visualRect(view.currentIndex()).center())
+            assert popup.grab().save(str(destination / ('font-popup-' + appearance + '.png')))
+            report.setdefault('font_popups', []).append({
+                'appearance': appearance, 'width': popup.width(), 'height': popup.height(),
+                'field_width': combo.width(), 'font_count': combo.count(),
+                'device_pixel_ratio': combo.devicePixelRatioF()})
+
+            def key_press(key):
+                for event_type in (QEvent.KeyPress, QEvent.KeyRelease):
+                    QApplication.sendEvent(view, QKeyEvent(event_type, key, Qt.NoModifier))
+                QApplication.processEvents()
+
+            key_press(Qt.Key_End)
+            assert view.currentIndex().row() == combo.count() - 1
+            key_press(Qt.Key_Return)
+            assert not popup.isVisible()
+            assert combo.currentIndex() == combo.count() - 1
+            assert dialog.color_preview.font().family() == combo.currentText()
+            combo.showPopup()
+            key_press(Qt.Key_Home)
+            key_press(Qt.Key_Escape)
+            assert not popup.isVisible() and dialog.isVisible()
+            assert combo.currentIndex() == combo.count() - 1
+        finally:
+            combo.hidePopup()
+            combo.setCurrentIndex(original)
+        report['font_popup_verified'] = True
+
+    def verify_large_font_and_checkboxes():
+        from lcsc3d.ui.favorites import FavoritesDialog
+        from lcsc3d.services.store import StoreClient
+        from PySide6.QtWidgets import QStyle, QStyleOptionViewItem
+        from lcsc3d.ui.app_theme import theme_manager
+        # Populate native tables locally; no account, saved session or network requests.
+        store = FavoritesDialog(window, client_factory=StoreClient, vault=False)
+        store.selection_changed = lambda *_: None
+        store.tabs.setCurrentIndex(1)
+        store.status.setText('LCSC3D UI verification · offline sample data')
+        for part, title in (('C2040', 'RP2040'), ('C20197', '4D03WGJ0102T5E'), ('C163691', 'SMDRS1275-152N')):
+            store.append_row(store.favorite_table, {'part': part, 'title': title, 'manufacturer': 'Sample', 'package': 'Sample'})
+            store.append_row(store.search_table, {'part': part, 'title': title, 'manufacturer': 'Sample', 'package': 'Sample'})
+        for table in (store.favorite_table, store.search_table):
+            table.item(1, 0).setCheckState(Qt.Checked)
+            # Block selection callbacks so the synthetic row does not request product details.
+            table.blockSignals(True)
+            table.selectRow(0)
+            table.blockSignals(False)
+        store.show()
+        try:
+            for size, mode in ((24, 'dark'), (10, 'light'), (18, 'dark')):
+                window.apply_preferences(Preferences(theme_mode=mode, accent_color='#7c3aed', font_size=size))
+                QApplication.processEvents()
+                assert window.settings_button.font().pixelSize() == size
+                table = store.favorite_table
+                assert table.font().pixelSize() == size
+                assert table.rowHeight(0) >= table.fontMetrics().height() + 10
+                assert table.item(1, 0).checkState() == Qt.Checked
+                if size == 18:
+                    assert store.grab().save(str(destination / 'store-checkboxes-dark.png'))
+                    for row in (0, 1, 2):
+                        option = QStyleOptionViewItem()
+                        table.itemDelegate().initStyleOption(option, table.model().index(row, 0))
+                        option.rect = table.visualItemRect(table.item(row, 0))
+                        rect = table.style().subElementRect(QStyle.SE_ItemViewItemCheckIndicator, option, table)
+                        assert table.viewport().grab(rect).save(str(destination / ('checkbox-' + str(row) + '.png')))
+                    store.close()
+                    window.settings_button.click()
+                    dialog = window.settings_dialog
+                    QApplication.processEvents()
+                    assert dialog.grab().save(str(destination / 'settings-font-size.png'))
+                    assert window.grab().save(str(destination / 'main-font-size-dark.png'))
+                    dialog.reset_size_button.click()
+                    assert dialog.font_size_spin.value() == 13
+                    dialog.save_button.click()
+                    assert get_preferences().font_size == 13
+            report['font_size_range_and_reset_verified'] = True
+            report['checkboxes_dark_mode_verified'] = True
+            assert theme_manager().tokens['font_size'] == 13
+        finally:
+            store.shutdown()
+            store.close()
+            store.deleteLater()
+
+    def verify_package(deadline):
+        dialog = window.settings_dialog
+        if dialog.worker is not None:
+            if time.monotonic() > deadline:
+                # Keep the thread owned until it finishes even when reporting failure.
+                dialog.worker.finished.connect(lambda: finish('Log package timed out'))
+            else:
+                QTimer.singleShot(25, lambda: verify_package(deadline))
+            return
+        try:
+            from lcsc3d.core.app_paths import data_directory
+            archive_path = max((data_directory() / 'diagnostics').glob('*.zip'), key=lambda path: path.stat().st_mtime_ns)
+            assert Path(report['opened_bundle_directory']) == archive_path.parent
+            with zipfile.ZipFile(archive_path) as archive:
+                assert archive.testzip() is None
+                assert {'diagnostics.json', '反馈说明.txt', 'logs/LCSC3D.log',
+                        'logs/LCSC3D.log.1', 'logs/LCSC3D-update.log', 'logs/LCSC3D-crash-12345.log'} <= set(archive.namelist())
+                metadata = json.loads(archive.read('diagnostics.json'))
+                assert metadata['application']['version'] == main.VERSION
+                assert metadata['environment']['frozen'] == report['frozen']
+                assert metadata['preferences'] == get_preferences().to_mapping()
+                assert b'settings.self_test_before_clear' in archive.read('logs/LCSC3D.log')
+                assert not any('store-session' in name or 'settings.json' in name for name in archive.namelist())
+            report['log_package_verified'] = True
+            report['log_package'] = str(archive_path)
+            folder = get_log_directory()
+            markers = list(folder.glob('run-*.json'))
+            assert markers
+            dialog.clear_log_button.click()
+            dialog.confirmation_notice.action_buttons[0].click()
+            assert 'settings.self_test_before_clear' in (folder / 'LCSC3D.log').read_text(encoding='utf-8')
+            dialog.clear_log_button.click()
+            dialog.confirmation_notice.action_buttons[1].click()
+            assert '日志已清除' in dialog.status.text()
+            assert archive_path.exists() and all(path.exists() for path in markers)
+            assert not (folder / 'LCSC3D.log.1').exists()
+            assert not (folder / 'LCSC3D-update.log').exists()
+            assert not (folder / 'LCSC3D-crash-12345.log').exists()
+            assert log_event('ERROR', 'settings.self_test_after_clear')
+            contents = (folder / 'LCSC3D.log').read_text(encoding='utf-8')
+            assert 'settings.self_test_before_clear' not in contents
+            assert 'settings.self_test_after_clear' in contents
+            report['log_clear_verified'] = True
+            import faulthandler
+            from lcsc3d.core import app_logging
+            faulthandler.dump_traceback(file=app_logging._crash_stream)
+            app_logging._crash_stream.flush()
+            assert b'verify_package' in Path(app_logging._crash_stream.name).read_bytes()
+            report['crash_capture_after_clear_verified'] = True
+        except Exception as exc:
+            finish(type(exc).__name__ + ': ' + str(exc))
+            return
+        finish()
+
+    def check():
+        try:
+            window.settings_button.click()
+            dialog = window.settings_dialog
+            QApplication.processEvents()
+            assert dialog.isVisible()
+            assert dialog.store_proxy_combo.currentData() == dialog.update_proxy_combo.currentData() == 'system'
+            assert dialog.log_level_combo.currentData() == 'DEBUG'
+            verify_font_popup(dialog, 'light')
+            assert dialog.grab().save(str(destination / '设置.png'))
+            assert window.grab().save(str(destination / '主窗口.png'))
+            dialog.section_buttons[3].click()
+            assert dialog.star_button.isVisible() and dialog.sponsor_button.isVisible()
+            dialog.star_button.click()
+            assert report['opened_repository'] == 'https://github.com/Travelerrrrrr/LCSC3D'
+            dialog.store_proxy_combo.setCurrentIndex(1)
+            dialog.sponsor_button.click()
+            QApplication.processEvents()
+            sponsorship = dialog.sponsorship_dialog
+            assert sponsorship.isVisible() and sponsorship._page_owner is dialog
+            assert sponsorship.window() is window and not sponsorship.isWindow()
+            assert len(sponsorship.code_labels) == 2
+            assert all(label.isVisible() and not label.pixmap().isNull()
+                       for label in sponsorship.code_labels)
+            assert sponsorship.grab().save(str(destination / '赞助与支持.png'))
+            sponsorship.close_button.click()
+            assert not sponsorship.isVisible() and dialog.isVisible()
+            assert dialog.store_proxy_combo.currentData() == 'direct'
+            assert get_preferences() == Preferences()
+            dialog.sponsor_button.click()
+            assert dialog.sponsorship_dialog is sponsorship and sponsorship.isVisible()
+            sponsorship.reject()
+            dialog.store_proxy_combo.setCurrentIndex(0)
+            report['support_buttons_verified'] = report['bundled_payment_codes_verified'] = True
+            report['support_preserves_unsaved_preferences'] = True
+            from lcsc3d.ui.app_theme import theme_manager
+            manager = theme_manager()
+            dialog.section_buttons[0].click()
+            original_path_text = window.path_input.text()
+            dialog.color_button.click()
+            picker = dialog.color_page
+            assert isinstance(picker, QColorDialog) and picker.window() is window
+            picker.setCurrentColor(QColor('#334455'))
+            picker.accept()
+            assert dialog.accent_combo.currentData() == '#334455'
+            report['custom_color_picker_verified'] = True
+            dialog.text_color_button.click()
+            picker = dialog.color_page
+            picker.setCurrentColor(QColor('#fff1d6'))
+            picker.accept()
+            assert dialog.text_color_combo.currentData() == '#fff1d6'
+            dialog.font_combo.setCurrentText('Segoe UI')
+            dialog.font_size_spin.setValue(18)
+            assert dialog.color_preview.font().family() == dialog.font_combo.currentText()
+            assert dialog.color_preview.font().pixelSize() == 18
+            assert window.settings_button.font().pixelSize() == 13
+            report['custom_text_color_picker_verified'] = True
+            dialog.language_combo.setCurrentIndex(dialog.language_combo.findData('en_US'))
+            dialog.theme_mode_combo.setCurrentIndex(dialog.theme_mode_combo.findData('dark'))
+            dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('#7c3aed'))
+            dialog.cancel_button.click()
+            assert get_preferences() == Preferences()
+            assert manager.tokens['on_accent'] == '#000000'
+            window.settings_button.click()
+            dialog = window.settings_dialog
+            dialog.language_combo.setCurrentIndex(dialog.language_combo.findData('en_US'))
+            dialog.theme_mode_combo.setCurrentIndex(dialog.theme_mode_combo.findData('dark'))
+            dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('#7c3aed'))
+            dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('#ffffff'))
+            dialog.font_combo.setCurrentText('Segoe UI')
+            dialog.font_size_spin.setValue(18)
+            chosen_font = dialog.font_combo.currentText()
+            dialog.save_button.click()
+            assert manager.dark and manager.tokens['accent'] == '#7c3aed'
+            assert manager.tokens['on_accent'] == manager.tokens['on_accent_hover'] == '#ffffff'
+            assert window.start_button.palette().color(QPalette.ButtonText).name() == '#ffffff'
+            assert window.settings_button.font().family() == chosen_font
+            assert window.settings_button.font().pixelSize() == 18
+            assert window.settings_button.text() == 'Settings'
+            assert window.path_input.text() == original_path_text
+            saved_theme = Preferences.from_mapping(json.loads(main.SETTINGS_PATH.read_text(encoding='utf-8')))
+            assert saved_theme.language == 'en_US' and saved_theme.theme_mode == 'dark'
+            assert saved_theme.accent_color == '#7c3aed'
+            assert saved_theme.accent_text_color == '#ffffff' and saved_theme.font_family == chosen_font
+            assert saved_theme.font_size == 18
+            manager.apply(Preferences())
+            window._restore_settings()
+            assert manager.tokens['on_accent'] == '#ffffff'
+            assert window.settings_button.font().family() == chosen_font
+            assert window.settings_button.font().pixelSize() == 18
+            report['font_and_text_color_persisted'] = True
+            report['font_size_persisted_and_cancelled'] = True
+            window.current_preview = 'C2040'
+            window.open_store()
+            assert report['opened_storefront'] == 'https://www.lcsc.com/product-detail/C2040.html'
+            window.current_preview = ''
+            from lcsc3d.services.international_store import InternationalStoreClient
+            assert isinstance(window.product_preview.factory(), InternationalStoreClient)
+            store = window.ensure_store()
+            assert store.international
+            from lcsc3d.services.store_session import MemoryOnlyVault
+            assert isinstance(store.vault, MemoryOnlyVault)
+            window.settings_button.click()
+            dialog = window.settings_dialog
+            QApplication.processEvents()
+            verify_font_popup(dialog, 'dark')
+            assert dialog.grab().save(str(destination / 'settings-English-dark.png'))
+            assert window.grab().save(str(destination / 'main-English-dark.png'))
+            dialog.cancel_button.click()
+            window.apply_preferences(replace(saved_theme, theme_mode='light', accent_color='#2563eb'))
+            assert not manager.dark and manager.tokens['accent'] == '#2563eb'
+            assert manager.tokens['on_accent'] == '#ffffff'
+            window.settings_button.click()
+            QApplication.processEvents()
+            assert window.settings_dialog.grab().save(str(destination / 'settings-English-light.png'))
+            window.settings_dialog.cancel_button.click()
+            window.apply_preferences(replace(saved_theme, language='zh_CN', theme_mode='light', accent_color='#168878'))
+            assert manager.tokens['on_accent'] == '#ffffff'
+            window.settings_button.click()
+            QApplication.processEvents()
+            assert window.settings_dialog.grab().save(str(destination / 'settings-text-font.png'))
+            assert window.grab().save(str(destination / 'main-text-font.png'))
+            window.settings_dialog.cancel_button.click()
+            window.apply_preferences(replace(saved_theme, theme_mode='system'))
+            manager.system_changed(Qt.ColorScheme.Dark)
+            assert manager.dark
+            manager.system_changed(Qt.ColorScheme.Light)
+            assert not manager.dark
+            assert manager.tokens['on_accent'] == '#ffffff'
+            report['manual_text_color_preserved'] = True
+            verify_large_font_and_checkboxes()
+            window.apply_preferences(Preferences())
+            assert window.settings_button.text() == '设置'
+            assert QApplication.instance()._qt_ui_translator is not None
+            report['qt_dialog_translations_loaded'] = True
+            assert window.path_input.text() == original_path_text
+            report['theme_language_roundtrip'] = report['system_theme_changes'] = True
+            report['international_store_routing'] = report['theme_saved_and_cancelled'] = True
+            window.settings_button.click()
+            dialog = window.settings_dialog
+            report['default_system_proxies'] = report['default_debug'] = True
+            window.schlib_box.setChecked(True)
+            window.merge_schlib_box.setChecked(True)
+            window.keep_schlib_box.setChecked(True)
+            window.export_targets = {'schlib_target': 'D:/库/原库.SchLib', 'pcblib_target': '',
+                                     'project_path': 'D:/工程/测试.PrjPcb',
+                                     'keep_individual': True, 'individual_directory': 'D:/器件',
+                                     'project_schlib_directory': 'D:/符号', 'project_pcblib_directory': 'D:/封装',
+                                     'project_model_directory': 'D:/模型', 'project_schlib_name': '项目符号',
+                                     'project_pcblib_name': '项目封装'}
+            window.lib_append_box.setChecked(True)
+            dialog.store_proxy_combo.setCurrentIndex(1)
+            dialog.log_level_combo.setCurrentIndex(dialog.log_level_combo.findData('ERROR'))
+            dialog.save_button.click()
+            expected = Preferences(store_proxy='direct', update_proxy='system', log_level='ERROR')
+            assert get_preferences() == expected
+            assert not dialog.isVisible()
+            saved = json.loads(main.SETTINGS_PATH.read_text(encoding='utf-8'))
+            assert Preferences.from_mapping(saved) == expected
+            assert saved['destination'] == '下载目录'
+            report['independent_proxy_preferences'] = report['saved_to_disk'] = True
+            set_preferences(Preferences())
+            set_log_level('DEBUG')
+            window._restore_settings()
+            assert get_preferences() == expected
+            assert window.keep_schlib_box.isChecked()
+            assert window.export_targets['schlib_target'] == 'D:/库/原库.SchLib'
+            assert window.export_targets['project_path'] == 'D:/工程/测试.PrjPcb'
+            assert window.lib_append_box.isChecked() and not window.lib_merge_box.isChecked()
+            assert not window.path_input.isEnabled()
+            assert window.export_targets['keep_individual'] and window.export_targets['individual_directory'] == 'D:/器件'
+            assert window.export_targets['project_model_directory'] == 'D:/模型'
+            assert window.export_targets['project_schlib_directory'] == 'D:/符号'
+            assert window.export_targets['project_pcblib_directory'] == 'D:/封装'
+            assert window.export_targets['project_schlib_name'] == '项目符号'
+            assert window.export_targets['project_pcblib_name'] == '项目封装'
+            assert 'import_existing_to_project' not in window.export_targets
+            report['library_options_restored'] = True
+            report['restored_from_disk'] = True
+            assert not log_event('DEBUG', 'settings.self_test_debug')
+            assert log_event('ERROR', 'settings.self_test_error')
+            entries = [json.loads(line) for line in (get_log_directory() / 'LCSC3D.log').read_text(encoding='utf-8').splitlines()]
+            assert any(entry['event'] == 'settings.self_test_error' for entry in entries)
+            assert not any(entry['event'] == 'settings.self_test_debug' for entry in entries)
+            report['log_level_filters_output'] = True
+            window.settings_button.click()
+            dialog = window.settings_dialog
+            assert dialog.store_proxy_combo.currentData() == 'direct'
+            assert dialog.log_level_combo.currentData() == 'ERROR'
+            dialog.update_proxy_combo.setCurrentIndex(1)
+            dialog.log_level_combo.setCurrentIndex(0)
+            dialog.cancel_button.click()
+            assert get_preferences() == expected
+            report['cancel_preserves_preferences'] = True
+            from lcsc3d.core.app_paths import data_directory
+            local_settings = data_directory() / 'LCSC3D-settings.json'
+            main.SETTINGS_PATH = local_settings
+            assert window.save_settings()
+            assert local_settings.is_file()
+            configure_logging(expected.log_level, version=main.VERSION)
+            assert (get_log_directory()).is_relative_to(data_directory())
+            report['app_data_settings'] = report['app_data_logs'] = True
+            if getattr(sys, 'frozen', False):
+                assert Path(sys._MEIPASS).resolve().is_relative_to((data_directory() / 'runtime').resolve())
+                report['app_data_runtime'] = True
+            from lcsc3d.core.app_logging import stop_crash_capture, start_crash_capture
+            stop_crash_capture()
+            start_crash_capture()
+            assert log_event('ERROR', 'settings.self_test_before_clear')
+            for name in ('LCSC3D.log.1', 'LCSC3D-update.log', 'LCSC3D-crash-12345.log'):
+                (get_log_directory() / name).write_text('synthetic diagnostic\n', encoding='utf-8')
+            window.settings_button.click()
+            dialog = window.settings_dialog
+            dialog.section_buttons[2].click()
+            assert dialog.package_log_button.isVisible() and dialog.clear_log_button.isVisible()
+            dialog.package_log_button.click()
+            assert not dialog.clear_log_button.isEnabled()
+            QTimer.singleShot(25, lambda: verify_package(time.monotonic() + 15))
+        except Exception as exc:
+            finish(type(exc).__name__ + ': ' + str(exc))
+
+    QTimer.singleShot(200, check)

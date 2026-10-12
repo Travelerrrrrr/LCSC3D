@@ -12,10 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-from app_logging import close_logging
-from app_settings import Preferences
-from shell_ui import notify
-import main
+from lcsc3d.core.app_logging import close_logging
+from lcsc3d.core.app_settings import Preferences
+from lcsc3d.ui.shell_ui import notify
+from lcsc3d.ui import main
 
 
 class WindowChromeTests(unittest.TestCase):
@@ -32,7 +32,7 @@ class WindowChromeTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         self.addCleanup(close_logging)
-        for target in ('main.MainWindow._setup_preview', 'main.MainWindow.request_component_info'):
+        for target in ('lcsc3d.ui.main.MainWindow._setup_preview', 'lcsc3d.ui.main.MainWindow.request_component_info'):
             stub = patch(target)
             stub.start()
             self.addCleanup(stub.stop)

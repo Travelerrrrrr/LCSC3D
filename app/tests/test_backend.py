@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from backend import Cancelled, DownloadError, NetworkApi, Options, atomic_write, download_part, get_component_metadata, parse_part_numbers, safe_filename
+from lcsc3d.services.backend import Cancelled, DownloadError, NetworkApi, Options, atomic_write, download_part, get_component_metadata, parse_part_numbers, safe_filename
 
 STEP = b'ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;'
 OBJ = 'newmtl body\nKd 0.25 0.25 0.25\nendmtl\nv 0 0 0\nv 2.54 0 0\nv 0 2.54 0\nusemtl body\nf 1 2 3\n'
@@ -45,7 +45,7 @@ class Tests(unittest.TestCase):
         self.temp.cleanup()
 
     def importer(self):
-        return patch('backend.model_reference', return_value=self.model)
+        return patch('lcsc3d.services.backend.model_reference', return_value=self.model)
 
     def test_input_dedup_and_invalid_number(self):
         self.assertEqual(parse_part_numbers('c2040，C20197\nC2040; C12bad'), (['C2040', 'C20197'], ['C12bad'], 1))
@@ -61,10 +61,10 @@ class Tests(unittest.TestCase):
 
     def test_component_metadata_keeps_title_without_a_3d_association(self):
         for error in (KeyError('packageDetail'), TypeError('bad shape')):
-            with self.subTest(error=error), patch('backend.model_reference', side_effect=error):
+            with self.subTest(error=error), patch('lcsc3d.services.backend.model_reference', side_effect=error):
                 self.assertEqual(get_component_metadata('C2040', FakeApi(title='RP2040')),
                                  {'title': 'RP2040', 'model': ''})
-        with patch('backend.model_reference', return_value=None):
+        with patch('lcsc3d.services.backend.model_reference', return_value=None):
             self.assertEqual(get_component_metadata('C2040', FakeApi(title='RP2040')),
                              {'title': 'RP2040', 'model': ''})
 
@@ -118,7 +118,7 @@ class Tests(unittest.TestCase):
     def test_failed_file_replacement_keeps_previous_content_and_cleans_up(self):
         path = self.folder / 'library.SchLib'
         path.write_bytes(b'previous library')
-        with patch('backend.os.replace', side_effect=PermissionError('file in use')):
+        with patch('lcsc3d.services.backend.os.replace', side_effect=PermissionError('file in use')):
             with self.assertRaises(PermissionError):
                 atomic_write(path, b'new library')
         self.assertEqual(path.read_bytes(), b'previous library')
@@ -182,9 +182,9 @@ class Tests(unittest.TestCase):
     def test_ad_filenames_use_only_the_sanitized_component_title(self):
         for title, basename in [(' RP2040 ', 'RP2040'), ('温度/传感器:V1', '温度_传感器_V1'),
                                 ('CON', '_CON'), ('x' * 200, 'x' * 115), ('', '未命名器件')]:
-            with self.subTest(title=title), patch('backend.model_reference', return_value=None), \
-                    patch('backend.export_schlib', return_value=b'schematic'), \
-                    patch('backend.export_pcblib', return_value=b'footprint'):
+            with self.subTest(title=title), patch('lcsc3d.services.backend.model_reference', return_value=None), \
+                    patch('lcsc3d.services.backend.export_schlib', return_value=b'schematic'), \
+                    patch('lcsc3d.services.backend.export_pcblib', return_value=b'footprint'):
                 result = download_part('C2040', Options(self.folder, ('SCHLIB', 'PCBLIB'), bind_3d_models=False), FakeApi(title=title))
             self.assertEqual(result.status, '成功', result.message)
             self.assertEqual(Path(result.folder), self.folder / f'{basename}_C2040')
@@ -248,7 +248,7 @@ class Tests(unittest.TestCase):
                 fetch.assert_not_called()
 
     def test_missing_model_does_not_create_output_files(self):
-        with patch('backend.model_reference', return_value=None):
+        with patch('lcsc3d.services.backend.model_reference', return_value=None):
             result = download_part('C2040', Options(self.folder, bind_3d_models=False), FakeApi())
         self.assertEqual(result.status, '无模型')
         self.assertEqual(result.files, [])

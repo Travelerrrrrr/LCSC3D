@@ -14,15 +14,15 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import main
-from errors import Cancelled
-from favorites import FavoritesDialog, THUMBNAIL_COLUMN
-from favorites_selftest import (OfflineStore, fixture_favorites, fixture_product, fixture_search,
+from lcsc3d.ui import main
+from lcsc3d.core.errors import Cancelled
+from lcsc3d.ui.favorites import FavoritesDialog, THUMBNAIL_COLUMN
+from lcsc3d.selftests.favorites_selftest import (OfflineStore, fixture_favorites, fixture_product, fixture_search,
                                 fixture_store_record, fixture_detail, fixture_png, native_click)
-from store import (MemorySession, StoreClient, StoreError, SessionExpired, catalog_products,
+from lcsc3d.services.store import (MemorySession, StoreClient, StoreError, SessionExpired, catalog_products,
                    favorite_products, normalize_items, public_url, product_page, search_page_products, CaptchaRequired,
                    storefront_product)
-from store_session import SessionVault
+from lcsc3d.services.store_session import SessionVault
 from PySide6.QtCore import QEvent, Qt, QPoint, QPointF
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest

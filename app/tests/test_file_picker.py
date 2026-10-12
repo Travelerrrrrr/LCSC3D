@@ -10,11 +10,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QEvent, Qt, QUrl
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QComboBox, QLineEdit, QListView
-from app_logging import close_logging
-from app_settings import Preferences
-from app_theme import theme_manager
-from shell_ui import choose_path
-import main
+from lcsc3d.core.app_logging import close_logging
+from lcsc3d.core.app_settings import Preferences
+from lcsc3d.ui.app_theme import theme_manager
+from lcsc3d.ui.shell_ui import choose_path
+from lcsc3d.ui import main
 
 
 class FilePickerTests(unittest.TestCase):

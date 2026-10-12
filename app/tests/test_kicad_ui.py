@@ -10,8 +10,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import Qt, QEvent
 from PySide6.QtWidgets import QApplication
-import main
-from app_logging import close_logging
+from lcsc3d.ui import main
+from lcsc3d.core.app_logging import close_logging
 
 
 class KiCadUiTests(unittest.TestCase):
@@ -77,13 +77,17 @@ class KiCadUiTests(unittest.TestCase):
         self.assertFalse(restored.kicad_3d_mode_box.isEnabled())
 
     def test_batch_summarizes_model_notices_once_with_copyable_part_numbers(self):
-        from backend import Result
+        from lcsc3d.services.backend import Result
         result = Result('C20197','成功',model_diagnostics=[
             {'severity':'warning','code':'model_far_from_footprint','message':'官方模型位置明显远离封装'}])
         with patch.object(main,'notify') as notify:
             self.window.complete_batch([result])
-            notify.assert_called_once()
-            actions = notify.call_args.kwargs['actions']
+            self.assertEqual(notify.call_count,2)
+            model_notices=[call for call in notify.call_args_list if call.args[1]=='3D 模型提醒']
+            self.assertEqual(len(model_notices),1)
+            self.assertEqual(notify.call_args_list[0].args[1],'下载完成')
+            self.assertIn('C20197',model_notices[0].kwargs['details'])
+            actions = model_notices[0].kwargs['actions']
             actions[0][1]()
             self.assertEqual(QApplication.clipboard().text(),'C20197')
             actions[1][1]()

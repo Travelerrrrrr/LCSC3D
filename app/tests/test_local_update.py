@@ -15,8 +15,8 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'app'))
 sys.path.insert(0, str(ROOT / 'scripts'))
-import updater
-from app_logging import configure_logging, close_logging
+from lcsc3d.services import updater
+from lcsc3d.core.app_logging import configure_logging, close_logging
 from local_update_server import serve_release
 
 
@@ -58,7 +58,7 @@ class LocalUpdateTests(unittest.TestCase):
         source = updater.LocalUpdateSource(server.origin, '2.1.0')
         client = updater.UpdateClient(source=source)
         progress = []
-        with patch('updater.proxy_for_url', side_effect=AssertionError('Local updates must bypass proxies')):
+        with patch('lcsc3d.services.updater.proxy_for_url', side_effect=AssertionError('Local updates must bypass proxies')):
             release = client.check('2.1.1')
             plan = client.download(release, self.target, lambda done, total: progress.append((done, total)))
         self.assertEqual(release.version, '2.1.1')
@@ -78,7 +78,7 @@ class LocalUpdateTests(unittest.TestCase):
         with patch.dict(os.environ, {'LCSC3D_UPDATE_SOURCE': 'http://127.0.0.1:8765'}):
             client = updater.UpdateClient()
         self.assertIsNone(client.source)
-        with patch('updater.connection_pool') as pool, self.assertRaises(updater.UpdateError):
+        with patch('lcsc3d.services.updater.connection_pool') as pool, self.assertRaises(updater.UpdateError):
             client._open('http://127.0.0.1:8765/latest.json')
         pool.assert_not_called()
 
@@ -102,7 +102,7 @@ class LocalUpdateTests(unittest.TestCase):
             response = Response()
             response.headers = {'Location': location}
             pool = SimpleNamespace(request=lambda *a, **kw: response)
-            with patch('updater.connection_pool', return_value=pool), self.subTest(location=location), self.assertRaises(updater.UpdateError):
+            with patch('lcsc3d.services.updater.connection_pool', return_value=pool), self.subTest(location=location), self.assertRaises(updater.UpdateError):
                 updater.UpdateClient(source=source)._open(source.origin + '/latest.json')
 
     def test_local_corrupt_checksum_preserves_original_and_removes_staging(self):
@@ -131,7 +131,7 @@ class LocalUpdateTests(unittest.TestCase):
         def spawn(arguments, directory):
             updater.acknowledge_update(manifest, self.target)
             return process
-        with patch('updater._wait_for_parent'), patch('updater._spawn', side_effect=spawn) as launched:
+        with patch('lcsc3d.services.updater._wait_for_parent'), patch('lcsc3d.services.updater._spawn', side_effect=spawn) as launched:
             self.assertEqual(updater.apply_update(manifest), 0)
         self.assertEqual(launched.call_args.args[0], [str(self.target), '--update-ack', str(manifest),
                                                      '--local-update-source', source.origin])
@@ -139,8 +139,8 @@ class LocalUpdateTests(unittest.TestCase):
 
     def test_failed_local_restart_rolls_back_with_original_test_comparison(self):
         manifest, source = self.stage()
-        with patch('updater._wait_for_parent'), patch('updater._spawn', return_value=SimpleNamespace(poll=lambda: 1)) as launched, \
-                patch('updater._wait_for_ack', return_value=False), patch('updater._show_failure'):
+        with patch('lcsc3d.services.updater._wait_for_parent'), patch('lcsc3d.services.updater._spawn', return_value=SimpleNamespace(poll=lambda: 1)) as launched, \
+                patch('lcsc3d.services.updater._wait_for_ack', return_value=False), patch('lcsc3d.services.updater._show_failure'):
             self.assertEqual(updater.apply_update(manifest), 1)
         self.assertEqual(self.target.read_bytes(), b'MZoriginal')
         self.assertEqual(launched.call_args.args[0], [str(self.target), *source.arguments()])

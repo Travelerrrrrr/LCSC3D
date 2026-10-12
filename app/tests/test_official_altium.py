@@ -13,9 +13,9 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from altium import export_schlib, export_pcblib
-from eda_geometry import points
-from errors import DownloadError
+from lcsc3d.eda.altium import export_schlib, export_pcblib
+from lcsc3d.eda.eda_geometry import points
+from lcsc3d.core.errors import DownloadError
 
 if sys.platform == 'win32':
     from altium_inspect import schematic, pcb, region

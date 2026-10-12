@@ -10,14 +10,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import main
-from backend import DownloadError
+from lcsc3d.ui import main
+from lcsc3d.services.backend import DownloadError
 from PySide6.QtCore import QEvent, QObject, Qt, QPoint, QPointF
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from test_library_preview import fixture
-from updater import Release
+from lcsc3d.services.updater import Release
 
 
 class WindowEvents(QObject):
@@ -149,7 +149,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         hwnd, geometry = int(self.window.winId()), self.window.geometry()
         events = WindowEvents(self.window)
         api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
-        with patch('main.NetworkApi', return_value=api) as network:
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api) as network:
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             self.assertIs(self.window.preview_stack.currentWidget(), self.window.symbol_view)
@@ -174,7 +174,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
     def test_vector_zoom_pan_and_fit(self):
         self.window.show()
         api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
-        with patch('main.NetworkApi', return_value=api):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api):
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
         view = self.window.symbol_view
@@ -212,7 +212,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
     def test_symbol_style_switch_reuses_cache_updates_real_browser_and_export_options(self):
         self.window.show()
         api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
-        with patch('main.NetworkApi', return_value=api) as network:
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api) as network:
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             original = self.window.symbol_view.document
@@ -229,7 +229,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                 "(() => { const p=document.querySelector('g[c_partid=part_pin]'); const s=getComputedStyle(p.querySelector('text')); return [getComputedStyle(p.querySelector('path')).stroke,s.fill,s.fontFamily,parseFloat(s.fontSize)]; })()")
             self.assertEqual(style[:3], ['rgb(0, 0, 0)', 'rgb(0, 0, 128)', '"Times New Roman"'])
             self.assertEqual(self.evaluate(self.window.symbol_view, font_sizes), original_sizes)
-            from i18n import set_language
+            from lcsc3d.core.i18n import set_language
             try:
                 set_language('en_US')
                 self.assertIn('AD style', self.window.preview_status.text())
@@ -267,7 +267,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
         sizes = "Array.from(document.querySelectorAll('#canvas svg text,#canvas svg tspan'), e=>getComputedStyle(e).fontSize)"
         self.window.show()
-        with patch('main.NetworkApi', return_value=api) as network:
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api) as network:
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             original = self.evaluate(self.window.symbol_view, sizes)
@@ -302,7 +302,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.assertEqual(self.window.symbol_style_box.currentData(), 'ad')
 
     def test_symbol_style_is_saved_restored_and_localized_without_changing_value(self):
-        from i18n import set_language
+        from lcsc3d.core.i18n import set_language
         settings_path = Path(self.directory.name) / 'style-settings.json'
         self.window.settings_enabled = True
         try:
@@ -331,7 +331,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
         self.window.show()
         self.window.symbol_style_box.setCurrentIndex(1)
-        with patch('main.NetworkApi', return_value=api) as network:
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api) as network:
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             self.assertEqual(self.window.symbol_view.document.symbol_style, 'ad')
@@ -358,7 +358,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
           </g></svg>'''
         api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
         self.window.show()
-        with patch('main.NetworkApi', return_value=api):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api):
             self.window.symbol_style_box.setCurrentIndex(1)
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
@@ -373,7 +373,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.window.show()
         self.window.input.setPlainText('C163691')
         self.window.load_queue()
-        with patch('main.NetworkApi', return_value=api) as network:
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api) as network:
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             for index in (0, 1, 0, 1):
@@ -400,7 +400,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
           </g></svg>'''
         api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
         self.window.show()
-        with patch('main.NetworkApi', return_value=api) as network:
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api) as network:
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             for index in (0, 1, 0):
@@ -427,7 +427,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
           </g></svg>'''
         api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
         self.window.show()
-        with patch('main.NetworkApi', return_value=api):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api):
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             self.window.symbol_style_box.setCurrentIndex(1)
@@ -457,7 +457,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             </g></g></svg>'''
         api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
         self.window.show()
-        with patch('main.NetworkApi', return_value=api):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api):
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             self.window.symbol_style_box.setCurrentIndex(1)
@@ -506,7 +506,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
           return {length:Math.hypot(a.x-b.x,a.y-b.y),outer:[a.x,a.y],body:[b.x,b.y],dot:[d.x,d.y],text};
         })'''
         self.window.show()
-        with patch('main.NetworkApi', return_value=api) as network:
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api) as network:
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             before = self.evaluate(self.window.symbol_view, geometry)
@@ -530,7 +530,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
     def test_official_reversed_resistor_pins_extend_outward_and_keep_body_ends(self):
         api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture('C5879483'), check_cancelled=lambda: None)
         self.window.show()
-        with patch('main.NetworkApi', return_value=api):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api):
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             self.window.symbol_style_box.setCurrentIndex(1)
@@ -556,7 +556,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         data['result'][0]['svg'] = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-30 -30 450 150">'+''.join(pins)+'</svg>'
         api = SimpleNamespace(get_svg_data_of_component=lambda part:data, check_cancelled=lambda:None)
         self.window.show()
-        with patch('main.NetworkApi', return_value=api):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api):
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             self.window.symbol_style_box.setCurrentIndex(1)
@@ -571,7 +571,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
     def test_official_pad_css_and_pin_text_survive_browser_rendering(self):
         self.window.show()
         api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
-        with patch('main.NetworkApi', return_value=api):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api):
             self.window.preview_mode_buttons['footprint'].click()
             self.wait_for_library()
             fill = self.evaluate(self.window.footprint_view,
@@ -592,7 +592,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         data = fixture('C20197')
         data['result'][0]['svg'] = data['result'][0]['svg'].replace('</svg>', '<!--' + 'x' * 2100000 + '--></svg>')
         api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
-        with patch('main.NetworkApi', return_value=api):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api):
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
         self.assertTrue(self.svg_state(self.window.symbol_view)['loaded'])
@@ -601,7 +601,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
     def test_failed_request_can_be_reloaded(self):
         self.window.show()
         api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
-        with patch('main.NetworkApi', side_effect=[DownloadError('offline'), api]) as network:
+        with patch('lcsc3d.ui.main.NetworkApi', side_effect=[DownloadError('offline'), api]) as network:
             self.window.preview_mode_buttons['symbol'].click()
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline and self.window.library_worker is not None:
@@ -631,7 +631,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                         raise RuntimeError('Test release timed out')
                 return fixture(part)
 
-        with patch('main.NetworkApi', side_effect=Api):
+        with patch('lcsc3d.ui.main.NetworkApi', side_effect=Api):
             self.window.preview_mode_buttons['symbol'].click()
             try:
                 self.assertTrue(started.wait(1))
@@ -657,7 +657,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                 raise main.Cancelled()
 
         self.window.show()
-        with patch('main.NetworkApi', side_effect=Api):
+        with patch('lcsc3d.ui.main.NetworkApi', side_effect=Api):
             self.window.preview_mode_buttons['symbol'].click()
             self.assertTrue(started.wait(1))
             self.assertFalse(self.window.close())
@@ -674,7 +674,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><circle cx="10" cy="10" r="5"/></svg>'}]
         api = SimpleNamespace(get_svg_data_of_component=lambda part: data, check_cancelled=lambda: None)
         self.window.show()
-        with patch('main.NetworkApi', return_value=api):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api):
             self.window.preview_mode_buttons['symbol'].click()
             self.wait_for_library()
             self.assertTrue(self.window.symbol_unit_box.isVisible())
@@ -835,7 +835,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertFalse(self.window.footprint_view.shell_started)
         self.window.show()
         api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
-        with patch('main.NetworkApi', return_value=api):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api):
             self.window.preview_mode_buttons['footprint'].click()
             self.wait_for_library()
         self.assertTrue(self.window.footprint_view.shell_started)
@@ -849,7 +849,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
 
     def test_check_update_button_displays_latest_version_and_reuses_open_dialog(self):
         self.window.show()
-        with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)):
+        with patch('lcsc3d.ui.update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)):
             self.window.settings_button.click()
             self.window.settings_dialog.update_button.click()
             dialog = self.window.update_dialog
@@ -870,7 +870,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.window.settings_dialog.cancel_button.click()
         self.window.settings_button.click()
         self.app.sendPostedEvents(None, QEvent.DeferredDelete)
-        with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)):
+        with patch('lcsc3d.ui.update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)):
             self.window.settings_dialog.update_button.click()
             self.wait_for_update_check()
         self.assertIs(self.window.update_dialog._page_owner, self.window.settings_dialog)
@@ -878,14 +878,14 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
 
     def test_check_update_failure_can_retry_and_source_run_offers_release_page(self):
         self.window.show()
-        with patch('update_ui.UpdateClient', side_effect=RuntimeError('offline')):
+        with patch('lcsc3d.ui.update_ui.UpdateClient', side_effect=RuntimeError('offline')):
             self.window.settings_button.click()
             self.window.settings_dialog.update_button.click()
             self.wait_for_update_check()
         dialog = self.window.update_dialog
         self.assertIn('offline', dialog.status.text())
         release = Release('2.1.0', 'https://github.com/Travelerrrrrr/LCSC3D/releases/tag/v2.1.0', '', '', 100, '新版说明')
-        with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: release)):
+        with patch('lcsc3d.ui.update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: release)):
             dialog.install.click()
             self.wait_for_update_check()
         self.assertIn('2.1.0', dialog.status.text())
@@ -895,11 +895,11 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         dialog.close()
 
     def test_local_source_is_visible_and_reaches_the_update_worker(self):
-        from updater import LocalUpdateSource
+        from lcsc3d.services.updater import LocalUpdateSource
         source = LocalUpdateSource('http://127.0.0.1:8765', '2.1.0')
         self.window.update_source = source
         self.window.show()
-        with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)) as client:
+        with patch('lcsc3d.ui.update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)) as client:
             self.window.settings_button.click()
             self.window.settings_dialog.update_button.click()
             self.wait_for_update_check()
@@ -919,7 +919,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                 self.cancelled.wait(3)
                 raise main.Cancelled()
         self.window.show()
-        with patch('update_ui.UpdateClient', side_effect=Client):
+        with patch('lcsc3d.ui.update_ui.UpdateClient', side_effect=Client):
             self.window.settings_button.click()
             self.window.settings_dialog.update_button.click()
             self.assertTrue(started.wait(1))
@@ -950,10 +950,10 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                           'project_schlib_directory', 'project_pcblib_directory', 'project_schlib_name', 'project_pcblib_name'})
         self.window.path_input.setText(str(Path(self.directory.name) / 'models'))
         captured = []
-        def download(part, options, api, progress):
+        def download(part, options, api, progress, **kwargs):
             captured.append(options.formats)
             return main.Result(part, '成功')
-        with patch('main.NetworkApi', return_value=SimpleNamespace()), patch('backend.download_part', side_effect=download):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=SimpleNamespace()), patch('lcsc3d.services.backend.download_part', side_effect=download):
             self.window.start_batch()
             deadline = time.monotonic() + 5
             while self.window.batch_running and time.monotonic() < deadline:
@@ -981,7 +981,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertTrue(self.window.pcblib_box.isChecked())
         self.window.path_input.setText(str(Path(self.directory.name) / 'AD 导出'))
         api = SimpleNamespace(get_cad_data_of_component=lambda part: cad[part], check_cancelled=lambda: None)
-        with patch('main.NetworkApi', return_value=api) as network:
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api) as network:
             for attempt in range(2):
                 if attempt:
                     for result in self.window.results.values():
@@ -1017,11 +1017,11 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
 
     def test_out_of_order_results_update_progress_by_completion_count(self):
         self.window.update_result(1, main.Result('C20197', '成功', message='done'))
-        self.assertEqual(self.window.progress_bar.value(), 1)
+        self.assertEqual(self.window.progress_bar.value(), 5000)
         self.window.update_phase(1, '下载 STEP', '')
         self.assertEqual(self.window.table.item(1, main.RESULT_COLUMN).text(), '成功')
         self.window.update_result(0, main.Result('C2040', '失败', message='missing'))
-        self.assertEqual(self.window.progress_bar.value(), 2)
+        self.assertEqual(self.window.progress_bar.value(), 10000)
 
     def test_loading_queries_titles_before_download_including_unchecked_parts(self):
         self.info_patch.stop()
@@ -1029,8 +1029,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         infos = {'C2040': {'title': 'RP2040', 'model': 'LQFN-56'},
                  'C20197': {'title': '4D03WGJ0102T5E', 'model': 'R0603-8P'}}
         self.window.table.item(1, main.DOWNLOAD_COLUMN).setCheckState(Qt.Unchecked)
-        with patch('main.NetworkApi', return_value=api), \
-                patch('main.get_component_metadata', side_effect=lambda part, _: infos[part]) as query:
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=api), \
+                patch('lcsc3d.ui.main.get_component_metadata', side_effect=lambda part, _: infos[part]) as query:
             self.window.load_queue()
             self.wait_for_component_info()
         self.assertEqual({call.args[0] for call in query.call_args_list}, set(infos))
@@ -1055,8 +1055,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                 return {'title': 'Old queue', 'model': ''}
             return {'title': part + ' current', 'model': ''}
 
-        with patch('main.NetworkApi', return_value=SimpleNamespace()), \
-                patch('main.get_component_metadata', side_effect=query):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=SimpleNamespace()), \
+                patch('lcsc3d.ui.main.get_component_metadata', side_effect=query):
             self.window.load_queue()
             old_revision = self.window.info_revision
             try:
@@ -1080,8 +1080,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                 raise DownloadError('offline')
             return {'title': 'Resistor', 'model': ''}
 
-        with patch('main.NetworkApi', return_value=SimpleNamespace()), \
-                patch('main.get_component_metadata', side_effect=first_query):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=SimpleNamespace()), \
+                patch('lcsc3d.ui.main.get_component_metadata', side_effect=first_query):
             self.window.load_queue()
             self.wait_for_component_info()
         item = self.window.table.item(0, main.MODEL_COLUMN)
@@ -1089,8 +1089,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertIn('offline', item.toolTip())
         self.assertTrue(self.window.start_button.isEnabled())
         self.assertEqual(self.window.checked_rows(), [0, 1])
-        with patch('main.NetworkApi', return_value=SimpleNamespace()), \
-                patch('main.get_component_metadata', return_value={'title': 'Recovered', 'model': ''}):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=SimpleNamespace()), \
+                patch('lcsc3d.ui.main.get_component_metadata', return_value={'title': 'Recovered', 'model': ''}):
             self.window.load_queue()
             self.wait_for_component_info()
         self.assertEqual(self.window.table.item(0, main.MODEL_COLUMN).text(), 'Recovered')
@@ -1104,7 +1104,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertEqual(self.window.component_info['C2040'], {'title': 'Downloaded', 'model': 'Official model'})
         self.assertIn('Official model', self.window.table.item(0, main.MODEL_COLUMN).toolTip())
         self.window.update_component_info(revision, 'C20197', {'title': 'Known title', 'model': ''}, '')
-        self.assertEqual(self.window.progress_bar.value(), 1)
+        self.assertEqual(self.window.progress_bar.value(), 5000)
         self.window.update_result(1, main.Result('C20197', '失败', message='offline'))
         self.assertEqual(self.window.table.item(1, main.MODEL_COLUMN).text(), 'Known title')
         self.assertEqual(self.window.table.item(1, main.RESULT_COLUMN).text(), '失败')
@@ -1119,8 +1119,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             raise main.Cancelled()
 
         self.window.show()
-        with patch('main.NetworkApi', side_effect=lambda cancelled: SimpleNamespace(cancelled=cancelled)), \
-                patch('main.get_component_metadata', side_effect=query):
+        with patch('lcsc3d.ui.main.NetworkApi', side_effect=lambda cancelled: SimpleNamespace(cancelled=cancelled)), \
+                patch('lcsc3d.ui.main.get_component_metadata', side_effect=query):
             self.window.load_queue()
             self.assertTrue(started.wait(1))
             self.assertFalse(self.window.close())
@@ -1161,7 +1161,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         destination = Path(self.directory.name) / 'not-created'
         self.window.path_input.setText(str(destination))
         self.window.invert_selection_button.click()
-        with patch('main.BatchWorker') as worker:
+        with patch('lcsc3d.ui.main.BatchWorker') as worker:
             self.window.start_batch()
         worker.assert_not_called()
         self.assertIsNone(self.window.worker)
@@ -1199,7 +1199,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             update_phase(row, status, title)
             phases.append((row, self.window.run_status.text()))
 
-        def download(part, options, api, progress):
+        def download(part, options, api, progress, **kwargs):
             progress('下载 STEP', part + ' model')
             return main.Result(part, '成功', title=part + ' model', message='done')
 
@@ -1209,14 +1209,15 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                 QTest.qWait(20)
             self.assertFalse(self.window.batch_running, 'Batch did not complete')
             self.assertTrue(self.window.worker.wait(5000))
+            QTest.qWait(350)
 
-        with patch('main.NetworkApi', return_value=SimpleNamespace()), \
-                patch('backend.download_part', side_effect=download) as fetch, \
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=SimpleNamespace()), \
+                patch('lcsc3d.services.backend.download_part', side_effect=download) as fetch, \
                 patch.object(self.window, 'update_phase', side_effect=capture_phase):
             self.window.start_batch()
             self.assertEqual(self.window.worker.ids, ['C20197', 'C1'])
             self.assertEqual(self.window.worker.rows, [1, 3])
-            self.assertEqual(self.window.progress_bar.maximum(), 2)
+            self.assertEqual(self.window.progress_bar.maximum(), 10000)
             wait_for_batch()
             self.assertEqual({call.args[0] for call in fetch.call_args_list}, {'C20197', 'C1'})
             self.assertEqual({row for row, _ in phases}, {1, 3})
@@ -1228,7 +1229,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             for row in (1, 3):
                 self.assertEqual(self.window.table.item(row, main.MODEL_COLUMN).text(), self.window.ids[row] + ' model')
                 self.assertEqual(self.window.table.item(row, main.RESULT_COLUMN).text(), '成功')
-            self.assertEqual(self.window.progress_bar.value(), 2)
+            self.assertEqual(self.window.progress_bar.value(), 10000)
             self.assertEqual(self.window.summary.text(), '2 / 2 成功')
             self.assertEqual(self.window.checked_rows(), [1, 3])
 
@@ -1243,8 +1244,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             wait_for_batch()
             self.assertEqual([call.args[0] for call in fetch.call_args_list], ['C2040'])
             self.assertEqual(len(self.window.results), 3)
-            self.assertEqual(self.window.progress_bar.value(), 1)
-            self.assertEqual(self.window.progress_bar.maximum(), 1)
+            self.assertEqual(self.window.progress_bar.value(), 10000)
+            self.assertEqual(self.window.progress_bar.maximum(), 10000)
             self.assertEqual(self.window.summary.text(), '1 / 1 成功')
 
     def test_batch_completion_preserves_results_without_csv_output(self):
@@ -1266,8 +1267,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.window.path_input.setText(str(destination))
         finished = []
         self.window.batch_done.connect(lambda: finished.append(True))
-        with patch('main.NetworkApi', return_value=Api()), \
-                patch('backend.model_reference', return_value=model):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=Api()), \
+                patch('lcsc3d.services.backend.model_reference', return_value=model):
             self.window.start_batch()
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline and (not finished or self.window.worker.isRunning()):

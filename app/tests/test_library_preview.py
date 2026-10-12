@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from library_preview import build_library_preview
+from lcsc3d.ui.library_preview import build_library_preview
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 

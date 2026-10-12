@@ -10,14 +10,14 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import backend
-from altium import (export_schlib, export_pcblib, export_linked_pcblib, MergedLibrary,
+from lcsc3d.services import backend
+from lcsc3d.eda.altium import (export_schlib, export_pcblib, export_linked_pcblib, MergedLibrary,
                     _pcblib_component, _parameters, _string_block, _pcb_header)
 from altium_inspect import schematic, pcb
-from app_logging import close_logging
-from compound_storage import compound_file
-from errors import DownloadError
-from library_merge import LibraryIndex, append_library, footprint_signature, Reader, parameters
+from lcsc3d.core.app_logging import close_logging
+from lcsc3d.eda.compound_storage import compound_file
+from lcsc3d.core.errors import DownloadError
+from lcsc3d.eda.library_merge import LibraryIndex, append_library, footprint_signature, Reader, parameters
 from test_backend import STEP
 
 
@@ -283,7 +283,7 @@ class ExportIntegrityTests(unittest.TestCase):
             if path.parent.name.endswith('_C8734') and path.suffix == '.SchLib':
                 raise PermissionError('locked')
             original_write(path, payload)
-        with patch('backend.atomic_write', side_effect=write):
+        with patch('lcsc3d.services.backend.atomic_write', side_effect=write):
             rows = backend.download_batch(['C23922', 'C8734'], options, api=self.api)
         self.assertEqual([row.status for row in rows], ['成功', '部分完成'])
         self.assertEqual(len(self.names(options.merged_paths()['PCBLIB'], 'PCBLIB')), 1)

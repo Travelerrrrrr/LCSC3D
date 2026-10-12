@@ -19,7 +19,7 @@
 
 LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具。下载 `LCSC3D.exe` 即可运行，无须安装 Python；生成元件库也无须安装对应的 EDA 软件。
 
-当前源码与本地交付为 **2.4.0-demo.5**，修复 Type-C 模型水平与高度偏移：恢复官方放置基准换算，仅扫描 OBJ 顶点，保留 STEP 原始尺寸，不引入 CAD 内核或几何比对。以下在线下载仍指向正式版 2.3.0；本次未发布 Release。
+当前源码与本地交付为 **2.4.0**，新增按处理阶段更新的平滑下载进度、“消息”记录页和最新在上的右上角通知；保留已验证的 Type-C 模型放置规则。以下在线下载仍指向正式版 2.3.0；本次未发布 Release。
 
 **当前版本：2.3.0** · **[下载 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.3.0.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
@@ -58,7 +58,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 KiCad 添加封装库时，**库昵称应与导出库名一致**，例如 `LCSC3D`，以便符号找到对应封装。KiCad 封装中的过孔保留位置、孔径和铜环，网络归属需在 PCB 中确认。导出过程需要近似转换时，会在结果中提示。
 
-两种目标均支持多单元符号、字符串引脚编号和常见贴片 / 通孔封装。正式版 2.3.0 需要手动关联模型；本地开发版 **2.4.0-demo.5 默认关联 3D**，支持 AD 内嵌、KiCad 9/10 内嵌与 KiCad 8 外部模型，详见 [使用说明](app/README.md)。AD 暂不生成 IntLib。
+两种目标均支持多单元符号、字符串引脚编号和常见贴片 / 通孔封装。正式版 2.3.0 需要手动关联模型；本地开发版 **2.4.0 默认关联 3D**，支持 AD 内嵌、KiCad 9/10 内嵌与 KiCad 8 外部模型，详见 [使用说明](app/README.md)。AD 暂不生成 IntLib。
 
 具体操作见 [使用说明](app/README.md)。
 

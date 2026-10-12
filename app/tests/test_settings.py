@@ -13,14 +13,14 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import main
-import backend
-import updater
-import app_logging
-from app_settings import Preferences, get_preferences, set_preferences, proxy_for_url, write_settings, read_settings
-from app_paths import data_directory, temporary_directory, replace_file
-from store_session import SessionVault
-from store import MemorySession
+from lcsc3d.ui import main
+from lcsc3d.services import backend
+from lcsc3d.services import updater
+from lcsc3d.core import app_logging
+from lcsc3d.core.app_settings import Preferences, get_preferences, set_preferences, proxy_for_url, write_settings, read_settings
+from lcsc3d.core.app_paths import data_directory, temporary_directory, replace_file
+from lcsc3d.services.store_session import SessionVault
+from lcsc3d.services.store import MemorySession
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -131,8 +131,8 @@ class ProxyRoutingTests(PreferencesTestCase):
 
         with patch('urllib.request.getproxies', return_value={'https': proxy}), \
                 patch('urllib.request.proxy_bypass', return_value=False), \
-                patch('backend.connection_pool', side_effect=pool), \
-                patch('updater.connection_pool', side_effect=pool):
+                patch('lcsc3d.services.backend.connection_pool', side_effect=pool), \
+                patch('lcsc3d.services.updater.connection_pool', side_effect=pool):
             set_preferences(Preferences(store_proxy='direct', update_proxy='system'))
             self.assertEqual(api.fetch('https://lceda.cn/api/public'), b'public resource')
             update._open(updater.LATEST_API).close()
@@ -189,7 +189,7 @@ class LogOutputTests(PreferencesTestCase):
         self.assertIn('test.public_event', contents)
 
     def test_rotation_limits_backups_and_retains_recent_entries(self):
-        with patch('app_logging.MAX_LOG_BYTES', 500), patch('app_logging.LOG_BACKUPS', 2):
+        with patch('lcsc3d.core.app_logging.MAX_LOG_BYTES', 500), patch('lcsc3d.core.app_logging.LOG_BACKUPS', 2):
             app_logging.configure_logging(directory=self.log_dir)
             for index in range(30):
                 app_logging.log_event('DEBUG', 'test.rotation', index=index)
@@ -209,7 +209,7 @@ class SettingsPersistenceTests(PreferencesTestCase):
         path = self.folder / 'LCSC3D-settings.json'
         path.write_text('{"destination":"existing"}', encoding='utf-8')
         previous = path.read_bytes()
-        with patch('app_settings.os.replace', side_effect=PermissionError()), self.assertRaises(OSError):
+        with patch('lcsc3d.core.app_settings.os.replace', side_effect=PermissionError()), self.assertRaises(OSError):
             write_settings(path, {'store_proxy': 'direct'})
         self.assertEqual(path.read_bytes(), previous)
         self.assertFalse(list(self.folder.glob('.LCSC3D-settings-*')))
@@ -235,7 +235,7 @@ class SettingsPersistenceTests(PreferencesTestCase):
     def test_failed_migration_preserves_old_configuration(self):
         legacy = self.folder / 'legacy.json'
         legacy.write_text('{"store_proxy":"direct"}', encoding='utf-8')
-        with patch('app_settings.write_settings', side_effect=PermissionError()):
+        with patch('lcsc3d.core.app_settings.write_settings', side_effect=PermissionError()):
             self.assertEqual(read_settings(data_directory() / 'LCSC3D-settings.json', legacy), {'store_proxy': 'direct'})
         self.assertTrue(legacy.exists())
 
@@ -252,7 +252,7 @@ class SettingsPersistenceTests(PreferencesTestCase):
             paths.append(Path(source))
             real_replace(source, destination)
 
-        with patch('backend.replace_file', side_effect=inspect):
+        with patch('lcsc3d.services.backend.replace_file', side_effect=inspect):
             backend.atomic_write(output, b'public model')
         self.assertEqual(output.read_bytes(), b'public model')
         self.assertEqual(paths[0].parent, temporary_directory())
@@ -266,7 +266,7 @@ class SettingsPersistenceTests(PreferencesTestCase):
         source.write_bytes(b'complete model')
         target = self.folder / 'exports' / 'model.step'
         target.parent.mkdir()
-        with patch('app_paths.os.replace', side_effect=OSError(errno.EXDEV, 'different volumes')):
+        with patch('lcsc3d.core.app_paths.os.replace', side_effect=OSError(errno.EXDEV, 'different volumes')):
             replace_file(source, target)
         self.assertEqual(target.read_bytes(), b'complete model')
         self.assertFalse(source.exists())
@@ -385,7 +385,7 @@ class SettingsWindowTests(PreferencesTestCase):
         self.window.settings_button.click()
         dialog = self.window.settings_dialog
         dialog.store_proxy_combo.setCurrentIndex(1)
-        with patch('main.write_settings', side_effect=PermissionError()):
+        with patch('lcsc3d.ui.main.write_settings', side_effect=PermissionError()):
             dialog.save_button.click()
         self.assertTrue(dialog.isVisible())
         self.assertIn('无法保存设置', dialog.status.text())
@@ -393,7 +393,7 @@ class SettingsWindowTests(PreferencesTestCase):
         self.assertFalse(self.settings_path.exists())
 
     def test_theme_save_failure_keeps_language_palette_and_download_inputs(self):
-        from app_theme import theme_manager
+        from lcsc3d.ui.app_theme import theme_manager
         self.window.input.setPlainText('C2040\nC20197')
         self.window.path_input.setText('F:/用户选择/模型')
         before = dict(theme_manager().tokens)
@@ -405,7 +405,7 @@ class SettingsWindowTests(PreferencesTestCase):
         dialog.text_color_combo.setCurrentIndex(dialog.text_color_combo.findData('#ffffff'))
         dialog.font_combo.setCurrentText('Segoe UI')
         dialog.font_size_spin.setValue(24)
-        with patch('main.write_settings', side_effect=PermissionError()):
+        with patch('lcsc3d.ui.main.write_settings', side_effect=PermissionError()):
             dialog.save_button.click()
         self.assertTrue(dialog.isVisible())
         self.assertEqual(self.window.settings_button.text(), '设置')
@@ -415,8 +415,8 @@ class SettingsWindowTests(PreferencesTestCase):
 
     def test_text_color_and_font_save_restore_and_reset_without_affecting_other_preferences(self):
         from PySide6.QtGui import QColor
-        from app_theme import theme_manager, effective_font_family
-        from app_settings import DEFAULT_FONT_FAMILY
+        from lcsc3d.ui.app_theme import theme_manager, effective_font_family
+        from lcsc3d.core.app_settings import DEFAULT_FONT_FAMILY
         self.window.open_settings()
         dialog = self.window.settings_dialog
         dialog.text_color_button.click()
@@ -457,7 +457,7 @@ class SettingsWindowTests(PreferencesTestCase):
 
     def test_cancelled_text_picker_and_settings_do_not_change_live_font_or_color(self):
         from PySide6.QtGui import QColor
-        from app_theme import theme_manager
+        from lcsc3d.ui.app_theme import theme_manager
         before = dict(theme_manager().tokens)
         self.window.open_settings()
         dialog = self.window.settings_dialog
@@ -525,14 +525,14 @@ class SettingsWindowTests(PreferencesTestCase):
 
     def test_language_roundtrip_keeps_queue_checks_and_does_not_read_mainland_session_in_english(self):
         from dataclasses import replace
-        from i18n import set_language
+        from lcsc3d.core.i18n import set_language
         self.addCleanup(set_language, 'zh_CN')
         self.window.input.setPlainText('C2040\nC20197')
         self.window.load_queue()
         self.window.table.item(1, main.DOWNLOAD_COLUMN).setCheckState(Qt.Unchecked)
         self.window.apply_preferences(replace(self.window.preferences, language='en_US', theme_mode='dark'))
         self.assertEqual(self.window.settings_button.text(), 'Settings')
-        with patch('favorites.SessionVault', side_effect=AssertionError('Mainland session must not be opened')):
+        with patch('lcsc3d.ui.favorites.SessionVault', side_effect=AssertionError('Mainland session must not be opened')):
             store = self.window.ensure_store()
             self.assertTrue(store.international)
         self.assertEqual(self.window.ids, ['C2040', 'C20197'])
@@ -544,7 +544,7 @@ class SettingsWindowTests(PreferencesTestCase):
 
     def test_english_import_notices_use_operation_result_including_duplicate_and_invalid_input(self):
         from dataclasses import replace
-        from i18n import set_language
+        from lcsc3d.core.i18n import set_language
         self.addCleanup(set_language, 'zh_CN')
         self.window.apply_preferences(replace(self.window.preferences, language='en_US'))
         dialog = self.window.ensure_store()
@@ -561,7 +561,7 @@ class SettingsWindowTests(PreferencesTestCase):
 
     def test_open_log_button_opens_the_log_directory(self):
         self.window.settings_button.click()
-        with patch('settings_ui.QDesktopServices.openUrl', return_value=True) as opened:
+        with patch('lcsc3d.ui.settings_ui.QDesktopServices.openUrl', return_value=True) as opened:
             self.window.settings_dialog.open_log_button.click()
         self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), self.log_dir)
         self.assertTrue(self.log_dir.is_dir())
@@ -569,7 +569,7 @@ class SettingsWindowTests(PreferencesTestCase):
     def test_package_button_creates_zip_and_opens_its_directory(self):
         self.window.settings_button.click()
         dialog = self.window.settings_dialog
-        with patch('settings_ui.QDesktopServices.openUrl', return_value=True) as opened:
+        with patch('lcsc3d.ui.settings_ui.QDesktopServices.openUrl', return_value=True) as opened:
             dialog.package_log_button.click()
             self.assertFalse(dialog.clear_log_button.isEnabled())
             deadline = time.monotonic() + 5
@@ -599,7 +599,7 @@ class SettingsWindowTests(PreferencesTestCase):
     def test_packaging_failure_restores_controls_and_allows_retry(self):
         self.window.settings_button.click()
         dialog = self.window.settings_dialog
-        with patch('settings_ui.package_logs', side_effect=PermissionError()):
+        with patch('lcsc3d.ui.settings_ui.package_logs', side_effect=PermissionError()):
             dialog.package_log_button.click()
             deadline = time.monotonic() + 5
             while dialog.worker is not None and time.monotonic() < deadline:
@@ -614,13 +614,13 @@ class SettingsWindowTests(PreferencesTestCase):
         self.window.settings_button.click()
         dialog = self.window.settings_dialog
         release = threading.Event()
-        import settings_ui
+        from lcsc3d.ui import settings_ui
         original = settings_ui.package_logs
         def delayed():
             release.wait(timeout=3)
             return original()
-        with patch('settings_ui.package_logs', side_effect=delayed), \
-                patch('settings_ui.QDesktopServices.openUrl', return_value=True):
+        with patch('lcsc3d.ui.settings_ui.package_logs', side_effect=delayed), \
+                patch('lcsc3d.ui.settings_ui.QDesktopServices.openUrl', return_value=True):
             dialog.package_log_button.click()
             dialog.reject()
             self.assertTrue(dialog.isVisible())

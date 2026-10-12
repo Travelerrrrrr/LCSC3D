@@ -1,12 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="94" height="20" viewBox="0 0 94 20" role="img" aria-labelledby="title">
-  <title id="title">release: v2.3.0</title>
+  <title id="title">version: v2.4.0</title>
   <clipPath id="badge"><rect width="94" height="20" rx="3"/></clipPath>
   <g clip-path="url(#badge)">
     <rect width="49" height="20" fill="#555"/>
     <rect x="49" width="45" height="20" fill="#007ec6"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana, Geneva, sans-serif" font-size="11">
-    <text x="24.5" y="14">release</text>
-    <text x="71.5" y="14">v2.3.0</text>
+    <text x="24.5" y="14">version</text>
+    <text x="71.5" y="14">v2.4.0</text>
   </g>
 </svg>

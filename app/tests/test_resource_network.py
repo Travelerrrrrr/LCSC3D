@@ -15,9 +15,9 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import backend
+from lcsc3d.services import backend
 import urllib3
-from app_logging import close_logging, configure_logging
+from lcsc3d.core.app_logging import close_logging, configure_logging
 from test_backend import STEP, OBJ
 
 
@@ -29,12 +29,12 @@ class ResourceNetworkTests(unittest.TestCase):
         self.patch(patch.dict(os.environ, {'LOCALAPPDATA': str(self.folder)}))
         configure_logging('DEBUG', version='test')
         self.addCleanup(close_logging)
-        self.patch(patch('backend.proxy_for_url', return_value=None))
-        self.patch(patch('backend.RESOURCE_COOLDOWNS', backend.ResourceCooldowns()))
+        self.patch(patch('lcsc3d.services.backend.proxy_for_url', return_value=None))
+        self.patch(patch('lcsc3d.services.backend.RESOURCE_COOLDOWNS', backend.ResourceCooldowns()))
         # A single connection exposes a response held open during backoff.
         self.pool = urllib3.PoolManager(maxsize=1, block=True)
         self.addCleanup(self.pool.clear)
-        self.patch(patch('backend.connection_pool', return_value=self.pool))
+        self.patch(patch('lcsc3d.services.backend.connection_pool', return_value=self.pool))
 
     def patch(self, patcher):
         value = patcher.start()
@@ -84,9 +84,9 @@ class ResourceNetworkTests(unittest.TestCase):
         return f'http://127.0.0.1:{server.server_port}', requests
 
     def route_models(self, base):
-        self.patch(patch('backend.COMPONENT_ENDPOINTS', (base + '/components/{part}',)))
-        self.patch(patch('backend.ENDPOINT_3D_MODEL_STEP', base + '/step/{uuid}'))
-        self.patch(patch('backend.ENDPOINT_3D_MODEL', base + '/obj/{uuid}'))
+        self.patch(patch('lcsc3d.services.backend.COMPONENT_ENDPOINTS', (base + '/components/{part}',)))
+        self.patch(patch('lcsc3d.services.backend.ENDPOINT_3D_MODEL_STEP', base + '/step/{uuid}'))
+        self.patch(patch('lcsc3d.services.backend.ENDPOINT_3D_MODEL', base + '/obj/{uuid}'))
 
     def test_batches_cross_29_items_and_recover_each_rate_limit_window(self):
         fixture = json.loads((Path(__file__).parent / 'fixtures/C2040.json').read_text(encoding='utf-8'))
@@ -154,7 +154,7 @@ class ResourceNetworkTests(unittest.TestCase):
         self.assertGreaterEqual(time.time(), due)
 
     def test_missing_and_invalid_retry_after_recover(self):
-        self.patch(patch('backend.RESOURCE_RETRY_BACKOFF', 0.02))
+        self.patch(patch('lcsc3d.services.backend.RESOURCE_RETRY_BACKOFF', 0.02))
         for header in (None, 'invalid date', '-3', '0'):
             with self.subTest(header=header):
                 headers = {} if header is None else {'Retry-After': header}
@@ -237,8 +237,8 @@ class ResourceNetworkTests(unittest.TestCase):
         event = ClockEvent()
         request = Mock(side_effect=lambda *a, **kw:
             urllib3.response.HTTPResponse(status=429, body=b'busy', preload_content=False))
-        self.patch(patch('backend.connection_pool', return_value=SimpleNamespace(request=request)))
-        self.patch(patch('backend.time.monotonic', side_effect=lambda: event.now))
+        self.patch(patch('lcsc3d.services.backend.connection_pool', return_value=SimpleNamespace(request=request)))
+        self.patch(patch('lcsc3d.services.backend.time.monotonic', side_effect=lambda: event.now))
         with self.assertRaisesRegex(backend.DownloadError, 'HTTP 429'):
             backend.NetworkApi(event).fetch('http://127.0.0.1/model')
         self.assertEqual(request.call_count, 5)
@@ -255,7 +255,7 @@ class ResourceNetworkTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 2)
 
     def test_step_obj_and_svg_recover_without_mirror_or_placeholder(self):
-        self.patch(patch('backend.RESOURCE_RETRY_BACKOFF', 0.02))
+        self.patch(patch('lcsc3d.services.backend.RESOURCE_RETRY_BACKOFF', 0.02))
         counts = Counter()
         svg = b'{"success":true,"result":[]}'
 
@@ -267,7 +267,7 @@ class ResourceNetworkTests(unittest.TestCase):
 
         base, requests = self.serve(respond)
         self.route_models(base)
-        self.patch(patch('backend.SVG_ENDPOINTS', (base + '/svg/{part}',)))
+        self.patch(patch('lcsc3d.services.backend.SVG_ENDPOINTS', (base + '/svg/{part}',)))
         api = backend.NetworkApi(use_cache=False)
         self.assertEqual(api.get_step_3d_model('test-model'), STEP)
         self.assertEqual(api.get_raw_3d_model_obj('test-model'), OBJ)

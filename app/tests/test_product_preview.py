@@ -4,10 +4,10 @@ import time
 from unittest.mock import patch
 
 from test_settings import PreferencesTestCase
-import main
-from favorites import FavoritesDialog
-from store import StoreError
-from product_preview import ProductPreview
+from lcsc3d.ui import main
+from lcsc3d.ui.favorites import FavoritesDialog
+from lcsc3d.services.store import StoreError
+from lcsc3d.ui.product_preview import ProductPreview
 from PySide6.QtCore import Qt, QBuffer, QIODevice, QEvent
 from PySide6.QtGui import QImage, QColor
 from PySide6.QtTest import QTest

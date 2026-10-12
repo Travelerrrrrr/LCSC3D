@@ -12,9 +12,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'app'))
-from easyeda_import import parse_component
-from eda_ir import Pad, Pin, Via
-from kicad import build_library, FORMATS, pin_electrical_type
+from lcsc3d.eda.easyeda_import import parse_component
+from lcsc3d.eda.eda_ir import Pad, Pin, Via
+from lcsc3d.eda.kicad import build_library, FORMATS, pin_electrical_type
 
 
 def expected_bbox(pad):

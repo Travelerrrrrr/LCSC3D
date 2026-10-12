@@ -11,13 +11,13 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from eda_ir import Component, Extension, Pin, Pad, Via, Point, Symbol, SymbolUnit, Footprint, D, loads, dumps, require_domain
-from easyeda_import import parse_component
-from errors import DownloadError, Cancelled
-from kicad import build_library, FORMATS
-from altium import export_schlib, export_pcblib
+from lcsc3d.eda.eda_ir import Component, Extension, Pin, Pad, Via, Point, Symbol, SymbolUnit, Footprint, D, loads, dumps, require_domain
+from lcsc3d.eda.easyeda_import import parse_component
+from lcsc3d.core.errors import DownloadError, Cancelled
+from lcsc3d.eda.kicad import build_library, FORMATS
+from lcsc3d.eda.altium import export_schlib, export_pcblib
 from altium_inspect import schematic, pcb
-from app_logging import close_logging
+from lcsc3d.core.app_logging import close_logging
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 
@@ -65,7 +65,7 @@ class IRTests(unittest.TestCase):
     def test_real_thermal_vias_remain_distinct_and_keep_copper_drill_and_span(self):
         import struct
         from test_kicad import sexpr, children, child
-        from eda_targets import KICAD
+        from lcsc3d.eda.eda_targets import KICAD
         component = loads(dumps(parse_component(fixture('C31966'), 'C31966')))
         self.assertEqual(component.schema_version, '1.4')
         vias = [v for v in component.footprint.items if isinstance(v, Via)]
@@ -160,7 +160,7 @@ class IRTests(unittest.TestCase):
         self.assertEqual(child(actual['2'], 'at')[1:], ['5.08', '0', '180'])
 
     def test_pin_dot_selects_either_path_endpoint_in_all_four_directions(self):
-        from kicad import symbol_definition
+        from lcsc3d.eda.kicad import symbol_definition
         from test_kicad import sexpr, child
         for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             for reverse in (False, True):
@@ -299,7 +299,7 @@ class IRTests(unittest.TestCase):
         self.assertEqual(len(artifacts), 2)
 
     def test_limited_future_target_cannot_implicitly_accept_complex_core_features(self):
-        from eda_targets import KICAD
+        from lcsc3d.eda.eda_targets import KICAD
         limited = replace(KICAD, name='FutureSimpleEDA', features=frozenset({'local-mm-y-up'}))
         with self.assertRaisesRegex(DownloadError, 'symbol-units'):
             limited.require(parse_component(fixture('C23922'), 'C23922'), 'symbol')

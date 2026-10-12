@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from test_settings import PreferencesTestCase
-import main
-from updater import Release
+from lcsc3d.ui import main
+from lcsc3d.services.updater import Release
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -52,7 +52,7 @@ class StartupUpdateTests(PreferencesTestCase):
 
     def test_new_version_notifies_and_opens_ready_page_only_on_request(self):
         client = SimpleNamespace(check=Mock(return_value=self.release), download=Mock())
-        with patch('update_ui.UpdateClient', return_value=client), patch.object(sys, 'frozen', True, create=True):
+        with patch('lcsc3d.ui.update_ui.UpdateClient', return_value=client), patch.object(sys, 'frozen', True, create=True):
             self.start()
             self.wait_for(lambda: self.window.startup_update_outcome is not None)
             self.assertIsNone(self.window.update_dialog)
@@ -74,8 +74,8 @@ class StartupUpdateTests(PreferencesTestCase):
 
     def test_latest_version_finishes_silently(self):
         status = self.window.run_status.text()
-        with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)), \
-                patch('main.UpdateDialog') as dialog:
+        with patch('lcsc3d.ui.update_ui.UpdateClient', return_value=SimpleNamespace(check=lambda version: None)), \
+                patch('lcsc3d.ui.main.UpdateDialog') as dialog:
             self.start()
             self.wait_for(lambda: self.window.startup_update_outcome is not None)
         self.assertEqual(self.window.startup_update_outcome, 'latest')
@@ -85,7 +85,7 @@ class StartupUpdateTests(PreferencesTestCase):
 
     def test_network_failure_is_logged_without_creating_any_update_dialog(self):
         client = SimpleNamespace(check=Mock(side_effect=OSError('offline')))
-        with patch('update_ui.UpdateClient', return_value=client), patch('main.UpdateDialog') as dialog:
+        with patch('lcsc3d.ui.update_ui.UpdateClient', return_value=client), patch('lcsc3d.ui.main.UpdateDialog') as dialog:
             self.start()
             self.wait_for(lambda: self.window.startup_update_outcome is not None)
         self.assertEqual(self.window.startup_update_outcome, 'failed')
@@ -95,7 +95,7 @@ class StartupUpdateTests(PreferencesTestCase):
 
     def test_startup_check_runs_once_and_manual_check_still_reports_latest(self):
         client = SimpleNamespace(check=Mock(return_value=None))
-        with patch('update_ui.UpdateClient', return_value=client):
+        with patch('lcsc3d.ui.update_ui.UpdateClient', return_value=client):
             self.start()
             self.wait_for(lambda: self.window.startup_update_outcome is not None)
             self.window.check_startup_update()
@@ -117,7 +117,7 @@ class StartupUpdateTests(PreferencesTestCase):
             return self.release
         clients = [SimpleNamespace(check=slow_check), SimpleNamespace(check=lambda version: None)]
         try:
-            with patch('update_ui.UpdateClient', side_effect=clients):
+            with patch('lcsc3d.ui.update_ui.UpdateClient', side_effect=clients):
                 self.start()
                 self.assertTrue(started.wait(1))
                 self.window.input.setPlainText('C2040')
@@ -137,7 +137,7 @@ class StartupUpdateTests(PreferencesTestCase):
             release.set()
 
     def test_closing_before_scheduled_check_cancels_the_request(self):
-        with patch('update_ui.UpdateClient') as client:
+        with patch('lcsc3d.ui.update_ui.UpdateClient') as client:
             self.window.schedule_startup_update_check()
             self.assertTrue(self.window.startup_update_timer.isActive())
             self.window.close()
@@ -153,8 +153,8 @@ class StartupUpdateTests(PreferencesTestCase):
             release.wait(timeout=2)
             return self.release
         try:
-            with patch('update_ui.UpdateClient', return_value=SimpleNamespace(check=slow_check)), \
-                    patch('main.UpdateDialog') as dialog:
+            with patch('lcsc3d.ui.update_ui.UpdateClient', return_value=SimpleNamespace(check=slow_check)), \
+                    patch('lcsc3d.ui.main.UpdateDialog') as dialog:
                 self.start()
                 self.assertTrue(started.wait(1))
                 began = time.monotonic()

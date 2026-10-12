@@ -19,7 +19,7 @@
 | 商城顶部白条 | 关闭原生页签基线，使用统一的 Material 选中下划线。 |
 | 支持按钮文案被修改 | 恢复“⭐点个Star⭐”与“🍔赞助作者🍔”。 |
 
-界面继续使用 [UN-GCPDS/qt-material](https://github.com/UN-GCPDS/qt-material) 的模板及 SVG 控件资源。页面与通知组件位于 `app/shell_ui.py`，共用分隔条位于 `app/ui_components.py`，覆盖样式位于 `app/assets/material-overrides.qss`。主题和勾选框缓存仅生成在 `%LOCALAPPDATA%/LCSC3D/cache/`。
+界面继续使用 [UN-GCPDS/qt-material](https://github.com/UN-GCPDS/qt-material) 的模板及 SVG 控件资源。页面与通知组件位于 `app/lcsc3d/ui/shell_ui.py`，共用分隔条位于 `app/lcsc3d/ui/ui_components.py`，覆盖样式位于 `app/assets/material-overrides.qss`。主题和勾选框缓存仅生成在 `%LOCALAPPDATA%/LCSC3D/cache/`。
 
 侧栏切换保留下载队列、勾选、商城搜索与未保存设置；设置中的保存、取消和返回遵守原有保存语义。预览商城元件切回工作台，重新进入商城保留选择。后台更新检查仅发送通知，点击通知后进入更新页；重复打开复用当前更新任务。
 

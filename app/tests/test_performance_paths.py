@@ -11,7 +11,7 @@ from unittest.mock import patch
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import backend
+from lcsc3d.services import backend
 from test_backend import FakeApi, STEP, OBJ
 
 
@@ -34,7 +34,7 @@ class DownloadPerformanceTests(unittest.TestCase):
         api = Api()
         model = SimpleNamespace(name='QFN', uuid='model-id')
         with tempfile.TemporaryDirectory() as folder, \
-                patch('backend.model_reference', return_value=model):
+                patch('lcsc3d.services.backend.model_reference', return_value=model):
             result = backend.download_part('C2040', backend.Options(Path(folder), ('STEP', 'OBJ'), bind_3d_models=False), api)
         self.assertEqual(result.status, '成功')
         self.assertEqual(api.step_calls, 1)
@@ -44,7 +44,7 @@ class DownloadPerformanceTests(unittest.TestCase):
         api = FakeApi()
         model = SimpleNamespace(name='QFN', uuid='model-id')
         with tempfile.TemporaryDirectory() as folder, \
-                patch('backend.model_reference', return_value=model), \
+                patch('lcsc3d.services.backend.model_reference', return_value=model), \
                 patch.object(api, 'get_raw_3d_model_obj', return_value=None) as fetch:
             result = backend.download_part('C2040', backend.Options(Path(folder), ('STEP', 'OBJ'), bind_3d_models=False), api)
         self.assertEqual(result.status, '部分完成')
@@ -66,7 +66,7 @@ class DownloadPerformanceTests(unittest.TestCase):
                 raise backend.DownloadError('missing')
             return backend.Result(part, '成功')
 
-        with patch('backend.download_part', side_effect=download):
+        with patch('lcsc3d.services.backend.download_part', side_effect=download):
             results = backend.download_batch(['C1', 'C2', 'C3'], backend.Options(Path('unused'), bind_3d_models=False), api=FakeApi(),
                                               on_result=lambda row, result: callbacks.append((row, result.part)))
         self.assertEqual([result.part for result in results], ['C1', 'C2', 'C3'])
@@ -80,14 +80,14 @@ class DownloadPerformanceTests(unittest.TestCase):
             cancelled.set()
             return backend.Result(part, '成功')
 
-        with patch('backend.download_part', side_effect=first) as fetch:
+        with patch('lcsc3d.services.backend.download_part', side_effect=first) as fetch:
             results = backend.download_batch(['C1', 'C2', 'C3'], backend.Options(Path('unused'), bind_3d_models=False), cancelled, api=FakeApi(), workers=1)
         self.assertEqual(fetch.call_count, 1)
         self.assertEqual([result.status for result in results], ['成功', '已取消', '已取消'])
 
     def test_download_always_bypasses_cached_network_payloads(self):
-        with patch('backend.NetworkApi', return_value=FakeApi()) as factory, \
-                patch('backend.download_part', return_value=backend.Result('C1', '成功')):
+        with patch('lcsc3d.services.backend.NetworkApi', return_value=FakeApi()) as factory, \
+                patch('lcsc3d.services.backend.download_part', return_value=backend.Result('C1', '成功')):
             backend.download_batch(['C1'], backend.Options(Path('unused'), bind_3d_models=False))
         self.assertFalse(factory.call_args.kwargs['use_cache'])
 
@@ -105,18 +105,18 @@ class DownloadPerformanceTests(unittest.TestCase):
 
     def test_payload_cache_is_bounded_expires_and_does_not_cache_failures(self):
         cache = backend.PayloadCache(max_bytes=10)
-        with patch('backend.time.monotonic', return_value=0):
+        with patch('lcsc3d.services.backend.time.monotonic', return_value=0):
             cache.put('old', b'123456', 5)
             cache.put('new', b'abcdef', 5)
             self.assertIsNone(cache.get('old'))
             self.assertEqual(cache.get('new'), b'abcdef')
             cache.put('oversized', b'x' * 11, 5)
             self.assertLessEqual(cache.size, 10)
-        with patch('backend.time.monotonic', return_value=6):
+        with patch('lcsc3d.services.backend.time.monotonic', return_value=6):
             self.assertIsNone(cache.get('new'))
             self.assertEqual(cache.size, 0)
         api = backend.NetworkApi()
-        with patch('backend.PAYLOAD_CACHE', cache), patch.object(api, 'fetch', side_effect=backend.DownloadError('offline')):
+        with patch('lcsc3d.services.backend.PAYLOAD_CACHE', cache), patch.object(api, 'fetch', side_effect=backend.DownloadError('offline')):
             with self.assertRaises(backend.DownloadError):
                 api.get_step_3d_model('model-id')
         self.assertEqual(cache.size, 0)
@@ -124,7 +124,7 @@ class DownloadPerformanceTests(unittest.TestCase):
     def test_valid_model_cache_avoids_network_and_still_honors_cancellation(self):
         cache = backend.PayloadCache()
         api = backend.NetworkApi()
-        with patch('backend.PAYLOAD_CACHE', cache), patch.object(api, 'fetch', return_value=STEP) as fetch:
+        with patch('lcsc3d.services.backend.PAYLOAD_CACHE', cache), patch.object(api, 'fetch', return_value=STEP) as fetch:
             self.assertEqual(api.get_step_3d_model('model-id'), STEP)
             self.assertEqual(api.get_step_3d_model('model-id'), STEP)
             self.assertEqual(fetch.call_count, 1)

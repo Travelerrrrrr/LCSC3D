@@ -11,11 +11,11 @@ from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QCheckBox
-from app_logging import close_logging
-from app_settings import Preferences
-from shell_ui import notify
-from ui_components import ColumnSplitter
-import main
+from lcsc3d.core.app_logging import close_logging
+from lcsc3d.core.app_settings import Preferences
+from lcsc3d.ui.shell_ui import notify
+from lcsc3d.ui.ui_components import ColumnSplitter
+from lcsc3d.ui import main
 
 
 class SingleWindowTests(unittest.TestCase):
@@ -32,8 +32,8 @@ class SingleWindowTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         self.addCleanup(close_logging)
-        for target in ('main.MainWindow._setup_preview', 'main.MainWindow.request_component_info',
-                       'main.MainWindow.show_preview', 'favorites.LoginDialog.begin'):
+        for target in ('lcsc3d.ui.main.MainWindow._setup_preview', 'lcsc3d.ui.main.MainWindow.request_component_info',
+                       'lcsc3d.ui.main.MainWindow.show_preview', 'lcsc3d.ui.favorites.LoginDialog.begin'):
             stub = patch(target)
             stub.start()
             self.addCleanup(stub.stop)

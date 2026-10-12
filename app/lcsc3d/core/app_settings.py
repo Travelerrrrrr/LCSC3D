@@ -1,0 +1,169 @@
+"""Saved preferences and live routing for storefront and update requests."""
+from __future__ import annotations
+
+from dataclasses import dataclass, asdict
+import json
+import os
+import re
+from pathlib import Path
+import tempfile
+import threading
+import urllib.request
+from urllib.parse import urlsplit
+from lcsc3d.core.app_logging import traced, log_event, record_error
+
+
+PROXY_OPTIONS = (('使用系统代理', 'system'), ('不使用系统代理', 'direct'))
+LOG_LEVELS = ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
+LANGUAGES = (('简体中文', 'zh_CN'), ('English', 'en_US'))
+THEME_MODES = (('跟随系统', 'system'), ('浅色', 'light'), ('深色', 'dark'))
+ACCENT_COLORS = (('品牌蓝', '#087af5'), ('青绿', '#168878'), ('蓝色', '#2563eb'), ('紫色', '#7c3aed'),
+                 ('玫红', '#be185d'), ('橙色', '#c2410c'))
+DEFAULT_ACCENT = '#087af5'
+DEFAULT_FONT_FAMILY = 'Microsoft YaHei UI'
+DEFAULT_FONT_SIZE = 13
+MIN_FONT_SIZE, MAX_FONT_SIZE = 10, 24
+
+
+def color_value(value, default):
+    return value.lower() if isinstance(value, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', value) else default
+
+
+@dataclass(frozen=True)
+class Preferences:
+    store_proxy: str = 'system'
+    update_proxy: str = 'system'
+    log_level: str = 'DEBUG'
+    language: str = 'zh_CN'
+    theme_mode: str = 'light'
+    accent_color: str = DEFAULT_ACCENT
+    accent_text_color: str = 'auto'
+    font_family: str = DEFAULT_FONT_FAMILY
+    font_size: int = DEFAULT_FONT_SIZE
+    auto_backup: bool = True
+
+    @classmethod
+    def from_mapping(cls, values):
+        values = values if isinstance(values, dict) else {}
+        return cls(store_proxy=values.get('store_proxy') if values.get('store_proxy') in ('system', 'direct') else 'system',
+                   update_proxy=values.get('update_proxy') if values.get('update_proxy') in ('system', 'direct') else 'system',
+                   log_level=values.get('log_level') if values.get('log_level') in LOG_LEVELS else 'DEBUG',
+                   language=values.get('language') if values.get('language') in ('zh_CN', 'en_US') else 'zh_CN',
+                   theme_mode=values.get('theme_mode') if values.get('theme_mode') in ('system', 'light', 'dark') else 'light',
+                   accent_color=color_value(values.get('accent_color'), DEFAULT_ACCENT),
+                   accent_text_color=color_value(values.get('accent_text_color'), 'auto'),
+                   font_family=values['font_family'].strip() if isinstance(values.get('font_family'), str)
+                   and 0 < len(values['font_family'].strip()) <= 128
+                   and not any(ord(c) < 32 for c in values['font_family']) else DEFAULT_FONT_FAMILY,
+                   font_size=values['font_size'] if type(values.get('font_size')) is int
+                   and MIN_FONT_SIZE <= values['font_size'] <= MAX_FONT_SIZE else DEFAULT_FONT_SIZE,
+                   auto_backup=values.get('auto_backup') if type(values.get('auto_backup')) is bool else True)
+
+    def to_mapping(self):
+        return asdict(self)
+
+
+_LOCK = threading.RLock()
+_preferences = Preferences()
+
+
+def get_preferences():
+    with _LOCK:
+        return _preferences
+
+
+def set_preferences(value):
+    global _preferences
+    with _LOCK:
+        _preferences = Preferences.from_mapping(value.to_mapping())
+
+
+def proxy_mode(service):
+    preferences = get_preferences()
+    if service == 'store':
+        return preferences.store_proxy
+    if service == 'update':
+        return preferences.update_proxy
+    raise ValueError('Unknown network service')
+
+
+def proxy_settings(service):
+    # An empty explicit ProxyHandler also bypasses environment proxy variables.
+    return urllib.request.getproxies() if proxy_mode(service) == 'system' else {}
+
+
+def proxy_for_url(url, service):
+    if proxy_mode(service) == 'direct':
+        return None
+    parsed = urlsplit(url)
+    if urllib.request.proxy_bypass(parsed.hostname or ''):
+        return None
+    return urllib.request.getproxies().get(parsed.scheme)
+
+
+@traced('settings.write')
+def write_settings(path, values):
+    """Keep the previous configuration intact if saving is interrupted."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                         prefix='.LCSC3D-settings-', suffix='.tmp', delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(values, stream, ensure_ascii=False, indent=2)
+            stream.write('\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+@traced('settings.read')
+def read_settings(path, legacy_path=None):
+    path = Path(path)
+    if path.exists():
+        try:
+            value = json.loads(path.read_text(encoding='utf-8'))
+            if not isinstance(value, dict):
+                log_event('WARNING', 'settings.invalid_structure')
+                return {}
+            log_event('DEBUG', 'settings.loaded', origin='app_data')
+            return value
+        except (OSError, ValueError) as exc:
+            record_error(exc, 'settings.read_failed', level='WARNING')
+            return {}
+    if legacy_path is None:
+        return {}
+    legacy_path = Path(legacy_path)
+    try:
+        original = legacy_path.read_bytes()
+        value = json.loads(original)
+        if not isinstance(value, dict):
+            return {}
+    except FileNotFoundError:
+        log_event('DEBUG', 'settings.defaults_used')
+        return {}
+    except (OSError, ValueError) as exc:
+        record_error(exc, 'settings.legacy_read_failed', level='WARNING')
+        return {}
+    try:
+        write_settings(path, value)
+        # Remove only the exact old configuration that has been preserved.
+        if legacy_path.read_bytes() == original:
+            legacy_path.unlink()
+        log_event('INFO', 'settings.migrated')
+    except OSError as exc:
+        # Migration can be retried later; the old settings remain usable.
+        record_error(exc, 'settings.migration_failed', level='WARNING')
+    return value
+
+
+def initial_log_level(path):
+    """Read only the threshold before startup diagnostics are configured."""
+    try:
+        return Preferences.from_mapping(json.loads(Path(path).read_text(encoding='utf-8'))).log_level
+    except (OSError, ValueError):
+        return 'DEBUG'

@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'app'), str(ROOT / 'app/tests')]
-from altium import export_schlib, export_pcblib
+from lcsc3d.eda.altium import export_schlib, export_pcblib
 from altium_inspect import schematic, pcb, region
 from test_official_altium import OfficialAltiumTests, cases
 

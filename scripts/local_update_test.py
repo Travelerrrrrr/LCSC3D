@@ -100,7 +100,7 @@ def main():
         parser.error('This test launcher requires Windows')
     if args.startup and not args.auto:
         parser.error('--startup requires --auto')
-    version = args.target_version or re.search(r"VERSION = '([^']+)'", (ROOT / 'app/main.py').read_text(encoding='utf-8')).group(1)
+    version = args.target_version or re.search(r"VERSION = '([^']+)'", (ROOT / 'app/lcsc3d/ui/main.py').read_text(encoding='utf-8')).group(1)
     if not re.fullmatch(r'\d+\.\d+\.\d+', version):
         parser.error('Versions must use X.Y.Z')
     current = args.current_version or (version if args.scenario == 'no-update' else previous_version(version))

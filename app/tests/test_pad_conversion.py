@@ -5,9 +5,9 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from altium import export_pcblib
-from eda_geometry import pad_outline
-from errors import Cancelled, DownloadError
+from lcsc3d.eda.altium import export_pcblib
+from lcsc3d.eda.eda_geometry import pad_outline
+from lcsc3d.core.errors import Cancelled, DownloadError
 
 if sys.platform == 'win32':
     from altium_inspect import pcb, region

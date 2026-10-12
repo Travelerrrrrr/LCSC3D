@@ -2,6 +2,8 @@
 
 感谢提交问题、改进和修复。提交问题时请提供软件版本、Windows 版本、器件 C 编号、复现步骤和错误提示。日志及截图请先移除个人目录和敏感信息。
 
+应用实现按职责组织在 `app/lcsc3d/`，目录职责和导入规则见 [代码结构](docs/代码结构.md)。源码入口仍是 `app/main.py`，便携入口是 `app/launcher.py`。
+
 ## 开发环境
 
 使用 Windows x64 和 Python 3.12。普通克隆即可，2.0.0 不再使用上游子模块或转换器。
@@ -21,17 +23,17 @@ AD 导出回归也需要 Windows，以 `olefile` 独立读取 CFB 并核对引�
 
 不要提交个人设置、日志、Python 环境、构建文件或下载的模型。官方测试样本应保留来源声明，第三方代码及资源应保留相应许可证。
 
-Material UI 使用 `qt-material==2.17`，公共控件在 `app/ui_components.py`，应用样式覆盖在 `app/assets/material-overrides.qss`。`ThemeManager` 从上游模板生成样式，将图标按配色缓存到 AppData；不要直接调用默认写入用户主目录的主题导出接口。修改主题后运行 `test_theme.py`、`test_material_ui.py` 及相关窗口回归。
+Material UI 使用 `qt-material==2.17`，公共控件在 `app/lcsc3d/ui/ui_components.py`，应用样式覆盖在 `app/assets/material-overrides.qss`。`ThemeManager` 从上游模板生成样式，将图标按配色缓存到 AppData；不要直接调用默认写入用户主目录的主题导出接口。修改主题后运行 `test_theme.py`、`test_material_ui.py` 及相关窗口回归。
 
-文件选择页沿用 Qt 的文件模型、筛选和导航信号，在 `app/shell_ui.py` 中布局到共享 Material 卡片。不要让上游 `QToolButton` 的宽边框挤占固定尺寸按钮的图标区域。`test_file_picker.py` 检查实际渲染的图标像素、主题/字号、前进后退、视图切换、筛选、确认/取消及嵌套页面返回；`--self-test-material` 同时捕获真实 EXE 的浅色、深色、大字号英文目录选择页及库文件选择页。
+文件选择页沿用 Qt 的文件模型、筛选和导航信号，在 `app/lcsc3d/ui/shell_ui.py` 中布局到共享 Material 卡片。不要让上游 `QToolButton` 的宽边框挤占固定尺寸按钮的图标区域。`test_file_picker.py` 检查实际渲染的图标像素、主题/字号、前进后退、视图切换、筛选、确认/取消及嵌套页面返回；`--self-test-material` 同时捕获真实 EXE 的浅色、深色、大字号英文目录选择页及库文件选择页。
 
-一体化标题栏位于 `app/window_chrome.py`。Windows 保留原生移动、缩放与系统菜单，仅替换标题栏绘制；原生命中测试使用物理坐标，Qt 控件使用逻辑坐标。修改窗口行为后运行 `test_window_chrome.py`，核对边角命中、按钮与拖动区分离、最大化工作区、还原尺寸、关闭事件与通知避让，并实测鼠标拖动和双击。`--self-test-material` 在实际 EXE 中验证最大化、最小化与还原后句柄和尺寸不变。
+一体化标题栏位于 `app/lcsc3d/ui/window_chrome.py`。Windows 保留原生移动、缩放与系统菜单，仅替换标题栏绘制；原生命中测试使用物理坐标，Qt 控件使用逻辑坐标。修改窗口行为后运行 `test_window_chrome.py`，核对边角命中、按钮与拖动区分离、最大化工作区、还原尺寸、关闭事件与通知避让，并实测鼠标拖动和双击。`--self-test-material` 在实际 EXE 中验证最大化、最小化与还原后句柄和尺寸不变。
 
 `LCSC3D.exe --self-test-material <隔离目录>` 离线捕获明暗工作台、最小窗口/24px 英文界面、五个设置分类、三种空白登录表单、追加和帮助窗口，并验证官方符号/封装预览。提前把 `C2040_svgs.json` 和 `C20197_svgs.json` 放入该目录的 `fixtures/`，设置隔离的 `LOCALAPPDATA`。它不恢复会话、不请求二维码、不访问商城网络，输出 `material-verification.json` 和 PNG。
 
 新 Logo 原始素材位于 `app/assets/branding/`，`scripts/make_assets.py` 只将给定的 PNG/ICO 同步到应用入口，不重绘 Logo。侧栏和关于页使用 SVG；新用户默认浅色、品牌蓝 `#087AF5`，已保存的主题保留。
 
-备份逻辑位于 `app/backups.py`，管理页位于 `app/backup_ui.py`；`auto_backup` 作为偏好设置保存。修改已有库/工程继续经 `commit_user_file` 校验原内容并按开关创建副本。恢复总是保留被覆盖内容，且执行前再次核对确认时的内容；清理只删除确认列表中的受管理备份。运行 `test_backups.py` 及库集成、设置、日志回归。`--self-test-backups <隔离目录>` 需要 `fixtures/C2040.json` 和全新的隔离 `LOCALAPPDATA`，在源码或真实 EXE 中验证新旧备份、两种库与工程恢复、持久化开关、损坏拒绝、确认/取消、清理与后续备份，并生成明暗及大字号截图。自测目录仅使用测试文件，不可指向用户真实备份。
+备份逻辑位于 `app/lcsc3d/services/backups.py`，管理页位于 `app/lcsc3d/ui/backup_ui.py`；`auto_backup` 作为偏好设置保存。修改已有库/工程继续经 `commit_user_file` 校验原内容并按开关创建副本。恢复总是保留被覆盖内容，且执行前再次核对确认时的内容；清理只删除确认列表中的受管理备份。运行 `test_backups.py` 及库集成、设置、日志回归。`--self-test-backups <隔离目录>` 需要 `fixtures/C2040.json` 和全新的隔离 `LOCALAPPDATA`，在源码或真实 EXE 中验证新旧备份、两种库与工程恢复、持久化开关、损坏拒绝、确认/取消、清理与后续备份，并生成明暗及大字号截图。自测目录仅使用测试文件，不可指向用户真实备份。
 
 `app/.venv/Scripts/python.exe scripts/verify_bundle.py --exe outputs/LCSC3D.exe --source-zip outputs/LCSC3D.zip` 逐一比较成品中的应用模块、界面资源、许可证和源码 ZIP，核对 Qt Material 模板和 SVG 已打包；不运行 EXE、不访问用户设置。
 
@@ -89,7 +91,7 @@ Demo.5 的商城离线验证还覆盖单价精度、库存与缺失值、最低�
 
 启动后台检查另运行 `test_startup_update.py`，覆盖有新版弹窗、无更新/网络失败静默、只检查一次、手动查询接管和关闭时不等待网络。真实 EXE 使用 `local_update_test.py --auto --startup`，再分别追加 `--scenario no-update`、`--scenario check-failure` 验证静默分支。其他自测入口不自动请求 GitHub。
 
-版本信息在 `app/main.py` 的 `VERSION` 与 `app/version_info.txt` 的 Windows 版本资源中；同步更新 `docs/images/release-badge.svg` 中的版本文字。同步使用说明与版本记录后，通过测试、构建和成品验证，再创建对应的 `vX.Y.Z` Git 标签和 GitHub Release。
+版本信息在 `app/lcsc3d/ui/main.py` 的 `VERSION` 与 `app/version_info.txt` 的 Windows 版本资源中；同步更新 `docs/images/release-badge.svg` 中的版本文字。同步使用说明与版本记录后，通过测试、构建和成品验证，再创建对应的 `vX.Y.Z` Git 标签和 GitHub Release。
 
 Release 上传固定文件名 `LCSC3D.exe`、`LCSC3D.zip` 和 `SHA256SUMS.txt`。EXE、ZIP 与验证输出不放入 Git。修改许可证、上游版本或打包依赖时同步更新第三方声明。
 

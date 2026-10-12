@@ -9,13 +9,13 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app_settings import Preferences, ACCENT_COLORS, set_preferences, get_preferences, DEFAULT_FONT_FAMILY
-from app_theme import colors, contrast, theme_manager, effective_font_family
-from i18n import text, message, render, set_language, language
-from localized_widgets import QLabel, QLineEdit, QTableWidget, QTableWidgetItem, QMessageBox, QPushButton
-from international_store import (InternationalStoreClient, international_product, catalog_client,
+from lcsc3d.core.app_settings import Preferences, ACCENT_COLORS, set_preferences, get_preferences, DEFAULT_FONT_FAMILY
+from lcsc3d.ui.app_theme import colors, contrast, theme_manager, effective_font_family
+from lcsc3d.core.i18n import text, message, render, set_language, language
+from lcsc3d.ui.localized_widgets import QLabel, QLineEdit, QTableWidget, QTableWidgetItem, QMessageBox, QPushButton
+from lcsc3d.services.international_store import (InternationalStoreClient, international_product, catalog_client,
                                  storefront_url, HOME, API)
-from store import StoreClient, StoreError
+from lcsc3d.services.store import StoreClient, StoreError
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontDatabase, QPalette
 from PySide6.QtWidgets import QApplication
@@ -54,9 +54,9 @@ class AppearanceTests(unittest.TestCase):
         self.assertEqual(Preferences.from_mapping(values), expected)
 
     def test_explicit_ui_messages_have_english_catalog_entries(self):
-        from translations_en import ENGLISH
+        from lcsc3d.core.translations_en import ENGLISH
         missing = set()
-        for path in Path(__file__).resolve().parents[1].glob('*.py'):
+        for path in (Path(__file__).resolve().parents[1] / 'lcsc3d').rglob('*.py'):
             for node in ast.walk(ast.parse(path.read_text('utf-8'))):
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('ui_text', 'ui_message'):
                     if node.args and isinstance(node.args[0], ast.Constant):
@@ -246,7 +246,7 @@ class AppearanceTests(unittest.TestCase):
 
     def test_checkbox_and_table_indicators_remain_visible_on_dark_and_selected_rows(self):
         from PySide6.QtWidgets import QCheckBox, QStyle, QStyleOptionViewItem
-        from app_theme import foreground
+        from lcsc3d.ui.app_theme import foreground
         box = QCheckBox('')
         table = QTableWidget(1, 1)
         item = QTableWidgetItem()
@@ -298,7 +298,7 @@ class AppearanceTests(unittest.TestCase):
                 widget.deleteLater()
 
     def test_font_change_reflows_open_product_descriptions_and_parameter_rows(self):
-        from favorites import DetailLabel, ParameterTable
+        from lcsc3d.ui.favorites import DetailLabel, ParameterTable
         label = DetailLabel('LCSC3D component parameter with long text. ' * 24)
         label.resize(210, 30)
         table = ParameterTable()

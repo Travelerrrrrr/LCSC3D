@@ -11,9 +11,9 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import updater
-from errors import Cancelled
-from app_logging import configure_logging, close_logging
+from lcsc3d.services import updater
+from lcsc3d.core.errors import Cancelled
+from lcsc3d.core.app_logging import configure_logging, close_logging
 
 NEW = b'MZ' + b'new executable payload' * 100
 OLD = b'MZoriginal executable'
@@ -104,7 +104,7 @@ class UpdateTests(unittest.TestCase):
             response = Response(b'')
             response.status = 302
             response.headers = {'Location': location}
-            with patch('updater.connection_pool', return_value=SimpleNamespace(request=lambda *a, **k: response)), \
+            with patch('lcsc3d.services.updater.connection_pool', return_value=SimpleNamespace(request=lambda *a, **k: response)), \
                     self.subTest(location=location), self.assertRaises(updater.UpdateError):
                 self.client._open(PREFIX + 'LCSC3D.exe')
 
@@ -146,7 +146,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_cancellation_before_check_and_during_download(self):
         self.client.cancelled.set()
-        with patch('updater.connection_pool') as pool, self.assertRaises(Cancelled):
+        with patch('lcsc3d.services.updater.connection_pool') as pool, self.assertRaises(Cancelled):
             self.client.check('2.0.0')
         pool.assert_not_called()
         self.client.cancelled.clear()
@@ -164,7 +164,7 @@ class UpdateTests(unittest.TestCase):
         def spawn(arguments, directory):
             updater.acknowledge_update(manifest, self.target)
             return child
-        with patch('updater._wait_for_parent') as wait, patch('updater._spawn', side_effect=spawn) as start:
+        with patch('lcsc3d.services.updater._wait_for_parent') as wait, patch('lcsc3d.services.updater._spawn', side_effect=spawn) as start:
             self.assertEqual(updater.apply_update(manifest), 0)
         wait.assert_called_once()
         self.assertEqual(self.target.read_bytes(), NEW)
@@ -174,8 +174,8 @@ class UpdateTests(unittest.TestCase):
     def test_failed_startup_restores_and_restarts_original(self):
         manifest = self.stage()
         child = SimpleNamespace(poll=lambda: 1)
-        with patch('updater._wait_for_parent'), patch('updater._spawn', return_value=child) as start, \
-                patch('updater._wait_for_ack', return_value=False), patch('updater._show_failure'):
+        with patch('lcsc3d.services.updater._wait_for_parent'), patch('lcsc3d.services.updater._spawn', return_value=child) as start, \
+                patch('lcsc3d.services.updater._wait_for_ack', return_value=False), patch('lcsc3d.services.updater._show_failure'):
             self.assertEqual(updater.apply_update(manifest), 1)
         self.assertEqual(self.target.read_bytes(), OLD)
         self.assertEqual(start.call_args.args[0], [str(self.target)])
@@ -187,7 +187,7 @@ class UpdateTests(unittest.TestCase):
             manifest = self.stage()
             path = self.target if changed == 'target' else manifest.parent / changed
             path.write_bytes(b'changed')
-            with patch('updater._wait_for_parent'), patch('updater._spawn') as start, patch('updater._show_failure'):
+            with patch('lcsc3d.services.updater._wait_for_parent'), patch('lcsc3d.services.updater._spawn') as start, patch('lcsc3d.services.updater._show_failure'):
                 self.assertEqual(updater.apply_update(manifest), 1)
             start.assert_not_called()
             self.assertFalse((manifest.parent / 'previous.exe').exists())
@@ -204,7 +204,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_source_mode_does_not_launch_an_updater(self):
         manifest = self.stage()
-        with patch('updater._spawn') as start, patch.object(sys, 'frozen', False, create=True), self.assertRaises(updater.UpdateError):
+        with patch('lcsc3d.services.updater._spawn') as start, patch.object(sys, 'frozen', False, create=True), self.assertRaises(updater.UpdateError):
             updater.launch_update(manifest)
         start.assert_not_called()
 

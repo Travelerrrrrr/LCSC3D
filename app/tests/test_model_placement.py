@@ -17,18 +17,18 @@ from unittest.mock import patch, Mock
 import zlib
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import backend
-from app_logging import close_logging
-from app_paths import temporary_directory
-from easyeda_import import parse_component, model_outline_center
-from eda_ir import Model3D, ModelPlacement, ModelAsset, dumps, loads
-from errors import DownloadError, Cancelled
-from model_export import resolve_models
-from model_geometry import rotation_zxy, euler_xyz, obj_origin, ModelOrigin
-from altium import export_pcblib, MergedLibrary
-from library_merge import LibraryIndex, append_library
-from kicad import build_library, footprint_definition
-from library_files import commit_library
+from lcsc3d.services import backend
+from lcsc3d.core.app_logging import close_logging
+from lcsc3d.core.app_paths import temporary_directory
+from lcsc3d.eda.easyeda_import import parse_component, model_outline_center
+from lcsc3d.eda.eda_ir import Model3D, ModelPlacement, ModelAsset, dumps, loads
+from lcsc3d.core.errors import DownloadError, Cancelled
+from lcsc3d.models.model_export import resolve_models
+from lcsc3d.models.model_geometry import rotation_zxy, euler_xyz, obj_origin, ModelOrigin
+from lcsc3d.eda.altium import export_pcblib, MergedLibrary
+from lcsc3d.eda.library_merge import LibraryIndex, append_library
+from lcsc3d.eda.kicad import build_library, footprint_definition
+from lcsc3d.eda.library_files import commit_library
 import olefile
 import zstandard
 
@@ -269,7 +269,7 @@ class ModelPlacementTests(unittest.TestCase):
         api = self.api()
         api.use_cache = True
         api.get_raw_3d_model_obj = Mock(return_value=OBJ)
-        with patch('backend.PAYLOAD_CACHE',cache):
+        with patch('lcsc3d.services.backend.PAYLOAD_CACHE',cache):
             first = api.get_model_origin('test-model')
             self.assertEqual(api.get_model_origin('test-model'),first)
             api.get_raw_3d_model_obj.assert_called_once()
@@ -381,7 +381,7 @@ class ModelPlacementTests(unittest.TestCase):
                 dumps(invalid)
 
     def test_direct_placement_requires_explicit_target_support(self):
-        from eda_targets import ALTIUM
+        from lcsc3d.eda.eda_targets import ALTIUM
         c,_ = self.resolved()
         self.assertEqual(c.schema_version,'1.4')
         target = replace(ALTIUM,features=ALTIUM.features-{'model-direct-placement'})
@@ -443,9 +443,9 @@ class ModelPlacementTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform=='win32','Native CFB writer')
     def test_ad_dedup_uses_content_and_pose_instead_of_compression_or_guid(self):
-        from altium_models import _rewrite_ids, _model_table, _pose_key
-        from library_merge import footprint_signature, Reader, patch_parameters, indexed_component
-        from compound_storage import compound_file
+        from lcsc3d.eda.altium_models import _rewrite_ids, _model_table, _pose_key
+        from lcsc3d.eda.library_merge import footprint_signature, Reader, patch_parameters, indexed_component
+        from lcsc3d.eda.compound_storage import compound_file
         c,assets = self.resolved()
         raw = export_pcblib(c,c.part,model_assets=assets)
         with olefile.OleFileIO(io.BytesIO(raw)) as ole:
@@ -504,7 +504,7 @@ class ModelPlacementTests(unittest.TestCase):
         for fmt in ('PCBLIB','KICAD_FOOTPRINT'):
             api = self.api()
             api.get_raw_3d_model_obj = Mock(return_value=OBJ)
-            with patch('model3d.read_obj',side_effect=AssertionError('mesh must not be built')):
+            with patch('lcsc3d.models.model3d.read_obj',side_effect=AssertionError('mesh must not be built')):
                 result = backend.download_part('C20197',backend.Options(self.root/fmt,(fmt,)),api)
             self.assertEqual(result.status,'成功',result.message)
             api.get_raw_3d_model_obj.assert_called_once_with('test-model')
@@ -543,7 +543,7 @@ class ModelPlacementTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform=='win32','Native CFB writer')
     def test_ad_embeds_real_resource_checksum_and_merge_append_preserve_every_resource(self):
-        from altium_models import model_checksum
+        from lcsc3d.eda.altium_models import model_checksum
         from altium_inspect import Reader,parameters
         first,assets = self.resolved()
         second,other = self.resolved(source('20,30,40'))

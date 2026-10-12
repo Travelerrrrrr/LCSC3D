@@ -66,7 +66,7 @@ def own_window():
     return found[0] if found else None
 
 
-version = re.search(r"VERSION = '([^']+)'", (root / 'app/main.py').read_text(encoding='utf-8')).group(1)
+version = re.search(r"VERSION = '([^']+)'", (root / 'app/lcsc3d/ui/main.py').read_text(encoding='utf-8')).group(1)
 report = {'version': version, 'cases': {}}
 for case in ('legacy_migration', 'new_profile'):
     profile = Path(tempfile.mkdtemp(prefix='LCSC3D 数据验证 ')).resolve()

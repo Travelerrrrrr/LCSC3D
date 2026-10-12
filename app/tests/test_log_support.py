@@ -7,13 +7,24 @@ import zipfile
 from unittest.mock import patch
 
 from test_settings import PreferencesTestCase
-import app_logging as logs
-import log_support
-from app_paths import data_directory
-from app_settings import Preferences, set_preferences
+from lcsc3d.core import app_logging as logs
+from lcsc3d.services import log_support
+from lcsc3d.core.app_paths import data_directory
+from lcsc3d.core.app_settings import Preferences, set_preferences
 
 
 class LogSupportTests(PreferencesTestCase):
+    def test_message_history_is_separate_from_log_collection_and_survives_log_clear(self):
+        from lcsc3d.services.notification_history import NotificationHistory
+        history=NotificationHistory()
+        history.add('Title','PRIVATE-visible-notification','info')
+        before=history.path.read_bytes()
+        _,contents,_=self.bundle()
+        self.assertNotIn(b'PRIVATE-visible-notification',b'\n'.join(contents.values()))
+        log_support.clear_logs()
+        self.assertEqual(history.path.read_bytes(),before)
+        self.assertTrue(logs.log_event('ERROR','test.after_clear_with_message_history'))
+
     def bundle(self):
         result = log_support.package_logs()
         self.assertTrue(result['path'].is_relative_to(data_directory() / 'diagnostics'))
@@ -88,7 +99,7 @@ class LogSupportTests(PreferencesTestCase):
 
     def test_failed_zip_write_removes_partial_archive_and_keeps_logs(self):
         logs.log_event('ERROR', 'test.keep_on_package_failure')
-        with patch('log_support.zipfile.ZipFile.writestr', side_effect=OSError('disk full')):
+        with patch('lcsc3d.services.log_support.zipfile.ZipFile.writestr', side_effect=OSError('disk full')):
             with self.assertRaises(OSError):
                 log_support.package_logs()
         self.assertEqual(list((data_directory() / 'diagnostics').iterdir()), [])

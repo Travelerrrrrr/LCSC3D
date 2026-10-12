@@ -31,7 +31,7 @@ if args.user_ad_evidence_dir:
  ad_evidence_text='- 用户提供的 AD 实测截图展示 SchLib 符号、PcbLib 封装及 PCB 工程中的两类库引用，已收录首页；截图是用户验证证据，不代表本自动验证执行了器件放置或整板设计检查。\n'
 outputs,tested=args.output_dir.resolve(),args.portable_dir.resolve()
 outputs.mkdir(parents=True,exist_ok=True)
-version=re.search(r"VERSION = '([^']+)'",(root/'app/main.py').read_text(encoding='utf-8')).group(1)
+version=re.search(r"VERSION = '([^']+)'",(root/'app/lcsc3d/ui/main.py').read_text(encoding='utf-8')).group(1)
 report=json.loads((tested/'verification.json').read_text(encoding='utf-8'))
 update=json.loads(args.update_report.read_text(encoding='utf-8'))
 assert report['version']==update['version']==version
@@ -256,15 +256,8 @@ with zipfile.ZipFile(archive_path) as archive:
   assert not any(part in {'work','outputs','.venv','__pycache__','runtime'} for part in Path(relative).parts)
   assert not any(word in name for word in ('LCSC3D-settings.json','store-session.bin','.store-session-'))
   assert archive.read(name)==(root/relative).read_bytes(),name
-def normalize(code):
- return code.replace(co_filename='',co_consts=tuple(normalize(v) if isinstance(v,types.CodeType) else v for v in code.co_consts))
-executable_archive=CArchiveReader(str(outputs/'LCSC3D.exe'))
-frozen=executable_archive.open_embedded_archive('PYZ.pyz')
-for name in ('main','favorites','favorites_selftest','store','store_crypto','store_session','store_images','store_diagnostics','app_paths','app_settings','app_logging','log_support','settings_ui','settings_selftest','docs_capture','updater','update_ui','update_selftest','backend','altium','compound_storage','library_merge','altium_project','export_targets','export_selftest','product_preview','resources','model3d','library_preview'):
- code=compile((root/'app'/f'{name}.py').read_text(encoding='utf-8'),'','exec',dont_inherit=True)
- assert normalize(frozen.extract(name))==normalize(code),name
-for name in ('viewer.html','vector_viewer.html'):
- assert executable_archive.extract(name)==(root/'app'/name).read_bytes(),name
+from verify_bundle import verify as verify_current_bundle
+verify_current_bundle(outputs/'LCSC3D.exe', outputs/'LCSC3D.zip')
 hashes=[]
 for name in ('LCSC3D.exe','LCSC3D.zip'):
  with (outputs/name).open('rb') as stream:hashes.append(hashlib.file_digest(stream,'sha256').hexdigest()+'  '+name)

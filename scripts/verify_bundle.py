@@ -18,12 +18,12 @@ def verify(executable, source_zip=None):
     archive = CArchiveReader(str(executable))
     pyz = archive.open_embedded_archive('PYZ.pyz')
     modules = []
-    for source in sorted((root / 'app').glob('*.py')):
-        if source.stem == 'launcher':
-            continue  # PyInstaller rewrites the entry script; application code lives in PYZ.
+    for source in sorted((root / 'app' / 'lcsc3d').rglob('*.py')):
+        relative = source.relative_to(root / 'app').with_suffix('')
+        name = '.'.join(relative.parts[:-1] if relative.name == '__init__' else relative.parts)
         code = compile(source.read_text(encoding='utf-8'), '', 'exec', dont_inherit=True)
-        assert normalized(pyz.extract(source.stem)) == normalized(code), source.name
-        modules.append(source.stem)
+        assert normalized(pyz.extract(name)) == normalized(code), name
+        modules.append(name)
     entries = {name.replace('\\', '/'): name for name in archive.toc}
     sources = [root / 'app' / name for name in ('viewer.html', 'vector_viewer.html')]
     sources += [p for folder in ('assets', 'licenses') for p in (root / 'app' / folder).rglob('*') if p.is_file()]

@@ -18,14 +18,14 @@ import time
 
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root / 'app'))
-from updater import STAGE_PREFIX, file_hash
+from lcsc3d.services.updater import STAGE_PREFIX, file_hash
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--output-dir', type=Path, default=root / 'outputs')
 parser.add_argument('--report', type=Path, default=root / 'work/self-update-verification.json')
 args = parser.parse_args()
 source = args.output_dir.resolve() / 'LCSC3D.exe'
-version = re.search(r"VERSION = '([^']+)'", (root / 'app/main.py').read_text(encoding='utf-8')).group(1)
+version = re.search(r"VERSION = '([^']+)'", (root / 'app/lcsc3d/ui/main.py').read_text(encoding='utf-8')).group(1)
 directory = Path(tempfile.mkdtemp(prefix='自更新 验证 ', dir=root / 'work')).resolve()
 target = directory / 'LCSC3D.exe'
 shutil.copy2(source, target)

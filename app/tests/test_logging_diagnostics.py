@@ -15,17 +15,17 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import app_logging as logs
-import backend
-import main
-import updater
-from app_settings import Preferences, get_preferences, set_preferences, read_settings, initial_log_level
-from errors import Cancelled, DownloadError
-from favorites import Jobs
-from favorites_selftest import OfflineStore
-from library_preview import build_library_preview, SvgPreviewPage
-from store import StoreClient, MemorySession, CaptchaRequired
-from store_session import SessionVault
+from lcsc3d.core import app_logging as logs
+from lcsc3d.services import backend
+from lcsc3d.ui import main
+from lcsc3d.services import updater
+from lcsc3d.core.app_settings import Preferences, get_preferences, set_preferences, read_settings, initial_log_level
+from lcsc3d.core.errors import Cancelled, DownloadError
+from lcsc3d.ui.favorites import Jobs
+from lcsc3d.selftests.favorites_selftest import OfflineStore
+from lcsc3d.ui.library_preview import build_library_preview, SvgPreviewPage
+from lcsc3d.services.store import StoreClient, MemorySession, CaptchaRequired
+from lcsc3d.services.store_session import SessionVault
 from test_backend import FakeApi, STEP, OBJ
 from test_altium import fixture
 from test_updater import Response, NEW, OLD, SHA, release_data
@@ -105,8 +105,8 @@ class DiagnosticTests(unittest.TestCase):
 
     def test_download_partial_failure_identifies_part_format_stage_and_root(self):
         api = FakeApi(step=STEP, obj=OBJ)
-        with patch('backend.model_reference', return_value=SimpleNamespace(name='model', uuid='synthetic')), \
-                patch('backend.export_pcblib', side_effect=ValueError('PRIVATE-converter-data')):
+        with patch('lcsc3d.services.backend.model_reference', return_value=SimpleNamespace(name='model', uuid='synthetic')), \
+                patch('lcsc3d.services.backend.export_pcblib', side_effect=ValueError('PRIVATE-converter-data')):
             results = backend.download_batch(['C2040', 'C20197'],
                 backend.Options(self.directory / 'exports', ('STEP', 'PCBLIB'), bind_3d_models=False), api=api)
         self.assertTrue(all(result.status == '部分完成' for result in results))
@@ -119,8 +119,8 @@ class DiagnosticTests(unittest.TestCase):
 
     def test_file_permission_failure_is_distinct_from_conversion_failure(self):
         api = FakeApi(step=STEP)
-        with patch('backend.model_reference', return_value=SimpleNamespace(name='model', uuid='synthetic')), \
-                patch('backend.replace_file', side_effect=PermissionError(errno.EACCES, 'PRIVATE-directory')):
+        with patch('lcsc3d.services.backend.model_reference', return_value=SimpleNamespace(name='model', uuid='synthetic')), \
+                patch('lcsc3d.services.backend.replace_file', side_effect=PermissionError(errno.EACCES, 'PRIVATE-directory')):
             result = backend.download_part('C2040', backend.Options(self.directory, ('STEP',), bind_3d_models=False), api)
         self.assertEqual(result.status, '失败')
         row = self.entries('download.format_failed')[0]
@@ -130,7 +130,7 @@ class DiagnosticTests(unittest.TestCase):
         self.assert_private_absent('PRIVATE-directory')
 
     def test_real_schlib_and_pcblib_conversion_are_traced(self):
-        from altium import export_schlib, export_pcblib
+        from lcsc3d.eda.altium import export_schlib, export_pcblib
         data = fixture()
         for event, export in (('export.schlib', export_schlib), ('export.pcblib', export_pcblib)):
             output = export(data, 'C2765186')
@@ -168,8 +168,8 @@ class DiagnosticTests(unittest.TestCase):
         row=self.entries('download.format_failed')[0]
         self.assertEqual(self.assert_cause(row,'EdaError')['eda_primitive'],'FUTURE')
         data['packageDetail']['dataStr']['shape']=['VIA~4000~3000~2~~5~gge123']
-        from easyeda_import import parse_component
-        from eda_ir import dumps,loads,require_domain
+        from lcsc3d.eda.easyeda_import import parse_component
+        from lcsc3d.eda.eda_ir import dumps,loads,require_domain
         component=loads(dumps(parse_component(data,'C31966')))
         self.assertEqual(self.entries('eda.import_domain_failed')[-1]['domain'],'footprint')
         with self.assertRaises(DownloadError) as caught:
@@ -178,7 +178,7 @@ class DiagnosticTests(unittest.TestCase):
         self.assert_private_absent('PRIVATE-source-record')
 
     def test_kicad_write_failure_and_cancel_log_rollback_and_preserve_previous_files(self):
-        import library_files
+        from lcsc3d.eda import library_files
         api=backend.NetworkApi()
         api.get_cad_data_of_component=lambda part:fixture(part)
         root=self.directory/'libraries'
@@ -197,7 +197,7 @@ class DiagnosticTests(unittest.TestCase):
                         raise Cancelled()
                     raise PermissionError(errno.EACCES,'PRIVATE-path')
                 return original(source,target)
-            with patch('library_files.replace_file',side_effect=fail):
+            with patch('lcsc3d.eda.library_files.replace_file',side_effect=fail):
                 backend.download_batch(['C31966'],options,cancelled=stop,api=api)
             events=self.entries()[start:]
             self.assertTrue(any(r['event']=='library.rollback_completed' for r in events))
@@ -303,8 +303,8 @@ sys.path.insert(0,{str(Path(__file__).resolve().parents[1])!r})
 if sys.platform=='win32':
     import ctypes
     ctypes.windll.kernel32.SetErrorMode(0x8002)
-from app_logging import configure_logging,start_crash_capture,log_event
-from log_support import clear_logs
+from lcsc3d.core.app_logging import configure_logging,start_crash_capture,log_event
+from lcsc3d.services.log_support import clear_logs
 configure_logging(version="crash-test")
 start_crash_capture()
 log_event("ERROR","test.before_clear")
@@ -336,7 +336,7 @@ faulthandler._sigsegv()
         self.assert_private_absent('PRIVATE')
 
     def test_model_parser_failure_keeps_worker_part_and_code_location(self):
-        with patch('main.NetworkApi', return_value=FakeApi()):
+        with patch('lcsc3d.ui.main.NetworkApi', return_value=FakeApi()):
             worker = main.ModelPreviewWorker('C2040', 3)
             worker.run()
         row = self.entries('preview.model_load_failed')[0]
@@ -344,7 +344,7 @@ faulthandler._sigsegv()
         self.assert_cause(row, 'ValueError', 'run')
 
     def test_invalid_svg_is_logged_even_when_returned_as_preview_error(self):
-        from library_preview import _read_svg
+        from lcsc3d.ui.library_preview import _read_svg
         result = _read_svg({'svg':'<svg PRIVATE'}, 'symbol')
         self.assertTrue(result.error)
         row = self.entries('preview.svg_invalid')[0]
@@ -409,8 +409,8 @@ faulthandler._sigsegv()
         manifest,target = self.stage_update()
         original = self.entries('update.verified')[0]
         child = SimpleNamespace(poll=lambda:1)
-        with patch('updater._wait_for_parent'),patch('updater._spawn',return_value=child), \
-                patch('updater._wait_for_ack',return_value=False),patch('updater._show_failure'):
+        with patch('lcsc3d.services.updater._wait_for_parent'),patch('lcsc3d.services.updater._spawn',return_value=child), \
+                patch('lcsc3d.services.updater._wait_for_ack',return_value=False),patch('lcsc3d.services.updater._show_failure'):
             self.assertEqual(updater.apply_update(manifest),1)
         self.assertEqual(target.read_bytes(),OLD)
         row = self.entries('update.install_failed')[0]
@@ -450,7 +450,7 @@ faulthandler._sigsegv()
 
     def test_logging_write_failure_is_visible_and_does_not_break_operations(self):
         logs.close_logging()
-        with patch('app_logging.SafeFileHandler',side_effect=PermissionError('PRIVATE-directory')):
+        with patch('lcsc3d.core.app_logging.SafeFileHandler',side_effect=PermissionError('PRIVATE-directory')):
             self.assertFalse(logs.configure_logging(directory=self.folder))
             self.assertEqual(logs.logging_health(),'PermissionError')
             @logs.traced('test.write_failed')

@@ -33,7 +33,7 @@ with (root / 'process.log').open('w', encoding='utf-8') as output:
                              stderr=subprocess.STDOUT, timeout=120)
 assert process.returncode == 0, process.returncode
 report = json.loads((root / 'kicad-verification.json').read_text('utf-8'))
-version = re.search(r"VERSION = '([^']+)'", (ROOT / 'app/main.py').read_text('utf-8')).group(1)
+version = re.search(r"VERSION = '([^']+)'", (ROOT / 'app/lcsc3d/ui/main.py').read_text('utf-8')).group(1)
 assert report['success'] and report['frozen'] and report['version'] == version, report
 assert [c['name'] for c in report['cases']] == ['individual', 'combined', 'merge-symbols', 'merge-footprints', 'footprint-only', 'copies', 'reversed', 'ad', 'ad-layout', 'ad-replace', 'replace', 'via-ad', 'via-kicad', 'preview-sample']
 assert report['kicad_preview_verified']
@@ -54,9 +54,9 @@ for name in ad['files']:
     if path.suffix == '.PcbLib':
         assert len(pcb(path.read_bytes())[1]) == (18 if pins == 14 else pins)
 from test_kicad import sexpr, children, child
-from easyeda_import import parse_component
-from eda_ir import Pin
-from kicad import pin_electrical_type
+from lcsc3d.eda.easyeda_import import parse_component
+from lcsc3d.eda.eda_ir import Pin
+from lcsc3d.eda.kicad import pin_electrical_type
 assert schematic((root/'ad-layout/lcsc3d_v2_3_0_hb.SchLib').read_bytes())[0]['COMPCOUNT'] == '12'
 assert schematic((root/'ad-replace/lcsc3d_v2_3_0_hb.SchLib').read_bytes())[0]['COMPCOUNT'] == '1'
 assert len(children(sexpr((root/'replace/LCSC3D.kicad_sym').read_bytes()),'symbol')) == 1

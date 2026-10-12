@@ -7,12 +7,12 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from altium import export_schlib, export_linked_schlib
+from lcsc3d.eda.altium import export_schlib, export_linked_schlib
 from altium_inspect import schematic, source_symbol_text_sizes, symbol_text_sizes
-import backend
-from library_merge import LibraryIndex
-from library_preview import build_library_preview, styled_symbol
-from symbol_style import AD_STYLE, normalize_symbol_style
+from lcsc3d.services import backend
+from lcsc3d.eda.library_merge import LibraryIndex
+from lcsc3d.ui.library_preview import build_library_preview, styled_symbol
+from lcsc3d.eda.symbol_style import AD_STYLE, normalize_symbol_style
 from test_export_modes import ExportFixture
 from test_official_altium import cases
 from test_library_preview import fixture
