@@ -109,6 +109,12 @@ class OfflineStore:
         self.removed_ids = set()
         self.cart_adds = []
         self.cart_code = 200
+        self.cart_rows = []
+        self.cart_updates = []
+        self.checkout_requests = []
+        self.order_rows = [{'uuid': 'fixture-order-1', 'orderCode': 'TEST-20261013', 'orderTime': '2026-10-13 10:00:00',
+            'orderTotalMoney': '12.50', 'currencyType': 'RMB', 'orderStatus': 'new', 'onlineDefrayStatus': 'wait',
+            'orderDetailVOList': [{'productCode': 'C2040', 'productModel': 'RP2040'}]}]
         from gmalg import SM2
         self.login_secret, self.login_public = SM2().generate_keypair()
         self.transport_secret, self.transport_public = SM2().generate_keypair()
@@ -133,8 +139,43 @@ class OfflineStore:
                 headers = {}
                 mime = 'application/json'
                 if parsed.path == '/cart/quick':
-                    owner.cart_adds.append(parse_qs(body.decode()))
+                    fields = parse_qs(body.decode())
+                    owner.cart_adds.append(fields)
+                    if owner.cart_code == 200:
+                        part, amount = fields['productCode'][0], int(fields['productNumber'][0])
+                        row = next((row for row in owner.cart_rows if row['productCode'] == part), None)
+                        if row is None:
+                            row = dict(productCode=part, productModel='Fixture ' + part, shopCarMapKey='0~' + part + '~RMB~CN',
+                                       productNumber=0, convesionRatio=1, productConsultPrice='0.50',
+                                       checked=True, encapsulationModel='SOT-23', productUnit='个', minBuyNumber=1)
+                            owner.cart_rows.append(row)
+                        row['productNumber'] += amount
+                        row['lineMoney'] = str(row['productNumber'] * .5)
                     value = {'code': owner.cart_code, 'result': {'cart_contains_count': len(owner.cart_adds)}}
+                elif parsed.path == '/cart/display':
+                    value = {'code': owner.cart_code, 'result': {'shoppingCartVO': {'rmbCnShoppingCart': {'currentlyProductList': owner.cart_rows}}}}
+                elif parsed.path == '/cart/update':
+                    fields = parse_qs(body.decode()); owner.cart_updates.append(fields)
+                    if owner.cart_code == 200:
+                        row = next(row for row in owner.cart_rows if row['shopCarMapKey'] == fields['cartKey'][0])
+                        row['productNumber'] = float(fields['productNumber'][0])
+                        row['lineMoney'] = str(row['productNumber'] * .5)
+                    value = {'code': owner.cart_code, 'result': {}}
+                elif parsed.path == '/cart/delete':
+                    fields = json.loads(body)
+                    owner.cart_rows = [row for row in owner.cart_rows if row['shopCarMapKey'] not in fields['cartKeyList']]
+                    value = {'code': owner.cart_code, 'result': {}}
+                elif parsed.path == '/async/validate/perfect':
+                    owner.checkout_requests.append(parse_qs(body.decode()))
+                    value = {'code': owner.cart_code, 'result': {}}
+                elif parsed.path == '/member/order/list':
+                    query = parse_qs(parsed.query)
+                    current, size = int(query.get('currentPage', ['1'])[0]), int(query.get('pageSize', ['20'])[0])
+                    keyword = query.get('searchKeywords', [''])[0]
+                    rows = [row for row in owner.order_rows if keyword in row['orderCode']]
+                    value = {'code': 200, 'result': {'page': {'currPage': current, 'pageRow': size, 'totalRow': len(rows)},
+                        'customerOrderList': rows[(current-1)*size:current*size],
+                        'orderStatusMap': {'new': '待处理'}, 'onlineDefrayStatusMap': {'wait': '待付款'}}}
                 elif parsed.path == '/api/cas/config/get-public-key':
                     value = {'code': 200, 'data': owner.login_public.hex()}
                 elif parsed.path == '/api/cas/secret/update':

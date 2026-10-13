@@ -30,6 +30,7 @@ from lcsc3d.eda.kicad import ELECTRICAL_TYPES, ELECTRICAL_POLICIES
 from lcsc3d.ui.update_ui import UpdateDialog, StartupUpdateCheck
 from lcsc3d.services.updater import acknowledge_update, cleanup_updates, launch_update
 from lcsc3d.ui.favorites import FavoritesDialog, normalize_items
+from lcsc3d.ui.commerce import QuantityInput
 from lcsc3d.core.app_settings import Preferences, set_preferences, write_settings, read_settings, initial_log_level
 from lcsc3d.ui.app_theme import theme_manager, colors, stylesheet
 from lcsc3d.core.i18n import set_language, render
@@ -278,6 +279,7 @@ class MainWindow(FramelessMainWindow):
         self.batch_running = False
         self.batch_ids = []
         self.ids = []
+        self.purchase_quantities = {}
         self.results = {}
         self.component_info = {}
         self.info_rows = {}
@@ -623,9 +625,10 @@ class MainWindow(FramelessMainWindow):
         self.summary = label(ui_text('0 个器件'), 'badge')
         list_head.addWidget(self.summary)
         list_layout.addLayout(list_head)
-        self.table = QTableWidget(0, 4)
+        self.table = QTableWidget(0, 5)
         self.table.setObjectName('downloadTable')
-        self.table.setHorizontalHeaderLabels([ui_text('下载'), ui_text('器件编号'), ui_text('型号 / 模型'), ui_text('结果')])
+        self.table.setHorizontalHeaderLabels([ui_text('下载'), ui_text('器件编号'), ui_text('型号 / 模型'), ui_text('结果'), ui_text('数量')])
+        self.table.setColumnWidth(4, 120)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -1078,6 +1081,7 @@ class MainWindow(FramelessMainWindow):
                 model_item.setToolTip(self.component_tooltip(info))
                 self.table.setItem(row, MODEL_COLUMN, model_item)
                 self.table.setItem(row, RESULT_COLUMN, QTableWidgetItem(ui_text('等待下载')))
+                self.add_purchase_quantity(row, part)
         finally:
             self.table.blockSignals(False)
         self.summary.setText(ui_message('{0} 个器件', len(ids)))
@@ -1108,12 +1112,27 @@ class MainWindow(FramelessMainWindow):
         if row < 0:
             return
         self.table.setCurrentCell(row, PART_COLUMN)
+        for index in range(self.table.rowCount()):
+            self.table.cellWidget(index, 4).interpretText()
         parts = [self.ids[r] for r in self.checked_rows()] if self.table.item(row, DOWNLOAD_COLUMN).checkState() == Qt.Checked else [self.ids[row]]
-        products = [{'part': part, 'title': self.component_info.get(part, {}).get('title', '')} for part in parts]
+        products = [{'part': part, 'title': self.component_info.get(part, {}).get('title', ''),
+                     'purchase_quantity': self.purchase_quantities.get(part, 1)} for part in parts]
         store = self.ensure_store()
         store.set_import_enabled(not self.batch_running)
         menu = store.make_product_menu(products, self.table)
         menu.exec(self.table.viewport().mapToGlobal(position))
+
+    def add_purchase_quantity(self, row, part):
+        spin = QuantityInput(self.purchase_quantities.get(part, 1))
+        spin.setToolTip(str(ui_text('本次加入购物车的数量；右键即可按此数量加购')))
+        def changed(amount):
+            self.purchase_quantities[part] = amount
+            if self.favorites_dialog is not None:
+                self.favorites_dialog.set_purchase_quantity(part, amount)
+        spin.valueChanged.connect(changed)
+        self.table.setCellWidget(row, 4, spin)
+        spin.ensurePolished()
+        self.table.setRowHeight(row, max(self.table.rowHeight(row), spin.sizeHint().height()))
 
     def refresh_store_account(self):
         if self.preferences.language == 'en_US':
@@ -1210,6 +1229,7 @@ class MainWindow(FramelessMainWindow):
                     self.component_info[part] = {'title': titles[part]}
                 self.table.setItem(row, MODEL_COLUMN, QTableWidgetItem(titles.get(part) or ui_text('查询中…')))
                 self.table.setItem(row, RESULT_COLUMN, QTableWidgetItem(ui_text('等待下载')))
+                self.add_purchase_quantity(row, part)
         finally:
             self.table.blockSignals(False)
         self.ids = merged

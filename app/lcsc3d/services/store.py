@@ -407,8 +407,11 @@ def request_operation(url):
                 }.get(parsed.path, '登录服务请求')
     if parsed.hostname == 'mp.weixin.qq.com':
         return '加载二维码图片'
-    if parsed.hostname == 'cart-api.szlcsc.com' and parsed.path == '/cart/quick':
-        return '加入购物车'
+    if parsed.hostname == 'cart-api.szlcsc.com':
+        return {'/cart/quick': '加入购物车', '/cart/display': '读取购物车', '/cart/update': '修改购物车数量',
+                '/cart/delete': '移除购物车商品', '/async/validate/perfect': '提交购物车结算'}.get(parsed.path, '购物车请求')
+    if parsed.hostname == 'order-api.szlcsc.com' and parsed.path == '/member/order/list':
+        return '读取订单列表'
     return '商城请求'
 
 

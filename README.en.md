@@ -28,8 +28,8 @@ LCSC3D is a portable Windows tool for hardware development, PCB design and mecha
 ## What's new in 2.4.1
 
 - Fix missing datasheets caused by the mainland store's new file metadata and manufacturer links.
-- Add mainland Cart and My Orders tabs, batch cart quantities and table context menus.
-- Reuse one on-demand embedded view for official checkout and orders. International accounts continue to use LCSC.com. This is a local delivery, not a published Release.
+- Add native mainland Cart and My Orders tables. Edit quantities inline and add selected rows directly through the context menu.
+- Submit selected cart items before opening checkout in the external browser. International accounts continue to use LCSC.com. This is a local delivery, not a published Release.
 
 ## What's new in 2.4.0
 

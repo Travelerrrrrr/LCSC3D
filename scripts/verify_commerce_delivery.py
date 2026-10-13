@@ -30,9 +30,10 @@ def verify(exe, root):
                                  timeout=90, creationflags=subprocess.CREATE_NO_WINDOW)
     report = json.loads((destination / 'commerce-verification.json').read_text('utf-8'))
     assert process.returncode == 0 and report['success'] and report['frozen'], report
-    for flag in ('datasheet_new_schema', 'lazy_four_tabs', 'context_download', 'quantity_and_single_write',
-                 'full_width_memory_browser', 'checkout_new_window_stays_embedded', 'orders_reuses_browser',
-                 'logout_clears_browser', 'logs_package_and_continue_after_clear', 'single_native_window'):
+    for flag in ('context_download_and_quantity_sync', 'inline_add_without_navigation', 'no_storefront_webview',
+                 'native_cart_quantity_saved', 'submit_then_external_browser_once', 'native_order_list',
+                 'quantity_preserved_between_tabs', 'logout_clears_account_tables',
+                 'logs_package_and_continue_after_clear', 'single_native_window'):
         assert report[flag], flag
     assert {p.name for p in application.iterdir()} == {'LCSC3D.exe'}
     assert not any(cwd.iterdir())

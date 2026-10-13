@@ -24,9 +24,10 @@ from lcsc3d.ui.store_images import ImageGallery, ProductImage, load_search_thumb
 from lcsc3d.services.store_diagnostics import record_request_error
 from lcsc3d.core.app_logging import (log_event, new_context, log_context, contextual, record_error, traced, safe_part)
 from lcsc3d.ui.commerce_actions import CommerceActions
+from lcsc3d.ui.commerce import QuantityInput
 
 
-THUMBNAIL_COLUMN = 7
+THUMBNAIL_COLUMN = 8
 
 
 class ProductTable(QTableWidget):
@@ -650,20 +651,21 @@ class FavoritesDialog(CommerceActions, QDialog):
         self.search_selected = {}
         self.thumbnail_cache = OrderedDict()
         self.price_choices = {}
+        self.purchase_quantities = getattr(parent, 'purchase_quantities', {})
         self.favorite_checked = set()
         self.galleries = []
         self.items, self.search_items = {}, []
         self.current_product = None
         self.pending_gallery_part = ''
         self.pages_read = 0
-        self.setWindowTitle(ui_text('立创商城 · 搜索与收藏'))
+        self.setWindowTitle(ui_text('立创商城 · 选型与采购'))
         self.resize(1420, 860)
         self.setMinimumSize(1100, 680)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 16)
         layout.setSpacing(12)
         account_row = QHBoxLayout()
-        account_row.addWidget(title_block(ui_text('立创商城'), ui_text('发现元件 · 查看资料 · 同步收藏'), large=True), 1)
+        account_row.addWidget(title_block(ui_text('立创商城'), ui_text('选型 · 资料 · 采购'), large=True), 1)
         self.account_label = plain_label(ui_text('未登录'), 'muted')
         self.account_label.setObjectName('badge')
         if self._page_host is None:
@@ -861,13 +863,15 @@ class FavoritesDialog(CommerceActions, QDialog):
                     title = table.horizontalHeaderItem(column).text()
                     table.setColumnWidth(column, max(round(width * scale), table.fontMetrics().horizontalAdvance(title) + 28))
             table.column_timer.start(0)
+            table.setColumnWidth(table.quantity_column, max(130, round(125 * scale)))
 
     def make_table(self, commercial=False):
         labels = [ui_text('选择'), ui_text('C 编号'), ui_text('型号'), ui_text('厂商'), ui_text('封装')]
         if commercial:
             labels += [ui_text('单价 / 梯度'), ui_text('库存')]
-        labels.append(ui_text('图片'))
+        labels += [ui_text('数量'), ui_text('图片')]
         table = ProductTable(0, len(labels))
+        table.quantity_column = table.columnCount() - 2
         table.setHorizontalHeaderLabels(labels)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -887,8 +891,11 @@ class FavoritesDialog(CommerceActions, QDialog):
         table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         table.horizontalHeader().setSectionResizeMode(table.thumbnail_column, QHeaderView.Fixed)
+        table.horizontalHeader().setSectionResizeMode(table.quantity_column, QHeaderView.Fixed)
+        table.setColumnWidth(table.quantity_column, 130)
         # Stable data/price columns; visually place photos after checkboxes.
         table.horizontalHeader().moveSection(table.thumbnail_column, 1)
+        table.horizontalHeader().moveSection(table.horizontalHeader().visualIndex(table.quantity_column), 4)
         table.cellDoubleClicked.connect(lambda row, column: self.open_gallery() if column == table.thumbnail_column else None)
         if commercial:
             table.setColumnWidth(5, 210)
@@ -1034,8 +1041,28 @@ class FavoritesDialog(CommerceActions, QDialog):
         table.item(row, 1).setData(Qt.UserRole, product)
         if table is self.search_table:
             self.append_commerce(row, product)
+        minimum = max(1, int(product.get('min_quantity') or 1))
+        spin = QuantityInput(self.purchase_quantities.get(product['part'], minimum), minimum)
+        spin.setToolTip(str(ui_text('本次加入购物车的数量；右键即可按此数量加购')))
+        self.purchase_quantities[product['part']] = spin.value()
+        spin.valueChanged.connect(lambda amount, part=product['part']: self.set_purchase_quantity(part, amount))
+        table.setCellWidget(row, table.quantity_column, spin)
         self.set_thumbnail(table, row, product)
         table.blockSignals(was_blocked)
+
+    def set_purchase_quantity(self, part, amount):
+        self.purchase_quantities[part] = amount
+        for table in (self.search_table, self.favorite_table):
+            for row in range(table.rowCount()):
+                if table.item(row, 1).text() == part:
+                    spin = table.cellWidget(row, table.quantity_column)
+                    if spin and spin.value() != amount:
+                        blocked = spin.blockSignals(True); spin.setValue(amount); spin.blockSignals(blocked)
+        parent = self.app_window
+        if parent is not None and hasattr(parent, 'ids') and part in parent.ids:
+            spin = parent.table.cellWidget(parent.ids.index(part), 4)
+            if spin is not None:
+                blocked = spin.blockSignals(True); spin.setValue(amount); spin.blockSignals(blocked)
 
     def set_thumbnail(self, table, row, product):
         urls = product.get('thumbnails') or product.get('images') or [product.get('image', '')]
@@ -1222,8 +1249,6 @@ class FavoritesDialog(CommerceActions, QDialog):
     def clear_session(self):
         self.jobs.cancel('cart-add')
         self.cart_busy = False
-        if self.cart_dialog is not None and isValid(self.cart_dialog):
-            self.cart_dialog.reject()
         self.reset_commerce()
         self.stop_read()
         self.jobs.cancel('favorite-thumbnails')
@@ -1356,6 +1381,8 @@ class FavoritesDialog(CommerceActions, QDialog):
     def set_import_enabled(self, enabled):
         self.import_enabled = enabled
         self.update_count()
+        self.cart_panel.import_enabled = enabled
+        self.cart_panel.update_summary()
 
     def toggle_selection(self):
         rows = [row for row in range(self.table.rowCount()) if not self.table.isRowHidden(row)]
@@ -1447,6 +1474,9 @@ class FavoritesDialog(CommerceActions, QDialog):
         if selected['part'] in self.search_selected:
             self.search_selected[selected['part']] = selected
         row = self.table.currentRow()
+        minimum = product.get('min_quantity')
+        if type(minimum) is int and 1 <= minimum <= 999999999:
+            self.table.cellWidget(row, self.table.quantity_column).setMinimum(minimum)
         self.table.blockSignals(True)
         self.table.item(row, 1).setData(Qt.UserRole, selected)
         for column, key in ((2, 'title'), (3, 'manufacturer'), (4, 'package')):
