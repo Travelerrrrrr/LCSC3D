@@ -35,6 +35,20 @@ class Api:
 
 @unittest.skipUnless(sys.platform == 'win32', 'AD CFB export uses Windows structured storage')
 class LibraryTests(unittest.TestCase):
+    def test_component_designator_is_visible_in_both_styles_and_multi_part_symbols(self):
+        for part in ('C2040', 'C23922'):
+            for style in ('jlc', 'ad'):
+                with self.subTest(part=part, style=style):
+                    _, records, _ = schematic(export_schlib(fixture(part), part, symbol_style=style))
+                    designators = [record for record in records if record.get('RECORD') == '34']
+                    self.assertEqual(len(designators), 1)
+                    self.assertEqual(designators[0]['NAME'], 'Designator')
+                    self.assertEqual(designators[0]['ISHIDDEN'], 'F')
+                    self.assertEqual(designators[0]['OWNERPARTID'], '-1')
+                    self.assertTrue(designators[0]['TEXT'])
+                    comments = [record for record in records if record.get('NAME') == 'Comment']
+                    self.assertEqual(comments[0]['ISHIDDEN'], 'T')
+
     def test_type_c_keeps_all_pin_names_numbers_and_native_footprint_reference(self):
         header, records, pins = schematic(export_schlib(fixture(), 'C2765186'))
         self.assertEqual(header['COMPCOUNT'], '1')

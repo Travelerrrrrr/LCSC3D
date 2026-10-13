@@ -5,7 +5,8 @@ from PySide6.QtWidgets import QMenu
 
 from lcsc3d.core.app_logging import log_event, record_error, safe_part
 from lcsc3d.core.i18n import text as tr, message as msg, render
-from lcsc3d.services.store import StoreError, SessionExpired, normalize_items, check_cancelled, quantity
+from lcsc3d.services.store import StoreError, SessionExpired, normalize_items, check_cancelled, quantity, original_image
+from lcsc3d.services.order_details import read_order_details
 from lcsc3d.services.commerce import (add_cart_batch, read_cart, update_quantity, remove_items,
                                       read_orders, CART_URL, ORDERS_URL, REJECTION_REASONS)
 from lcsc3d.ui.commerce import CartPanel, OrdersPanel
@@ -28,8 +29,13 @@ class CommerceActions:
         self.cart_panel.open_cart_requested.connect(lambda: self.open_commerce_link(CART_URL, 'cart'))
         self.cart_panel.remove_requested.connect(self.remove_cart_selection)
         self.cart_panel.download_requested.connect(lambda rows: self.import_requested.emit(normalize_items(rows)) if self.import_enabled else None)
+        self.cart_panel.thumbnails_requested.connect(lambda: self.start_thumbnails(self.cart_panel.table))
+        self.cart_panel.preview_requested.connect(self.preview_cart_image)
         self.orders_panel.read_requested.connect(self.load_orders)
         self.orders_panel.open_requested.connect(lambda url: self.open_commerce_link(url, 'order'))
+        self.orders_panel.detail_requested.connect(self.load_order_detail)
+        self.orders_panel.back_requested.connect(self.close_order_detail)
+        self.orders_panel.download_requested.connect(self.import_order_products)
 
     def commerce_tab_changed(self):
         shopping = self.tabs.currentIndex() >= 2
@@ -58,7 +64,7 @@ class CommerceActions:
 
     def reset_commerce(self):
         self.quantity_timer.stop(); self.quantity_updates.clear()
-        for channel in ('cart-read', 'cart-write', 'orders-read'):
+        for channel in ('cart-read', 'cart-write', 'cart-thumbnails', 'orders-read', 'order-detail'):
             self.jobs.cancel(channel)
         self.cart_loading = self.cart_mutating = self.orders_loading = False
         self.cart_panel.clear(); self.orders_panel.clear()
@@ -75,7 +81,14 @@ class CommerceActions:
 
     def cart_loaded(self, rows):
         self.cart_loading = self.cart_mutating = False
+        self.jobs.cancel('cart-thumbnails')
         self.cart_panel.show_rows(rows)
+        self.start_thumbnails(self.cart_panel.table)
+
+    def preview_cart_image(self, row):
+        if row.get('image'):
+            self.show_product_gallery(dict(part=row['part'], title=row['title'],
+                images=[original_image(row['image'])], thumbnails=[row['image']]))
 
     def cart_read_failed(self, error):
         self.cart_loading = self.cart_mutating = False
@@ -146,6 +159,7 @@ class CommerceActions:
     def load_orders(self, page=1):
         if self.orders_loading or page < 1 or not self.require_commerce_account():
             return
+        self.close_order_detail()
         self.orders_loading = True; self.orders_panel.set_busy(True)
         self.orders_panel.hint.setText(tr('正在读取订单…'))
         client = self.client
@@ -163,6 +177,38 @@ class CommerceActions:
         if isinstance(error, SessionExpired):
             self.clear_session()
             self.status.setText(str(error))
+
+    def load_order_detail(self, order):
+        if not order or not self.require_commerce_account():
+            return
+        self.orders_panel.begin_detail(order)
+        client, selected = self.client, order['identity']
+        self.jobs.start('order-detail', lambda stop, progress: read_order_details(client, selected, stop),
+                        lambda result: self.order_detail_loaded(selected, result), self.order_detail_failed)
+
+    def order_detail_loaded(self, selected, result):
+        panel = self.orders_panel.detail
+        if panel.order and panel.order['identity'] == selected:
+            panel.show_result(result)
+
+    def order_detail_failed(self, error):
+        if isinstance(error, SessionExpired):
+            self.clear_session()
+            self.status.setText(str(error))
+        else:
+            self.orders_panel.detail.fail(error)
+
+    def close_order_detail(self):
+        self.jobs.cancel('order-detail')
+        self.orders_panel.show_list()
+
+    def import_order_products(self, rows):
+        if not self.import_enabled:
+            return
+        products = normalize_items([row for row in rows if row.get('downloadable')])
+        if products:
+            log_event('INFO', 'orders.download_import', count=len(products))
+            self.import_requested.emit(products)
 
     def context_products(self, table, row):
         product = table.item(row, 1).data(Qt.UserRole)

@@ -35,6 +35,7 @@ def verify(exe, root):
                  'quantity_increments_and_price_tiers',
                  'batch_rejection_continues', 'per_item_cart_results',
                  'favorite_rules_checked_before_write',
+                 'cart_product_photos', 'native_order_items_in_place', 'order_parts_to_download',
                  'quantity_preserved_between_tabs', 'logout_clears_account_tables',
                  'logs_package_and_continue_after_clear', 'single_native_window'):
         assert report[flag], flag

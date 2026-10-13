@@ -438,6 +438,8 @@ def request_operation(url):
                 '/cart/delete': '移除购物车商品'}.get(parsed.path, '购物车请求')
     if parsed.hostname == 'order-api.szlcsc.com' and parsed.path == '/member/order/list':
         return '读取订单列表'
+    if parsed.hostname == 'order-api.szlcsc.com' and parsed.path == '/member/order/details':
+        return '读取订单商品'
     return '商城请求'
 
 

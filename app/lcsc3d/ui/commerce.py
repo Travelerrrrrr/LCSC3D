@@ -1,8 +1,8 @@
 """Native shopping tables. No web view or intermediate quantity page."""
 from decimal import Decimal
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QSpinBox, QHeaderView, QAbstractItemView
+from PySide6.QtCore import Qt, Signal, QSize, QTimer
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QSpinBox, QHeaderView, QAbstractItemView, QStackedWidget
 
 from lcsc3d.core.i18n import text as tr, message as msg
 from lcsc3d.services.commerce import MAX_CART_QUANTITY
@@ -116,6 +116,8 @@ class CartPanel(QWidget):
     open_cart_requested = Signal()
     remove_requested = Signal()
     download_requested = Signal(object)
+    thumbnails_requested = Signal()
+    preview_requested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -136,10 +138,19 @@ class CartPanel(QWidget):
         layout.addLayout(toolbar)
         card, body = surface()
         body.setContentsMargins(0, 0, 0, 0)
-        self.table = native_table(['选择', 'C 编号', '型号', '封装', '单价', '数量', '小计', '状态', '递增量'], 2)
+        self.table = native_table(['选择', 'C 编号', '型号', '封装', '单价', '数量', '小计', '状态', '递增量', '图片'], 2)
+        self.table.thumbnail_column = 9
+        self.table.thumbnail_channel = 'cart-thumbnails'
+        self.table.thumbnail_visible_only = True
+        self.table.setIconSize(QSize(48, 48))
+        self.table.setColumnWidth(9, 76)
+        self.table.verticalScrollBar().valueChanged.connect(lambda _: self.thumbnails_requested.emit())
+        self.table.cellDoubleClicked.connect(lambda row, col: self.preview_requested.emit(self.rows[row])
+            if col == self.table.thumbnail_column and 0 <= row < len(self.rows) and self.rows[row]['image'] else None)
         for column, width in ((0, 50), (1, 110), (3, 120), (4, 115), (5, 150), (6, 120), (7, 90), (8, 85)):
             self.table.setColumnWidth(column, width)
         self.table.horizontalHeader().moveSection(8, 5)
+        self.table.horizontalHeader().moveSection(self.table.horizontalHeader().visualIndex(9), 1)
         self.table.itemChanged.connect(lambda item: self.update_summary() if item.column() == 0 else None)
         body.addWidget(self.table)
         layout.addWidget(card, 1)
@@ -179,6 +190,10 @@ class CartPanel(QWidget):
             checked = row['key'] in selected if selected is not None else row['checked']
             item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
             self.table.setItem(index, 0, item)
+            photo = table_cell(self.table, index, self.table.thumbnail_column, '…' if row['image'] else '—')
+            photo.setTextAlignment(Qt.AlignCenter)
+            photo.setData(Qt.UserRole, row['image'])
+            photo.setToolTip(str(tr('正在加载图片…') if row['image'] else tr('暂无商品图片')))
             for column, key in ((1, 'part'), (2, 'title'), (3, 'package'), (7, 'status')):
                 table_cell(self.table, index, column, row[key])
             for column, key in ((4, 'price'), (6, 'total')):
@@ -190,7 +205,7 @@ class CartPanel(QWidget):
             table_cell(self.table, index, 8, step, True)
             spin = QuantityInput(row['quantity'], row['minimum'], step=step, preserve_initial=True)
             spin.ensurePolished()
-            self.table.setRowHeight(index, max(54, spin.sizeHint().height() + 12))
+            self.table.setRowHeight(index, max(68, spin.sizeHint().height() + 12))
             spin.valueChanged.connect(lambda amount, data=row: self.quantity_changed.emit(data, amount))
             self.table.setCellWidget(index, 5, spin)
         self.table.blockSignals(False)
@@ -227,10 +242,21 @@ class CartPanel(QWidget):
         self.hint.setText(tr('登录后读取购物车，可直接修改数量。'))
         self.set_busy(False)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, self.thumbnails_requested.emit)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self.thumbnails_requested.emit)
+
 
 class OrdersPanel(QWidget):
     read_requested = Signal(int)
     open_requested = Signal(str)
+    detail_requested = Signal(object)
+    back_requested = Signal()
+    download_requested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -251,16 +277,29 @@ class OrdersPanel(QWidget):
         self.refresh.clicked.connect(lambda: self.read_requested.emit(1))
         tools.addWidget(self.refresh)
         layout.addLayout(tools)
-        self.hint = QLabel(tr('登录后读取订单；双击订单可在浏览器查看详情。'))
+        self.content = QStackedWidget()
+        layout.addWidget(self.content, 1)
+        self.list_page = QWidget()
+        list_layout = QVBoxLayout(self.list_page); list_layout.setContentsMargins(0, 0, 0, 0)
+        self.content.addWidget(self.list_page)
+        from lcsc3d.ui.order_details import OrderDetailPanel
+        self.detail = OrderDetailPanel()
+        self.content.addWidget(self.detail)
+        self.detail.back_requested.connect(self.back_requested)
+        self.detail.open_requested.connect(self.open_requested)
+        self.detail.download_requested.connect(self.download_requested)
+        self.detail.refresh_requested.connect(lambda: self.detail_requested.emit(self.detail.order) if self.detail.order else None)
+        self.hint = QLabel(tr('登录后读取订单；点击订单可在此查看商品。'))
         self.hint.setObjectName('muted'); self.hint.setWordWrap(True)
-        layout.addWidget(self.hint)
+        list_layout.addWidget(self.hint)
         card, body = surface(); body.setContentsMargins(0, 0, 0, 0)
         self.table = native_table(['订单号', '下单时间', '商品', '金额', '订单状态', '付款状态'], 2)
         for col, width in ((0, 190), (1, 175), (3, 120), (4, 115), (5, 110)):
             self.table.setColumnWidth(col, width)
-        self.table.cellDoubleClicked.connect(self.open_row)
+        self.table.cellClicked.connect(self.open_row)
+        self.table.cellActivated.connect(self.open_row)
         body.addWidget(self.table)
-        layout.addWidget(card, 1)
+        list_layout.addWidget(card, 1)
         footer = QHBoxLayout()
         self.previous = QPushButton(tr('上一页'))
         self.previous.clicked.connect(lambda: self.read_requested.emit(self.page - 1))
@@ -270,17 +309,21 @@ class OrdersPanel(QWidget):
         self.next = QPushButton(tr('下一页'))
         self.next.clicked.connect(lambda: self.read_requested.emit(self.page + 1))
         footer.addWidget(self.next)
-        self.details = QPushButton(tr('查看订单详情'))
-        self.details.clicked.connect(lambda: self.open_row(self.table.currentRow()))
-        footer.addWidget(self.details)
-        self.table.currentCellChanged.connect(lambda *args: self.details.setEnabled(self.table.currentRow() >= 0))
-        layout.addLayout(footer)
+        list_layout.addLayout(footer)
         self.set_busy(False)
 
     def open_row(self, row, column=0):
         item = self.table.item(row, 0) if row >= 0 else None
         if item is not None:
-            self.open_requested.emit(item.data(Qt.UserRole))
+            self.detail_requested.emit(item.data(Qt.UserRole))
+
+    def begin_detail(self, order):
+        self.detail.begin(order)
+        self.content.setCurrentWidget(self.detail)
+
+    def show_list(self):
+        self.content.setCurrentWidget(self.list_page)
+        self.detail.clear()
 
     def show_result(self, result):
         self.table.setRowCount(len(result['items']))
@@ -288,11 +331,11 @@ class OrdersPanel(QWidget):
             for col, key in enumerate(('code', 'date', 'summary', 'total', 'status', 'payment')):
                 value = row['currency'] + row[key] if key == 'total' and row[key] else row[key] or '—'
                 table_cell(self.table, index, col, value, key == 'total')
-            self.table.item(index, 0).setData(Qt.UserRole, row['url'])
+            self.table.item(index, 0).setData(Qt.UserRole, row)
         self.page, self.pages = result['page'], result['pages']
         self.loaded = True
         self.page_label.setText(msg('第 {0} / {1} 页 · 共 {2} 个订单', self.page, max(1, self.pages), result['total']))
-        self.hint.setText(tr('双击订单或点击「查看订单详情」在浏览器继续。') if result['items'] else tr('没有符合条件的订单。'))
+        self.hint.setText(tr('点击订单查看购买的商品与金额。') if result['items'] else tr('没有符合条件的订单。'))
         self.set_busy(False)
 
     def set_busy(self, value):
@@ -300,11 +343,11 @@ class OrdersPanel(QWidget):
             widget.setEnabled(not value)
         self.previous.setEnabled(not value and self.page > 1)
         self.next.setEnabled(not value and self.page < self.pages)
-        self.details.setEnabled(not value and self.table.currentRow() >= 0)
 
     def clear(self):
         self.loaded = False; self.page = self.pages = 0
         self.table.setRowCount(0)
         self.page_label.setText(tr('尚未查询'))
-        self.hint.setText(tr('登录后读取订单；双击订单可在浏览器查看详情。'))
+        self.hint.setText(tr('登录后读取订单；点击订单可在此查看商品。'))
+        self.show_list()
         self.set_busy(False)

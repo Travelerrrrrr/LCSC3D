@@ -91,6 +91,17 @@ def fixture_detail(record):
     return '<html><script id="__NEXT_DATA__" type="application/json">' + json.dumps(data, ensure_ascii=False) + '</script></html>'
 
 
+def fixture_order_detail(order):
+    return {'code': 200, 'result': {'orderVO': {**order, 'productTotalMoney': '8.50', 'freightMoney': '4.00',
+        'receiveAddress': 'PRIVATE_ORDER_ADDRESS', 'linkPhone': 'PRIVATE_ORDER_PHONE'},
+        'szNormalProductList': [
+            {'productCode': 'C2040', 'productModel': 'RP2040', 'productName': '微控制器', 'encapStandard': 'LQFN-56',
+             'purchaseNumber': 5, 'stockUnitName': '个', 'productPrice': '1.50', 'orderDetailTotalMoney': '7.50'},
+            {'productCode': 'P-TOOL', 'productName': '测试工具', 'purchaseNumber': 1, 'stockUnit': '件',
+             'productPrice': '1.00', 'orderDetailTotalMoney': '1.00', 'isMro': True}],
+        'jsNormalProductList': [], 'hkNormalProductList': [], 'zhNormalProductList': []}}
+
+
 class OfflineStore:
     def __init__(self):
         self.requests = []
@@ -117,6 +128,7 @@ class OfflineStore:
         self.order_rows = [{'uuid': 'fixture-order-1', 'orderCode': 'TEST-20261013', 'orderTime': '2026-10-13 10:00:00',
             'orderTotalMoney': '12.50', 'currencyType': 'RMB', 'orderStatus': 'new', 'onlineDefrayStatus': 'wait',
             'orderDetailVOList': [{'productCode': 'C2040', 'productModel': 'RP2040'}]}]
+        self.order_details = {}
         from gmalg import SM2
         self.login_secret, self.login_public = SM2().generate_keypair()
         self.transport_secret, self.transport_public = SM2().generate_keypair()
@@ -150,6 +162,7 @@ class OfflineStore:
                         if row is None:
                             row = dict(productCode=part, productModel='Fixture ' + part, shopCarMapKey='0~' + part + '~RMB~CN',
                                        productNumber=0, convesionRatio=owner.cart_steps.get(part, 1), productConsultPrice='0.50',
+                                       breviaryImageUrl=f'https://alimg.szlcsc.com/upload/public/product/breviary/{part}/0.png',
                                        checked=True, encapsulationModel='SOT-23', productUnit='个', minBuyNumber=1)
                             owner.cart_rows.append(row)
                         row['productNumber'] += amount / row['convesionRatio']
@@ -179,6 +192,11 @@ class OfflineStore:
                     value = {'code': 200, 'result': {'page': {'currPage': current, 'pageRow': size, 'totalRow': len(rows)},
                         'customerOrderList': rows[(current-1)*size:current*size],
                         'orderStatusMap': {'new': '待处理'}, 'onlineDefrayStatusMap': {'wait': '待付款'}}}
+                elif parsed.path == '/member/order/details':
+                    query = parse_qs(parsed.query)
+                    key = query.get('uuid', [''])[0]
+                    order = next((row for row in owner.order_rows if row['uuid'] == key), None)
+                    value = owner.order_details.get(key) or (fixture_order_detail(order) if order else {'code': 404})
                 elif parsed.path == '/api/cas/config/get-public-key':
                     value = {'code': 200, 'data': owner.login_public.hex()}
                 elif parsed.path == '/api/cas/secret/update':

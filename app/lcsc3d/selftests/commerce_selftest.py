@@ -105,9 +105,14 @@ def start(window, folder):
                 state['mode'] = 'cart'
             elif mode == 'cart' and dialog.cart_panel.loaded:
                 panel = dialog.cart_panel
+                if any(panel.table.item(row, panel.table.thumbnail_column).icon().isNull() for row in range(panel.table.rowCount())):
+                    return
                 assert panel.table.rowCount() == 2
+                report['cart_product_photos'] = True
                 assert panel.table.item(0, 8).text() == '5'
                 assert panel.table.cellWidget(0, 5).singleStep() == 5
+                for toast in list(window.notifications.toasts):
+                    toast.close()
                 window.grab().save(str(root / 'native-cart.png'))
                 panel.table.cellWidget(0, 5).setValue(50)
                 assert not panel.remove.isEnabled()
@@ -131,6 +136,22 @@ def start(window, folder):
                 assert dialog.orders_panel.table.item(0, 0).text() == 'TEST-20261013'
                 report['native_order_list'] = True
                 window.grab().save(str(root / 'native-orders.png'))
+                state['browser_count'] = len(opened)
+                dialog.orders_panel.table.setCurrentCell(0, 0)
+                dialog.orders_panel.table.cellClicked.emit(0, 0)
+                state['mode'] = 'order-items'
+            elif mode == 'order-items' and dialog.orders_panel.detail.loaded:
+                panel = dialog.orders_panel
+                detail = panel.detail
+                assert panel.content.currentWidget() is detail and not detail.isWindow()
+                assert detail.table.rowCount() == 2 and '¥12.50' in detail.summary.text()
+                assert len(opened) == state['browser_count']
+                window.grab().save(str(root / 'native-order-items.png'))
+                detail.select.click(); detail.download.click()
+                assert 'C2040' in window.ids and 'P-TOOL' not in window.ids
+                detail.back.click()
+                assert panel.content.currentWidget() is panel.list_page and panel.table.currentRow() == 0
+                report['native_order_items_in_place'] = report['order_parts_to_download'] = True
                 dialog.tabs.setCurrentIndex(0)
                 assert dialog.search_table.cellWidget(0, dialog.search_table.quantity_column).value() == 5
                 report['quantity_preserved_between_tabs'] = True
@@ -183,6 +204,7 @@ def start(window, folder):
             elif mode == 'finish' and not dialog.has_jobs():
                 events = (get_log_directory() / 'LCSC3D.log').read_text('utf-8')
                 assert all(event in events for event in ('cart.add_confirmed', 'cart.quantity.finished', 'orders.loaded',
+                    'orders.detail_loaded', 'orders.download_import', 'image.thumbnails.finished',
                     'commerce.external_open', 'cart.response_rejected', 'cart.batch_item', 'cart.batch_completed', 'cart.batch_presented'))
                 assert package_logs()['path'].is_file()
                 assert not clear_logs()['failures']

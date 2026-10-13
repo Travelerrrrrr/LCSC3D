@@ -11,9 +11,10 @@ from lcsc3d.ui.localized_widgets import (QDialog, QLabel, QPushButton)
 from lcsc3d.core.errors import Cancelled
 from lcsc3d.ui.ui_components import title_block
 from lcsc3d.services.store import StoreError, check_cancelled
-from lcsc3d.core.app_logging import traced, log_event, record_error, safe_part
+from lcsc3d.core.app_logging import traced, log_event, record_error, safe_part, submit_logged
 
 
+@traced('image.thumbnails', lambda requests, *args: {'count': len(requests)})
 def load_search_thumbnails(requests, client_factory, cancelled, progress):
     """Load distinct public URLs with bounded concurrency; never touch widgets."""
     def fetch(url, rows):
@@ -22,11 +23,12 @@ def load_search_thumbnails(requests, client_factory, cancelled, progress):
         try:
             payload = client_factory().image(url, cancelled)
             check_cancelled(cancelled)
-            image.loadFromData(payload)
+            if not image.loadFromData(payload):
+                log_event('WARNING', 'image.thumbnail_decode_failed')
         except Cancelled:
             raise
-        except Exception:
-            pass  # One unavailable photo must not block the rest of the page.
+        except Exception as error:
+            record_error(error, 'image.thumbnail_failed', level='WARNING')
         if not image.isNull():
             image = image.scaled(128, 128, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             square = QImage(128, 128, QImage.Format_ARGB32_Premultiplied)
@@ -38,7 +40,7 @@ def load_search_thumbnails(requests, client_factory, cancelled, progress):
         return url, rows, image
 
     with ThreadPoolExecutor(max_workers=3, thread_name_prefix='store-thumbnail') as pool:
-        futures = [pool.submit(fetch, url, rows) for url, rows in requests.items()]
+        futures = [submit_logged(pool, fetch, url, rows) for url, rows in requests.items()]
         try:
             for future in as_completed(futures):
                 check_cancelled(cancelled)

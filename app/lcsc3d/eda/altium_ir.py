@@ -10,6 +10,7 @@ from lcsc3d.eda.eda_geometry import polygon_anchor, path_points
 from lcsc3d.core.errors import DownloadError
 from lcsc3d.eda.symbol_style import symbol_style as resolve_style
 from lcsc3d.eda.eda_targets import ALTIUM
+from lcsc3d.core.app_logging import log_event, safe_part
 
 UNIT = D('0.254')  # AD DXP schematic unit is 10 mil.
 LAYERS = {'top_copper': 1, 'bottom_copper': 32, 'top_silk': 33, 'bottom_silk': 34,
@@ -192,10 +193,11 @@ def schematic(component, check, *, merged=False, merge_pcb=False, fonts=None, fo
     parameters.update({key: value for key, value in params.items() if key not in ('name', 'pre', 'package')})
     designator = common(34)
     designator.update(OwnerPartId=-1, Name='Designator', Text=symbol.reference, FontID=1,
-                      **{'Location.X': 0, 'Location.Y': 0, 'IsHidden': 'T'})
+                      **{'Location.X': 0, 'Location.Y': 0, 'IsHidden': 'F'})
     if style:
         designator.update(Color=a._color(style.text), FontID=font())
     records.append(a._parameters(designator))
+    log_event('DEBUG', 'export.schlib_designator', part=safe_part(part), visible=True)
     for key, value in parameters.items():
         record = common(41)
         record.update(OwnerPartId=-1, Name=key, Text=value, FontID=1,

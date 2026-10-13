@@ -1123,11 +1123,18 @@ class FavoritesDialog(CommerceActions, QDialog):
         if self.closing:
             return
         table = self.search_table if table is None else table
-        channel = 'thumbnails' if table is self.search_table else 'favorite-thumbnails'
+        channel = getattr(table, 'thumbnail_channel', 'thumbnails' if table is self.search_table else 'favorite-thumbnails')
         if any(worker.channel == channel and self.jobs.current(worker) for worker in self.jobs.workers):
             return
         requests = {}
-        for row in range(table.rowCount()):
+        first, end = 0, table.rowCount()
+        if getattr(table, 'thumbnail_visible_only', False):
+            if not table.isVisible():
+                return
+            first = max(0, table.rowAt(0) - 2)
+            last = table.rowAt(table.viewport().height() - 1)
+            end = min(end, first + 20, last + 3 if last >= 0 else end)
+        for row in range(first, end):
             cell = table.item(row, table.thumbnail_column)
             url = cell.data(Qt.UserRole)
             if not url or not cell.icon().isNull():
@@ -1418,6 +1425,8 @@ class FavoritesDialog(CommerceActions, QDialog):
         self.update_count()
         self.cart_panel.import_enabled = enabled
         self.cart_panel.update_summary()
+        self.orders_panel.detail.import_enabled = enabled
+        self.orders_panel.detail.update_actions()
 
     def toggle_selection(self):
         rows = [row for row in range(self.table.rowCount()) if not self.table.isRowHidden(row)]
@@ -1682,6 +1691,9 @@ class FavoritesDialog(CommerceActions, QDialog):
                 self.request_detail(product)
             self.detail_hint.setText(ui_text('正在读取完整商品图库，加载完成后打开原图…'))
             return
+        self.show_product_gallery(product)
+
+    def show_product_gallery(self, product):
         existing = next((g for g in self.galleries if g.part == product['part'] and not g._page_finished), None)
         if existing:
             existing.raise_()
