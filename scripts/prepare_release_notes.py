@@ -10,7 +10,7 @@ REPOSITORY = 'Travelerrrrrr/LCSC3D'
 IMAGE_SUFFIXES = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
 
 
-def prepare(source: Path, tag: str) -> str:
+def prepare(source: Path, tag: str, *, allow_images=False) -> str:
     if not re.fullmatch(r'v\d+\.\d+\.\d+', tag):
         raise ValueError('Expected a stable vX.Y.Z tag')
     source = source.resolve()
@@ -34,6 +34,8 @@ def prepare(source: Path, tag: str) -> str:
         return url
 
     content = source.read_text(encoding='utf-8')
+    if not allow_images and re.search(r'!\[|<(?:img|picture)\b', content, re.I):
+        raise ValueError('Release notes must be text-only; --allow-images requires an explicit user request')
     content = re.sub(r'\]\(([^\s)]+)\)', lambda m: '](' + public_url(m[1]) + ')', content)
     return re.sub(r'((?:src|href)=")([^"]+)(")',
                   lambda m: m[1] + public_url(m[2]) + m[3], content)
@@ -44,7 +46,8 @@ if __name__ == '__main__':
     parser.add_argument('--tag', required=True)
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--allow-images', action='store_true', help='Only use when the user explicitly requests release images')
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(prepare(args.source, args.tag), encoding='utf-8', newline='\n')
+    args.output.write_text(prepare(args.source, args.tag, allow_images=args.allow_images), encoding='utf-8', newline='\n')
     print(f'Prepared public release notes: {args.output}')

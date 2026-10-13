@@ -19,28 +19,11 @@
 
 LCSC3D is a portable Windows tool for hardware development, PCB design and mechanical fit checks. Download and run `LCSC3D.exe`; no Python installation is required. Generating libraries does not require the target EDA software to be installed.
 
-**2.4.0 attaches 3D models to footprints by default.** AD PcbLib and KiCad 9/10 footprints embed STEP models, keeping the model with the library file. KiCad 8 uses portable external models. The original STEP size is preserved and the source placement anchor is converted before applying the official pose.
+**3D models are attached to footprints by default.** AD PcbLib and KiCad 9/10 footprints embed STEP models, keeping the model with the library file. KiCad 8 uses portable external models. The original STEP size is preserved and the source placement anchor is converted before applying the official pose.
 
-**Local development version: 2.4.1** · **[Download for Windows](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [User guide (Chinese)](app/README.md) · [Release notes (Chinese)](docs/releases/v2.4.1.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**[Download for Windows](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [User guide (Chinese)](app/README.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
-![LCSC3D 2.4.0 workspace: Type-C 3D preview, enabled footprint model binding, Messages navigation and download progress](docs/images/2.4.0-release/main.png)
-
-## What's new in 2.4.1
-
-- Fix missing datasheets caused by the mainland store's new file metadata and manufacturer links.
-- Add native mainland Cart and My Orders tables. Edit quantities inline and add selected rows directly through the context menu.
-- Quantities follow each part’s increment, prices follow the entered quantity, and all price tiers remain available to inspect. Open cart in browser goes directly to the official cart without submitting checkout. International accounts continue to use LCSC.com. This is a local delivery, not a published Release.
-
-## What's new in 2.4.0
-
-- **Embedded 3D models:** STEP inside AD `.PcbLib` and KiCad 9/10 footprint files, with relative external STEP paths for KiCad 8.
-- **Batch model binding:** Supported in individual exports, merged libraries, retained copies and AD append, independently of standalone STEP downloads.
-- **Original model dimensions:** Correct Type-C horizontal and height anchors while preserving official rotations, offsets and STEP contents.
-- **Smooth progress:** Lookup, preparation, processing and file publication contribute to progress. Cancellation does not falsely show 100%.
-- **Message history:** New Messages navigation, newest-first notices in the upper-right corner, search, filters and copyable details.
-- **Code and diagnostics:** Application packages organized by responsibility, with logs, updates, backups and recovery retained. All 636 regression tests passed.
-
-Earlier changes are listed in the [version history (Chinese)](docs/版本历史.md).
+![LCSC3D workspace: Type-C 3D preview, enabled footprint model binding, Messages navigation and download progress](docs/images/2.4.0-release/main.png)
 
 ## Quick start
 
@@ -51,6 +34,23 @@ Earlier changes are listed in the [version history (Chinese)](docs/版本历史.
 5. Click **Download**, then **Part folder**. Open SchLib / PcbLib in AD, or add the symbol file and footprint directory through KiCad's library managers.
 
 **Merging again uses the current selection.** Normal and merged AD / KiCad exports replace same-name libraries after successful generation. KiCad replaces the entire same-name `.pretty` directory, removing old members. Include every part you want to retain. AD's **Append** mode adds parts to existing libraries; KiCad append is not currently available.
+
+## Mainland storefront: selection, information and purchasing
+
+The native storefront brings **Search products, My favorites, Cart and My orders** into one workspace, connecting part selection and purchasing with library export.
+
+| Page | What it provides |
+| --- | --- |
+| Search products | Search by C-number, MPN or keyword, browse official categories, and filter by brand, package, component parameters, price and stock. View photos, specifications, datasheets and price tiers; keep checked parts across pages. |
+| My favorites | Read your mainland account favorites, find saved parts, and add or remove favorites. Add checked parts to the download list or cart. |
+| Cart | View photos, quantities, unit prices, subtotals and stock status. Edit quantities directly with automatic saving, remove items, or add parts to the download list. Open the official cart in your system browser to confirm the order and pay. |
+| My orders | Search orders by keyword and status. Open an order within the same table area to view purchased parts and other items, photos, quantities, prices and amounts. Add checked parts to the download list and return without losing your list position. Full order details can be opened in the external browser. |
+
+Search and favorites support inline purchase quantities with each part's minimum and increment. Search prices follow the entered quantity, with all price tiers still available to inspect. A row's context menu offers **Add to download list, Add to favorites and Add to cart**; batch cart additions use each row's quantity.
+
+Add checked parts from search, favorites, cart or orders to the download list. C-numbers are deduplicated before preview and AD / KiCad or model export. Drag column borders to resize and double-click product photos to view originals.
+
+Public search requires no login; favorites, cart and orders use a mainland LCSC account. These account purchasing pages are available in Chinese mode. English mode uses LCSC International search, with international account management on LCSC.com.
 
 ## Embedded 3D models
 
@@ -162,12 +162,10 @@ It has independent versioning and compatibility rules: new optional fields have 
 
 See the [architecture and compatibility guide (Chinese)](docs/EDA中间层.md) for details.
 
-## Selection, previews and batch downloads
+## Previews and batch downloads
 
 | Feature | What it provides |
 | --- | --- |
-| Store and favorites | Search by C-number, MPN or keyword, with 20 results per page and selections retained across pages. Search and favorites show thumbnails; double-click to view original images. |
-| Prices and information | View stock, match prices to quantities and inspect all price tiers, read full specifications, and open datasheets and original images. |
 | Four previews | Switch between 3D models, symbols, footprints and product photos, with zoom, pan and fit-to-window controls. |
 | Batch downloads | Combine STEP / OBJ with the selected target's two library formats; track per-part results, stop and retry. |
 | Library organization | Reuse identical footprints and optionally retain individual parts. Without per-part copies, models use a shared `library-name_3D` folder. |
@@ -186,9 +184,9 @@ Startup checks for stable updates in the background. Use **Settings → About & 
 
 ## Requirements and limitations
 
-Downloads and online previews need internet access. 3D preview needs a graphics driver supporting WebGL. KiCad 8 / 9 / 10 have been verified; see the [verification record (Chinese)](docs/2.4.0验证记录.md) for scope.
+Downloads and online previews need internet access. 3D preview needs a graphics driver supporting WebGL. KiCad 8 / 9 / 10 have been verified; see the [verification record (Chinese)](docs/2.4.1验证记录.md) for scope.
 
-Preview and export assist selection and design. Check pins, electrical types, dimensions and footprints against the datasheet before production use. Re-export any symbols affected by reversed pins in earlier versions.
+Preview and export assist selection and design. Check pins, electrical types, dimensions and footprints against the datasheet before production use.
 
 ## Run from source and build
 

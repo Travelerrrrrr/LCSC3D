@@ -95,7 +95,9 @@ Demo.5 的商城离线验证还覆盖单价精度、库存与缺失值、最低�
 
 Release 上传固定文件名 `LCSC3D.exe`、`LCSC3D.zip` 和 `SHA256SUMS.txt`。EXE、ZIP 与验证输出不放入 Git。修改许可证、上游版本或打包依赖时同步更新第三方声明。
 
-发布说明引用仓库截图或文档时，先运行 `python scripts/prepare_release_notes.py --tag vX.Y.Z --source docs/releases/vX.Y.Z.md --output work/release-notes.md`。它核对本地来源并将链接转换为该正式 tag 的公开地址；创建或编辑 Release 时使用生成文件作为 `--notes-file`，避免发布页面中的相对图片路径失效。`Prepare release` 已使用相同流程。
+README 中英文首页保持软件整体介绍，不放版本更新重点。Git 标签名使用 `vX.Y.Z`，GitHub Release 标题和附注标签首行固定为 `LCSC3D X.Y.Z`，不追加副标题。更新介绍保存在 `docs/releases/vX.Y.Z.md` 并用作 Release 正文。正文默认不放图片；只有用户明确要求时才加入图片，并为下述命令追加 `--allow-images`。
+
+发布说明引用仓库文档时，先运行 `python scripts/prepare_release_notes.py --tag vX.Y.Z --source docs/releases/vX.Y.Z.md --output work/release-notes.md`。它核对本地来源并将链接转换为该正式 tag 的公开地址；创建或编辑 Release 时使用生成文件作为 `--notes-file`，避免发布页面中的相对图片路径失效。`Prepare release` 已使用相同流程。
 
 也可在 Actions 中运行 `Prepare release`，填写版本标签和已成功完成的 `Windows build` 运行编号。流程核对应用源码与该构建一致，下载其 EXE，打包完整源码，生成校验和并上传到 Release 草稿；公开发布前核对附件。它不会覆盖已公开的 Release。
 

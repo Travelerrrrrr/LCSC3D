@@ -6,7 +6,7 @@ on:
       release_tag:
         description: Release tag matching app/lcsc3d/ui/main.py VERSION
         required: true
-        default: v2.3.0
+        default: v2.4.1
       build_run_id:
         description: Successful Windows build run to use
         required: true
@@ -69,7 +69,7 @@ jobs:
           $draft = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json isDraft --jq .isDraft 2>$null
           if ($LASTEXITCODE -eq 0) {
             if ($draft -ne 'true') { throw 'An existing public release will not be replaced' }
-            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --notes-file work/release-notes.md
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title ("LCSC3D " + $env:RELEASE_TAG.TrimStart('v')) --notes-file work/release-notes.md
           } else {
             gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft --target $env:GITHUB_SHA --title ("LCSC3D " + $env:RELEASE_TAG.TrimStart('v')) --notes-file work/release-notes.md
           }
