@@ -2306,6 +2306,7 @@ def main():
     parser.add_argument('--self-test-ad-integrate', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-store', '--self-test-favorites', dest='self_test_favorites', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-store-live', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-catalog-live', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-settings', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-backups', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-export', metavar='FOLDER', help=argparse.SUPPRESS)
@@ -2345,7 +2346,7 @@ def main():
     app.setStyleSheet(STYLES)
     logging.getLogger().setLevel(logging.ERROR)
     test_destination = next((value for value in (args.self_test, args.self_test_ad, args.self_test_favorites,
-                                                  args.self_test_store_live, args.self_test_settings, args.self_test_backups,
+                                                  args.self_test_store_live, args.self_test_catalog_live, args.self_test_settings, args.self_test_backups,
                                                   args.self_test_export, args.self_test_resources, args.self_test_kicad, args.self_test_models,
                                                   args.capture_docs, args.self_test_material, args.self_test_progress, args.self_test_commerce) if value), None)
     configure_logging('DEBUG' if test_destination else initial_log_level(SETTINGS_PATH), version=VERSION,
@@ -2412,6 +2413,10 @@ def main():
     if args.self_test_store_live:
         from lcsc3d.selftests.favorites_selftest import start_live
         start_live(window, args.self_test_store_live)
+        return app.exec()
+    if args.self_test_catalog_live:
+        from lcsc3d.selftests.catalog_live_selftest import start
+        start(window, args.self_test_catalog_live)
         return app.exec()
     if args.update_ack:
         QTimer.singleShot(250, lambda: acknowledge_update(args.update_ack))

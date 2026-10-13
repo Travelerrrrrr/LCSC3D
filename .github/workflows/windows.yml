@@ -59,6 +59,7 @@ jobs:
             work/unit-tests.log
             work/release-verification/**/*.log
             work/release-verification/**/*verification.json
+            work/release-verification/material-ui/acceptance/*.png
           if-no-files-found: error
       - uses: actions/upload-artifact@v7.0.1
         with:

@@ -92,7 +92,7 @@ def main():
             ('store', '--self-test-store', 'favorites-verification.json'),
             ('material-ui', '--self-test-material', 'material-verification.json'),
             ('live-resources', '--self-test-resources', 'verification.json'),
-            ('live-store', '--self-test-store-live', 'store-live-verification.json')):
+            ('live-catalog', '--self-test-catalog-live', 'catalog-live-verification.json')):
             attempt(name, lambda: frozen(name, flag, filename))
         attempt('commerce', lambda: script('verify_commerce_delivery', '--exe', executable, '--verify-dir', work / 'commerce'))
         attempt('progress', lambda: script('verify_progress_delivery', '--exe', executable, '--verify-dir', work / 'progress'))

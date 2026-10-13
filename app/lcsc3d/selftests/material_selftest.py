@@ -3,9 +3,11 @@ import json
 from pathlib import Path
 import sys
 import time
+import traceback
 
 from PySide6.QtCore import Qt, QTimer, QPoint, QUrl
 from PySide6.QtWidgets import QApplication
+from PySide6.QtTest import QTest
 from lcsc3d.core.app_settings import Preferences
 from lcsc3d.ui.app_theme import theme_manager
 from lcsc3d.ui.export_targets import ExportTargetsDialog
@@ -64,12 +66,19 @@ def start(window, folder):
             report['default_workspace_fits'] = True
             capture(window, 'workspace-symbol-light')
             window.apply_preferences(Preferences(accent_text_color='#ffffff'))
+            # Match the five-row layout regression's reference window size;
+            # the startup size is clamped to the runner's available desktop.
+            window.resize(1380, 880)
             window.input.setPlainText('\n'.join(['C2040', 'C20197'] + ['C' + str(10000 + n) for n in range(38)]))
             window.load_queue()
             window.table.setFocus()
             settle()
+            QTest.qWait(100)
             visible_rows = window.table.viewport().height() // window.table.rowHeight(0)
-            assert visible_rows >= 5 and window.content_scroll.verticalScrollBar().maximum() == 0
+            report['queue_geometry'] = dict(width=window.width(), height=window.height(),
+                visible_rows=visible_rows, outer_scroll_max=window.content_scroll.verticalScrollBar().maximum())
+            assert visible_rows >= 5 and window.content_scroll.verticalScrollBar().maximum() == 0, (
+                visible_rows, window.size(), window.content_scroll.verticalScrollBar().maximum())
             assert window.export_card.isAncestorOf(window.progress_bar)
             assert window.export_card.isAncestorOf(window.run_status)
             report['queue_layout'] = dict(parts=len(window.ids), visible_rows=visible_rows,
@@ -235,8 +244,8 @@ def start(window, folder):
             window.apply_preferences(Preferences(theme_mode='light'))
             window.set_preview_mode('footprint')
             QTimer.singleShot(200, footprint)
-        except Exception as exc:
-            finish(str(exc) or type(exc).__name__)
+        except Exception:
+            finish(traceback.format_exc())
 
     def footprint():
         if window.preview_state == 'ready':
@@ -253,8 +262,8 @@ def start(window, folder):
             report['queue_checks_preserved'] = window.table.item(1, main.DOWNLOAD_COLUMN).checkState() == Qt.Unchecked
             assert report['queue_checks_preserved']
             finish()
-        except Exception as exc:
-            finish(str(exc) or type(exc).__name__)
+        except Exception:
+            finish(traceback.format_exc())
 
     def ready():
         if window.preview_state == 'ready':
