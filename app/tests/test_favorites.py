@@ -615,6 +615,58 @@ class SessionVaultTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'win32', 'Native Qt window regression')
 class NativeStoreWindowTests(unittest.TestCase):
+    def test_deferred_store_restores_account_before_building_its_tables(self):
+        dialog = FavoritesDialog(self.window, client_factory=self.service.client, vault=False, deferred=True)
+        self.assertFalse(dialog.ui_ready)
+        self.assertFalse(hasattr(dialog, 'search_table'))
+        client = self.service.client()
+        client.account = {'name': 'Restored before opening'}
+        dialog.session_restored(client)
+        self.assertIn('Restored before opening', dialog.account_label.text())
+        dialog.show()
+        self.assertTrue(dialog.ui_ready)
+        self.assertEqual(dialog.login_button.text(), '退出登录')
+        self.assertIn('Restored before opening', dialog.account_label.text())
+        table = dialog.search_table
+        dialog.setup_ui()
+        self.assertIs(dialog.search_table, table)
+        dialog.shutdown()
+        self.wait_until(lambda: not dialog.has_jobs())
+        dialog.close()
+        dialog.deleteLater()
+
+    def test_thumbnail_changes_do_not_recount_or_change_checked_products(self):
+        from PySide6.QtGui import QImage
+        table = self.dialog.search_table
+        self.dialog.append_row(table, dict(part='C1', thumbnails=['fixture']))
+        with patch.object(self.dialog, 'update_count', wraps=self.dialog.update_count) as count:
+            self.dialog.thumbnail_loaded(table, 0, ('fixture', QImage.fromData(fixture_png())))
+            count.assert_not_called()
+            table.item(0, 0).setCheckState(Qt.Checked)
+            self.assertEqual(count.call_count, 1)
+        self.assertEqual([p['part'] for p in self.dialog.selected_items()], ['C1'])
+
+    def test_large_favorite_list_loads_visible_photos_and_bounds_retained_icons(self):
+        requests = []
+        def image(url, stop):
+            requests.append(url)
+            return fixture_png()
+        with patch.object(self.dialog, 'factory', return_value=SimpleNamespace(image=image)), \
+                patch.object(self.dialog, 'show_detail'), patch.object(self.dialog, 'request_detail'):
+            self.dialog.page_loaded(1, [dict(part=f'C{i+1}', thumbnails=[f'photo-{i}']) for i in range(300)])
+            QTest.qWait(100)
+            self.wait_until(lambda: not self.dialog.has_jobs())
+            self.assertLessEqual(len(requests), 128)
+            self.dialog.set_mode('favorites')
+            QTest.qWait(60)
+            table = self.dialog.favorite_table
+            table.verticalScrollBar().setValue(table.verticalScrollBar().maximum())
+            self.wait_until(lambda: not table.item(299, table.thumbnail_column).icon().isNull())
+            self.wait_until(lambda: not self.dialog.has_jobs())
+            self.assertLessEqual(sum(not table.item(row, table.thumbnail_column).icon().isNull()
+                                     for row in range(table.rowCount())), 128)
+            self.assertLessEqual(len(self.dialog.thumbnail_cache), 128)
+
     def test_favorite_photos_fit_rows_and_preserve_filter_selection_and_gallery(self):
         self.login()
         self.wait_until(lambda: not self.dialog.has_jobs())

@@ -72,13 +72,21 @@ def start(window, folder):
                 panel = dialog.filter_panel
                 assert dialog.search_content.currentWidget() is panel and not panel.isWindow()
                 panel.groups.setCurrentRow(next(i for i, group in enumerate(panel.facets) if group['key'] == 'param_31013_n'))
-                panel.low.setText('64'); panel.high.setText('128'); panel.unit.setCurrentText('KB'); panel.range_apply.click()
+                panel.low.setText('32'); panel.high.setText('64'); panel.unit.setCurrentText('KB'); panel.range_apply.click()
+                state['range_wait'] = time.monotonic() + 1
+                state['mode'] = 'range-refresh'
+            elif mode == 'range-refresh' and time.monotonic() >= state['range_wait'] and not dialog.has_jobs() and not dialog.filter_timer.isActive():
+                panel = dialog.filter_panel
+                assert (panel.low.text(), panel.high.text(), panel.unit.currentText()) == ('32', '64', 'KB')
+                assert [panel.options.item(i).data(Qt.UserRole) for i in range(panel.options.count())
+                        if not panel.options.item(i).isHidden()] == ['64KB']
+                report['mcu_range_survives_refresh'] = True
                 window.grab().save(str(root / 'native-filters.png'))
                 panel.apply.click(); state['mode'] = 'filtered'
             elif mode == 'filtered' and not dialog.searching:
                 from urllib.parse import unquote
                 requests = [json.loads(row[3]) for row in service.requests if row[1] == '/category/product']
-                assert '64KB~128KB@param_31013_n#range' in unquote(requests[-1]['queryParameterValue'])
+                assert '32KB~64KB@param_31013_n#range' in unquote(requests[-1]['queryParameterValue'])
                 assert dialog.search_content.currentWidget() is dialog.search_results
                 report['native_catalog_and_filters'] = True
                 dialog.search_table.setRowCount(0); dialog.search_items = []; dialog.search_selected.clear()

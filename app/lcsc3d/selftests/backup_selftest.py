@@ -50,6 +50,7 @@ def start(window, destination):
         settings = window.settings_dialog
         settings.section_buttons[4].click()
         settle()
+        wait(settings)
         return settings, settings.backup_panel
 
     def restore(panel, row, target):
@@ -133,6 +134,7 @@ def start(window, destination):
             legacy = backup_directory() / (uuid.uuid4().hex + '-Legacy.SchLib')
             legacy.write_bytes(originals['SchLib'])
             panel.refresh()
+            wait(settings)
             row = next(row for row in panel.rows if row.legacy)
             recovered = exports / 'Recovered.SchLib'
             page = restore(panel, row, recovered)
@@ -169,6 +171,7 @@ def start(window, destination):
             for notice in list(window.notifications.toasts):
                 notice.close()
             panel.refresh()
+            wait(settings)
             count = len(panel.rows)
             panel.clear_button.click()
             capture('clear-confirmation')

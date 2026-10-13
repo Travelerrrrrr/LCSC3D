@@ -2,7 +2,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QUrl
+from PySide6.QtCore import Qt, QThread, QUrl, QTimer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QHeaderView, QAbstractItemView
 from lcsc3d.ui.localized_widgets import QCheckBox, QDialog, QGroupBox, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem
@@ -21,9 +21,10 @@ def format_size(size):
 
 
 class BackupWorker(QThread):
-    def __init__(self, task, parent):
+    def __init__(self, task, parent, *, error_event='backup.operation_failed'):
         super().__init__(parent)
         self.task, self.result, self.error = task, None, ''
+        self.error_event = error_event
         self.log_context = new_context(feature='backups')
 
     @contextual
@@ -31,7 +32,7 @@ class BackupWorker(QThread):
         try:
             self.result = self.task()
         except Exception as exc:
-            record_error(exc, 'backup.operation_failed')
+            record_error(exc, self.error_event)
             self.error = render(str(exc))
 
 
@@ -41,6 +42,7 @@ class BackupPanel(QGroupBox):
         self.settings, self.rows = settings, []
         self.restore_page = None
         self.busy = False
+        self.refresh_pending = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 22, 16, 16)
         layout.setSpacing(12)
@@ -98,7 +100,7 @@ class BackupPanel(QGroupBox):
         folders.addWidget(self.clear_button)
         layout.addLayout(folders)
         self.table.itemSelectionChanged.connect(self.refresh_buttons)
-        self.refresh()
+        self.refresh_buttons()
 
     def main_window(self):
         host = page_host(self)
@@ -116,13 +118,30 @@ class BackupPanel(QGroupBox):
         return self.rows[index] if 0 <= index < len(self.rows) else None
 
     def refresh(self):
+        if not self.isVisible() or self.settings.worker is not None:
+            self.refresh_pending = True
+            return
+        self.refresh_pending = False
+        worker = BackupWorker(list_backups, self.settings, error_event='backup.list_failed')
+        self.settings.worker = worker
+        self.settings.set_log_busy(True)
+        self.usage.setText(ui_text('正在处理备份，请稍候…'))
+        def finish():
+            self.settings.worker = None
+            self.show_backups(worker.result or [], worker.error)
+            self.settings.set_log_busy(False)
+            worker.deleteLater()
+            if self.refresh_pending:
+                QTimer.singleShot(0, self.refresh)
+        worker.finished.connect(finish)
+        worker.start()
+
+    def show_backups(self, rows, error=''):
         selected = self.selected()
-        try:
-            self.rows = list_backups()
+        self.rows = rows
+        if not error:
             self.usage.setText(ui_message('{0} 份备份 · 占用 {1}', len(self.rows), format_size(sum(row.stored_size for row in self.rows))))
-        except Exception as exc:
-            record_error(exc, 'backup.list_failed')
-            self.rows = []
+        else:
             self.usage.setText(ui_text('无法读取备份目录，请检查目录权限。'))
         self.table.setRowCount(0)
         for index, row in enumerate(self.rows):

@@ -65,6 +65,8 @@ class CommerceActions:
         return True
 
     def reset_commerce(self):
+        if not hasattr(self, 'quantity_timer'):
+            return
         self.quantity_timer.stop(); self.quantity_updates.clear()
         for channel in ('cart-read', 'cart-write', 'cart-thumbnails', 'orders-read', 'order-detail', 'order-thumbnails'):
             self.jobs.cancel(channel)

@@ -16,6 +16,7 @@ from lcsc3d.core.errors import DownloadError
 from lcsc3d.eda.eda_ir import Pad
 from lcsc3d.models.model_export import resolved_models
 from lcsc3d.models.model_geometry import euler_xyz
+from lcsc3d.models.model_cache import cached_model, reuse_models
 
 MM_PER_RAW = .00000254
 
@@ -26,6 +27,11 @@ def model_checksum(data):
 
 
 def model_payload_identity(data):
+    return cached_model(('ad-model-identity', hashlib.sha256(data).digest()),
+                        lambda: _model_payload_identity(data))
+
+
+def _model_payload_identity(data):
     try:
         decompressor = zlib.decompressobj()
         payload = decompressor.decompress(data,64*1024*1024+1)
@@ -91,6 +97,7 @@ def _footprint_outline(component):
     return [(left,bottom),(right,bottom),(right,top),(left,top)]
 
 
+@reuse_models
 def embed_models(component, streams, section, payloads, check):
     from lcsc3d.eda import altium as a
     entries, records = {}, []
@@ -103,14 +110,17 @@ def embed_models(component, streams, section, payloads, check):
         angles = tuple(round(v,9) for v in euler_xyz(rotation))
         offset = tuple(_raw(model.transform[i*4+3])*MM_PER_RAW for i in range(3))
         raw = original
-        digest = hashlib.sha256(raw).hexdigest()
-        checksum = model_checksum(raw)
+        digest = asset.sha256  # resolved_models already verified the original bytes.
+        checksum, compressed = cached_model(('ad-step', digest),
+            lambda: (model_checksum(raw), zlib.compress(raw)),
+            size=lambda value: len(value[1]) + 128, check=check)
         model_id = '{' + str(uuid.uuid5(uuid.NAMESPACE_URL,'lcsc3d:step:'+digest+repr((angles,_raw(offset[2]))))).upper() + '}'
         name = digest + '.step'
         metadata = {'EMBED':'TRUE','MODELSOURCE':'Undefined','ID':model_id,
                     'ROTX':angles[0],'ROTY':angles[1],'ROTZ':angles[2],'DZ':_raw(offset[2]),
                     'CHECKSUM':checksum if checksum < 2**31 else checksum-2**32,'NAME':name}
-        entries.setdefault(model_id,(a._parameters(metadata),zlib.compress(raw)))
+        if model_id not in entries:
+            entries[model_id] = a._parameters(metadata), compressed
         if asset.bounds:  # Preserve supplied historical IR bounds without reading geometry.
             outline,low,high = _outline(tuple(float(v)*scale for v in asset.bounds),angles,offset)
         else:

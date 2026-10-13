@@ -18,6 +18,7 @@ class MessagesPage(QDialog):
         super().__init__(parent)
         self.history = history
         self.rows = []
+        self.search_texts = {}
         self.setWindowTitle(ui_text('消息'))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 18)
@@ -76,16 +77,38 @@ class MessagesPage(QDialog):
     def reload(self):
         selected = self.rows[self.table.currentRow()]['id'] if 0 <= self.table.currentRow() < len(self.rows) else None
         query, level = self.search.text().casefold().strip(), self.level.currentData()
-        self.rows = [e for e in self.history.entries if (not level or e['severity'] == level)
-                     and (not query or query in (e['title']+'\n'+e['message']+'\n'+e['details']).casefold())]
+        texts = {}
+        for entry in self.history.entries:
+            source = entry['title'], entry['message'], entry['details']
+            previous = self.search_texts.get(entry['id'])
+            texts[entry['id']] = previous if previous and previous[0] == source else (source, '\n'.join(source).casefold())
+        self.search_texts = texts
+        rows = [e for e in self.history.entries if (not level or e['severity'] == level)
+                and (not query or query in texts[e['id']][1])]
+        wanted = {e['id'] for e in rows}
         self.table.blockSignals(True)
-        self.table.setRowCount(len(self.rows))
-        for row, entry in enumerate(self.rows):
+        updating = self.table.updatesEnabled()
+        self.table.setUpdatesEnabled(False)
+        for index in range(len(self.rows) - 1, -1, -1):
+            if self.rows[index]['id'] not in wanted:
+                self.table.removeRow(index)
+                self.rows.pop(index)
+        for row, entry in enumerate(rows):
+            if row >= len(self.rows) or self.rows[row]['id'] != entry['id']:
+                self.table.insertRow(row)
+                self.rows.insert(row, entry)
             time = datetime.fromisoformat(entry['time']).astimezone().strftime('%Y-%m-%d %H:%M:%S')
             for column, value in enumerate((time, ui_text(LEVEL_LABELS[entry['severity']]), entry['title'])):
-                item = QTableWidgetItem(value)
-                item.setToolTip(entry['message'])
-                self.table.setItem(row, column, item)
+                item = self.table.item(row, column)
+                if item is None:
+                    item = QTableWidgetItem(value)
+                    self.table.setItem(row, column, item)
+                elif item.source_text() != value:
+                    item.setText(value)
+                if item._messages.get('setToolTip') != entry['message']:
+                    item.setToolTip(entry['message'])
+        self.table.setRowCount(len(rows))
+        self.rows = rows
         index = next((i for i, e in enumerate(self.rows) if e['id'] == selected), 0)
         if self.rows:
             self.table.selectRow(index)
@@ -93,6 +116,7 @@ class MessagesPage(QDialog):
         else:
             self.table.setCurrentCell(-1, -1)
         self.table.blockSignals(False)
+        self.table.setUpdatesEnabled(updating)
         self.status.setText(ui_text('消息保存失败，当前记录仅在本次运行中可用。') if self.history.save_failed else
             ui_message('显示 {0} / {1} 条消息，保留最近 500 条。', len(self.rows), len(self.history.entries)))
         self.clear_button.setEnabled(bool(self.history.entries))

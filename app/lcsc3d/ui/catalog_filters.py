@@ -7,7 +7,9 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QL
 from lcsc3d.ui.localized_widgets import QLabel, QPushButton, QLineEdit, QComboBox, QCheckBox
 from lcsc3d.ui.ui_components import surface, IconButton
 from lcsc3d.core.i18n import text as tr, message as msg
-from lcsc3d.services.catalog_filters import DEFAULTS, SORTS, normalize_filters, filter_count
+from lcsc3d.core.app_logging import log_event
+from lcsc3d.services.catalog_filters import (DEFAULTS, SORTS, normalize_filters, filter_count,
+                                           range_input, range_bounds, option_in_range)
 from lcsc3d.services.store import StoreError
 
 
@@ -101,6 +103,7 @@ class FilterPanel(QWidget):
     def __init__(self):
         super().__init__()
         self.draft = normalize_filters(); self.facets = []; self.filling = False
+        self.range_inputs = {}; self.displayed_key = None
         layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0)
         tools = QHBoxLayout()
         back = IconButton(tr('返回商品'), 'back'); back.clicked.connect(self.back_requested); tools.addWidget(back)
@@ -150,6 +153,7 @@ class FilterPanel(QWidget):
         self.range_widget = QWidget(); ranges = QHBoxLayout(self.range_widget); ranges.setContentsMargins(0, 0, 0, 0)
         self.low = QLineEdit(); self.low.setPlaceholderText(tr('最小值'))
         self.high = QLineEdit(); self.high.setPlaceholderText(tr('最大值'))
+        self.low.setMaxLength(64); self.high.setMaxLength(64)
         self.unit = QComboBox()
         for widget in (self.low, self.high, self.unit):
             widget.setMinimumWidth(50); ranges.addWidget(widget)
@@ -174,6 +178,7 @@ class FilterPanel(QWidget):
 
     def begin(self, filters, facets):
         self.filling = True; self.draft = normalize_filters(deepcopy(filters))
+        self.range_inputs.clear(); self.displayed_key = None
         for key, box in self.flags.items():
             box.setChecked(self.draft[key] if key == 'hasDataFile' else self.draft[key] == 0)
         self.origin.setCurrentIndex(max(0, self.origin.findData(self.draft['brandOriginFilter'])))
@@ -193,9 +198,11 @@ class FilterPanel(QWidget):
     def show_facets(self, facets):
         current = (self.current_group() or {}).get('key')
         query, scroll = self.option_search.text(), self.options.verticalScrollBar().value()
-        low, high, unit = self.low.text(), self.high.text(), self.unit.currentText()
+        self.remember_range()
         keys = {group['key'] for group in facets}
-        facets = list(facets) + [g for g in self.facets if g['key'] not in keys and any(self.selected_values(g['key']))]
+        facets = list(facets) + [g for g in self.facets if g['key'] not in keys and
+            (any(self.selected_values(g['key'])) or self.draft['parameters'].get(g['key'] + '#range')
+             or any(self.range_inputs.get(g['key'], ('', '', ''))[:2]))]
         self.facets = facets
         self.groups.blockSignals(True); self.groups.clear()
         for group in facets:
@@ -205,13 +212,16 @@ class FilterPanel(QWidget):
         self.show_options(); self.update_summary()
         if (self.current_group() or {}).get('key') == current:
             self.option_search.setText(query); self.options.verticalScrollBar().setValue(scroll)
-            self.low.setText(low); self.high.setText(high)
-            if unit:
-                self.unit.setCurrentText(unit)
+
+    def remember_range(self):
+        if self.displayed_key:
+            self.range_inputs[self.displayed_key] = self.low.text(), self.high.text(), self.unit.currentText()
 
     def show_options(self, *_):
+        self.remember_range()
         self.filling = True; self.options.clear(); self.option_search.clear(); self.low.clear(); self.high.clear(); self.unit.clear()
         group = self.current_group()
+        self.displayed_key = (group or {}).get('key')
         ranges = self.draft['parameters'].get((group or {}).get('key', '') + '#range', [])
         self.range_choice.setText(tr('已选范围：') + ' / '.join(ranges) if ranges else '')
         self.range_choice.setVisible(bool(ranges))
@@ -223,27 +233,49 @@ class FilterPanel(QWidget):
             for row in values:
                 count = row.get('count'); label = row['label'] + (f'  ({count:,})' if count is not None else '')
                 item = QListWidgetItem(label); item.setData(Qt.UserRole, row['value']); item.setToolTip(row['label'])
+                item.setData(Qt.UserRole + 1, row)
                 item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
                 if row.get('enabled') is False and row['value'] not in selected:
                     item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
                 item.setCheckState(Qt.Checked if row['value'] in selected else Qt.Unchecked); self.options.addItem(item)
             for unit in group.get('units', {}):
                 self.unit.addItem(unit)
-        self.filling = False
+            fields = self.range_inputs.get(key)
+            if fields is None and ranges:
+                fields = range_input(ranges[0], group.get('units', {}))
+            if fields:
+                low, high, unit = fields
+                self.low.setText(low); self.high.setText(high)
+                if unit and self.unit.findText(unit) < 0:
+                    self.unit.addItem(unit)
+                self.unit.setCurrentText(unit)
+        self.filling = False; self.filter_options()
 
     def filter_options(self, *_):
+        if self.filling:
+            return
         query = self.option_search.text().casefold()
+        group = self.current_group() or {}
+        ranges = self.draft['parameters'].get(group.get('key', '') + '#range', [])
+        bounds = range_bounds(ranges[0], group.get('units', {})) if ranges else None
         for index in range(self.options.count()):
-            item = self.options.item(index); item.setHidden(query not in item.text().casefold())
+            item = self.options.item(index)
+            item.setHidden(query not in item.text().casefold() or bounds is not None and
+                           not option_in_range(item.data(Qt.UserRole + 1) or {}, bounds))
 
     def set_values(self, key, values):
         if key.startswith('param_'):
             self.draft['parameters'].pop(key + '#range', None)
             self.draft['parameters'][key] = values
+            self.range_inputs.pop(key, None)
+            if self.displayed_key == key:
+                self.low.clear(); self.high.clear(); self.range_choice.clear(); self.range_choice.hide()
+                self.filter_options()
         else:
             self.draft[key] = '$'.join(values)
             if key == 'catalogIdFilter':
                 self.draft['parameters'] = {}
+                self.range_inputs.clear()
         self.draft['lastParamName'] = key
 
     def option_changed(self, *_):
@@ -297,22 +329,30 @@ class FilterPanel(QWidget):
     def use_range(self):
         group = self.current_group(); low, high, unit = self.low.text().strip(), self.high.text().strip(), self.unit.currentText()
         if not group or not group['key'].startswith('param_') or not unit or not (low or high):
-            return
+            return True
         try:
             values = [Decimal(value) for value in (low, high) if value]
             if any(not v.is_finite() or abs(v) > Decimal('1e18') for v in values) or low and high and Decimal(low) > Decimal(high):
                 raise ValueError()
         except (InvalidOperation, ValueError):
-            self.hint.setText(tr('请输入有效数值范围，最小值不能大于最大值。')); return
+            self.hint.setText(tr('请输入有效数值范围，最小值不能大于最大值。'))
+            log_event('WARNING', 'catalog.range_rejected', reason='invalid_bounds')
+            return False
         self.draft['parameters'].pop(group['key'], None)
         self.draft['parameters'][group['key'] + '#range'] = [(low + unit if low else '') + '~' + (high + unit if high else '')]
         self.draft['lastParamName'] = group['key']; self.show_options(); self.emit_change()
+        log_event('INFO', 'catalog.range_selected', lower_bound=bool(low), upper_bound=bool(high),
+                  option_count=self.options.count(), matching_count=sum(not self.options.item(i).isHidden()
+                                                                       for i in range(self.options.count())))
+        return True
 
     def reset(self):
         # Keep a browsed category so resetting does not turn into an empty query.
         self.begin({'catalogIdFilter': self.draft['catalogIdFilter']}, self.facets); self.emit_change()
 
     def apply_filters(self):
+        if not self.use_range():
+            return
         self.common_changed()
         try:
             value = normalize_filters(self.draft)

@@ -8,9 +8,12 @@ from __future__ import annotations
 from lcsc3d.core.app_logging import traced, operation
 
 from dataclasses import dataclass, field
+from array import array
+import base64
 import json
 import math
 import re
+import sys
 from typing import Callable
 
 from lcsc3d.core.errors import DownloadError
@@ -91,9 +94,25 @@ class Material:
     shininess: float = 0.25
 
 
+class VertexBuffer:
+    """Full-precision coordinates without one Python float object per axis."""
+    def __init__(self):
+        self.values = array('d')
+
+    def append(self, vertex):
+        self.values.extend(vertex)
+
+    def __len__(self):
+        return len(self.values) // 3
+
+    def __iter__(self):
+        values = iter(self.values)
+        return zip(values, values, values)
+
+
 @dataclass
 class Mesh:
-    vertices: list[tuple[float, float, float]] = field(default_factory=list)
+    vertices: list[tuple[float, float, float]] | VertexBuffer = field(default_factory=list)
     faces: list[tuple[str, tuple[int, ...]]] = field(default_factory=list)
     materials: dict[str, Material] = field(default_factory=lambda: {'': Material()})
 
@@ -101,21 +120,61 @@ class Mesh:
         names = list(self.materials)
         indices = {name: index for index, name in enumerate(names)}
         return {
-            'vertices': self.vertices,
+            'vertices': self.vertices if isinstance(self.vertices, list) else list(self.vertices),
             'faces': [[indices[name], *face] for name, face in self.faces],
             'materials': [list(self.materials[name].diffuse) for name in names],
         }
 
+    def preview_transfer(self, check_cancelled: Callable = lambda: None):
+        """Prepare compact, lossless doubles/indices before reaching the UI.
+
+        Keep full source precision until the renderer computes its normals and
+        finally uploads float32 geometry, exactly as for the JSON-array path.
+        """
+        names = list(self.materials)
+        indices = {name: index for index, name in enumerate(names)}
+        vertices = self.vertices.values if isinstance(self.vertices, VertexBuffer) else array('d')
+        if not isinstance(self.vertices, VertexBuffer):
+            for index, vertex in enumerate(self.vertices):
+                if index % 1024 == 0:
+                    check_cancelled()
+                vertices.extend(vertex)
+        if sys.byteorder != 'little':
+            vertices = array('d', vertices)
+            vertices.byteswap()
+        check_cancelled()
+        encoded_vertices = base64.b64encode(vertices).decode('ascii')
+        del vertices
+        faces = array('I')
+        for index, (name, face) in enumerate(self.faces):
+            if index % 1024 == 0:
+                check_cancelled()
+            faces.extend((indices[name], len(face)))
+            faces.extend(face)
+        if sys.byteorder != 'little':
+            faces.byteswap()
+        encoded_faces = base64.b64encode(faces).decode('ascii')
+        del faces
+        check_cancelled()
+        materials = json.dumps([list(self.materials[name].diffuse) for name in names], separators=(',', ':'))
+        # Base64 contains neither JSON quotes nor escapes. Joining these known
+        # strings directly avoids JSONEncoder copying/escaping the large arrays.
+        payload = ''.join(('{"encoding":"base64-le-v1","vertices":"', encoded_vertices,
+                           '","faces":"', encoded_faces, '","materials":', materials, '}'))
+        check_cancelled()
+        return payload
+
 
 @traced('model.obj_parse', lambda raw, *a, **kw: {'bytes': len(raw)})
-def read_obj(raw: str, check_cancelled: Callable = lambda: None) -> Mesh:
+def read_obj(raw: str, check_cancelled: Callable = lambda: None, *, packed=False) -> Mesh:
     """Read inline MTLs and v/vt/vn faces, including relative vertex indices.
 
 EasyEDA embeds newmtl/endmtl records in OBJ and writes d=0 even for opaque
 parts. Ignore that vendor field so pins and bodies remain visible. External
 mtllib references and textures are never fetched.
 """
-    mesh = Mesh()
+    mesh = Mesh(vertices=VertexBuffer()) if packed else Mesh()
+    vertex_count = 0
     active = ''
     defining = None
     for number, original in enumerate(raw.splitlines(), 1):
@@ -136,7 +195,8 @@ mtllib references and textures are never fetched.
                 if not all(math.isfinite(value) and abs(value) <= 1e9 for value in vertex):
                     raise ValueError('顶点坐标无效')
                 mesh.vertices.append(vertex)
-                if len(mesh.vertices) > 1_000_000:
+                vertex_count += 1
+                if vertex_count > 1_000_000:
                     raise ValueError('模型顶点过多')
             elif keyword == 'newmtl':
                 if not tail:
@@ -167,8 +227,8 @@ mtllib references and textures are never fetched.
                 face = []
                 for token in fields[1:]:
                     index = int(token.split('/')[0])
-                    index = index - 1 if index > 0 else len(mesh.vertices) + index if index < 0 else -1
-                    if not 0 <= index < len(mesh.vertices):
+                    index = index - 1 if index > 0 else vertex_count + index if index < 0 else -1
+                    if not 0 <= index < vertex_count:
                         raise ValueError('面引用了不存在的顶点')
                     face.append(index)
                 mesh.faces.append((active, tuple(face)))

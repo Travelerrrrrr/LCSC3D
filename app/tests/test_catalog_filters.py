@@ -16,7 +16,7 @@ from PySide6.QtCore import Qt, QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication, QHeaderView
 from lcsc3d.core import app_logging as logs
 from lcsc3d.services.catalog_filters import (parse_categories, search_facets, parameter_facets, normalize_filters,
-                                            search_payload, read_categories, read_parameters)
+                                            search_payload, read_categories, read_parameters, range_bounds, option_in_range)
 from lcsc3d.services.store import StoreClient, StoreError, search_page_products
 from lcsc3d.selftests.catalog_fixture import categories, parameters, add_facets
 from lcsc3d.selftests.favorites_selftest import OfflineStore, fixture_search
@@ -24,6 +24,22 @@ from lcsc3d.ui.favorites import FavoritesDialog
 
 
 class FilterDataTests(unittest.TestCase):
+    def test_numeric_range_uses_base_units_inclusive_bounds_zero_and_intervals(self):
+        units = {'MB': 1048576, 'Byte': 1, 'KB': 1024}
+        for value in ('32KB~64KB', '32768Byte~65536Byte', '.03125MB~.0625MB'):
+            bounds = range_bounds(value, units)
+            for number, matches in ((32, False), (32768, True), (61440, True), (65536, True), (131072, False)):
+                with self.subTest(value=value, number=number):
+                    self.assertEqual(option_in_range({'number': str(number)}, bounds), matches)
+        self.assertTrue(option_in_range({'number': 0}, range_bounds('0Byte~0Byte', units)))
+        self.assertFalse(option_in_range({'number': '-1'}, range_bounds('0Byte~', units)))
+        self.assertTrue(option_in_range({'number': 32768}, range_bounds('~32KB', units)))
+        self.assertFalse(option_in_range({'number': 'NaN'}, range_bounds('~32KB', units)))
+        interval = {'number': '32768', 'end_number': '65536', 'interval': True}
+        self.assertTrue(option_in_range(interval, range_bounds('32KB~64KB', units)))
+        self.assertFalse(option_in_range(interval, range_bounds('32KB~60KB', units)))
+        self.assertIsNone(range_bounds('32KB~64KB', {'KB': 'NaN'}))
+
     def test_category_headings_and_keyword_links_keep_only_real_electronics_ids(self):
         payload = categories(); rows = payload['result']['chips']['sonCatalogList']
         rows.append({'catalogId': None, 'catalogName': '工具', 'sonCatalogList': [
@@ -134,6 +150,79 @@ class FilterUiTests(unittest.TestCase):
         self.assertFalse(emitted)
         panel.inputs['endPrice'].setText('4'); panel.apply.click(); self.assertEqual(len(emitted), 1)
         panel.clear_group(); self.assertNotIn('param_31013_n#range', panel.draft['parameters'])
+
+    def mcu_facets(self):
+        rows = parameter_facets(parameters(category=True))
+        group = next(g for g in rows if g['key'] == 'param_31013_n')
+        group['units'] = {'MB': 1048576, 'Byte': 1, 'KB': 1024}
+        group['options'] = [dict(value=label, label=label, number=str(value), enabled=True)
+            for label, value in (('32Byte', 32), ('32KB', 32768), ('60KB', 61440), ('64KB', 65536), ('128KB', 131072))]
+        return rows
+
+    def visible_options(self, panel):
+        return [panel.options.item(i).data(Qt.UserRole) for i in range(panel.options.count()) if not panel.options.item(i).isHidden()]
+
+    def test_mcu_32_64kb_survives_async_refresh_group_switch_and_reopen(self):
+        d = self.dialog; facets = self.mcu_facets()
+        d.catalog_filters = {'catalogIdFilter': '11329'}; d.search_facets = facets
+        with patch.object(d.catalog, 'search_page', return_value=dict(facets=facets, total=3)):
+            d.open_filters(); panel = d.filter_panel
+            panel.groups.setCurrentRow(2)
+            panel.low.setText('32'); panel.high.setText('64'); panel.unit.setCurrentText('KB'); panel.range_apply.click()
+            self.assertEqual(self.visible_options(panel), ['32KB', '60KB', '64KB'])
+            self.wait(lambda: bool(d.filter_cache) and not d.has_jobs())
+            self.assertEqual((panel.low.text(), panel.high.text(), panel.unit.currentText()), ('32', '64', 'KB'))
+            self.assertEqual(self.visible_options(panel), ['32KB', '60KB', '64KB'])
+            panel.groups.setCurrentRow(0); panel.groups.setCurrentRow(2)
+            self.assertEqual((panel.low.text(), panel.high.text(), panel.unit.currentText()), ('32', '64', 'KB'))
+            panel.option_search.setText('64')
+            self.assertEqual(self.visible_options(panel), ['64KB'])
+            emitted = []; panel.applied.connect(emitted.append)
+            panel.apply.click(); self.wait(lambda: not d.searching)
+            request = search_payload('', 1, emitted[-1])
+            self.assertEqual(unquote(request['queryParameterValue']), '32KB~64KB@param_31013_n#range')
+            panel.begin(emitted[-1], facets); panel.groups.setCurrentRow(2)
+            self.assertEqual((panel.low.text(), panel.high.text(), panel.unit.currentText()), ('32', '64', 'KB'))
+
+    def test_refresh_retains_unsubmitted_edits_and_range_only_missing_group(self):
+        panel = self.dialog.filter_panel; facets = self.mcu_facets()
+        panel.begin({'catalogIdFilter': '11329'}, facets); panel.groups.setCurrentRow(2)
+        panel.low.setText('32'); panel.high.setText('64'); panel.unit.setCurrentText('KB')
+        panel.show_facets(facets[:2])
+        self.assertEqual(panel.current_group()['key'], 'param_31013_n')
+        self.assertEqual((panel.low.text(), panel.high.text(), panel.unit.currentText()), ('32', '64', 'KB'))
+        panel.range_apply.click(); panel.show_facets(facets[:2])
+        self.assertEqual(self.visible_options(panel), ['32KB', '60KB', '64KB'])
+        self.assertIn('32KB~64KB', panel.range_choice.text())
+        panel.clear_group()
+        self.assertFalse(panel.low.text() or panel.high.text() or panel.range_choice.text())
+        self.assertEqual(len(self.visible_options(panel)), 5)
+
+    def test_range_apply_validation_discrete_replacement_and_reset(self):
+        panel = self.dialog.filter_panel
+        panel.begin({'catalogIdFilter': '11329'}, self.mcu_facets()); panel.groups.setCurrentRow(2)
+        emitted = []; panel.applied.connect(emitted.append)
+        panel.low.setText('64'); panel.high.setText('32'); panel.unit.setCurrentText('KB'); panel.apply.click()
+        self.assertFalse(emitted); self.assertFalse(panel.draft['parameters'])
+        for invalid in ('NaN', 'Infinity', '1e999', 'not a number'):
+            panel.low.setText(invalid); panel.range_apply.click()
+            self.assertFalse(panel.draft['parameters'])
+        panel.low.setText('32'); panel.high.setText('64'); panel.apply.click()
+        self.assertEqual(emitted[-1]['parameters'], {'param_31013_n#range': ['32KB~64KB']})
+        panel.options.item(1).setCheckState(Qt.Checked)
+        self.assertEqual(panel.draft['parameters'], {'param_31013_n': ['32KB']})
+        self.assertFalse(panel.range_choice.text() or panel.low.text() or panel.high.text())
+        panel.apply.click(); self.assertEqual(emitted[-1]['parameters'], {'param_31013_n': ['32KB']})
+        panel.low.setText('0'); panel.high.clear(); panel.unit.setCurrentText('Byte'); panel.range_apply.click()
+        self.assertEqual(panel.draft['parameters'], {'param_31013_n#range': ['0Byte~']})
+        panel.reset(); self.assertFalse(panel.draft['parameters'])
+        self.assertFalse(panel.low.text() or panel.high.text())
+        records = [json.loads(line) for line in (logs.get_log_directory() / 'LCSC3D.log').read_text('utf-8').splitlines()]
+        selected = next(row for row in records if row['event'] == 'catalog.range_selected')
+        self.assertEqual(selected['matching_count'], 3)
+        self.assertTrue(selected['lower_bound'] and selected['upper_bound'])
+        self.assertTrue(any(row['event'] == 'catalog.range_rejected' for row in records))
+        self.assertNotIn('not a number', json.dumps(records))
 
     def test_filter_requests_are_debounced_cached_and_cancelled_on_back(self):
         d = self.dialog; d.search_keyword = 'fixture'; d.open_filters()

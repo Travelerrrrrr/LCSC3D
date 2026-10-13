@@ -1,6 +1,7 @@
 """Official catalog trees and server-side product facets for the native store."""
 import json
 import re
+from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, urlsplit
 
 from lcsc3d.services.store import StoreError, text, product_id, decimal_number, quantity, check_cancelled
@@ -26,6 +27,46 @@ DEFAULTS = {**{field: '' for field, *_ in GROUPS}, 'sortNumber': 0, 'satisfyStoc
 SORTS = [('综合排序', 0), ('价格从低到高', 1), ('价格从高到低', 2), ('销量优先', 6),
          ('库存从高到低', 8), ('库存从低到高', 9), ('广东仓库存从高到低', 10),
          ('广东仓库存从低到高', 11), ('江苏仓库存从高到低', 12), ('江苏仓库存从低到高', 13)]
+
+
+def finite_number(value):
+    try:
+        number = Decimal(str(value))
+        return number if number.is_finite() and abs(number) <= Decimal('1e30') else None
+    except InvalidOperation:
+        return None
+
+
+def range_input(value, units):
+    """Restore the single-unit range emitted by the native filter editor."""
+    if value.count('~') != 1:
+        return None
+    low, high = value.split('~')
+    for unit in sorted(units, key=len, reverse=True):
+        if unit and all(not part or part.endswith(unit) and finite_number(part[:-len(unit)]) is not None
+                        for part in (low, high)):
+            return low[:-len(unit)] if low else '', high[:-len(unit)] if high else '', unit
+    return None
+
+
+def range_bounds(value, units):
+    fields = range_input(value, units)
+    if fields is None:
+        return None
+    low, high, unit = fields
+    scale = finite_number(units[unit])
+    if scale is None or scale <= 0:
+        return None
+    return (finite_number(low) * scale if low else None, finite_number(high) * scale if high else None)
+
+
+def option_in_range(option, bounds):
+    """Match official base-unit values, including fully contained intervals."""
+    low, high = bounds
+    start = finite_number(option.get('number'))
+    end = finite_number(option.get('end_number')) if option.get('interval') else start
+    return ((low is None or start is not None and start >= low)
+            and (high is None or end is not None and end <= high))
 
 
 def normalize_filters(filters=None):
@@ -137,7 +178,7 @@ def _options(rows, label='label', value='label'):
             continue
         seen.add(val)
         result.append(dict(label=name, value=val, count=quantity(row.get('count')), enabled=row.get('status') is not False,
-            number=row.get('standardUnitValue'), end_number=row.get('standardUnitEndValue')))
+            number=row.get('standardUnitValue'), end_number=row.get('standardUnitEndValue'), interval=bool(row.get('isRange'))))
     return result
 
 

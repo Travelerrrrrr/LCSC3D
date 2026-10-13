@@ -13,12 +13,15 @@ permissions:
 jobs:
   test-and-build:
     runs-on: windows-latest
+    timeout-minutes: 45
     env:
       PYTHONUTF8: '1'
       # Hosted Windows runners use a virtual GPU that Chromium blocklists.
       QTWEBENGINE_CHROMIUM_FLAGS: '--ignore-gpu-blocklist'
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: '3.12'
@@ -29,7 +32,11 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r app/requirements-test.txt
       - name: Run regression tests
-        run: python -m unittest discover -s app/tests -v
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force work | Out-Null
+          python -m unittest discover -s app/tests -v 2>&1 | Tee-Object -FilePath work/unit-tests.log
+          if ($LASTEXITCODE -ne 0) { throw 'Regression tests failed' }
       - name: Build portable application
         working-directory: app
         run: python -m PyInstaller --noconfirm --clean LCSC3D.spec
@@ -38,3 +45,67 @@ jobs:
           name: LCSC3D-Windows-x64
           path: app/dist/LCSC3D.exe
           if-no-files-found: error
+      - name: Verify final executable and package release assets
+        run: python scripts/verify_release.py
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: LCSC3D-verification
+          path: |
+            work/unit-tests.log
+            work/release-verification/**/*.log
+            work/release-verification/**/*verification.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: LCSC3D-release-assets
+          path: |
+            outputs/LCSC3D.exe
+            outputs/LCSC3D.zip
+            outputs/SHA256SUMS.txt
+            outputs/使用说明.md
+          if-no-files-found: error
+
+  publish-2-4-2:
+    needs: test-and-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish v2.4.2]')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Publish the verified 2.4.2 release
+        shell: pwsh
+        run: |
+          $version = Select-String -LiteralPath app/lcsc3d/ui/main.py -Pattern "^VERSION = '2.4.2'$"
+          if (-not $version) { throw 'Release version mismatch' }
+          git diff --exit-code v2.4.1 HEAD -- README.md README.en.md
+          if ($LASTEXITCODE -ne 0) { throw 'Homepage README must remain unchanged' }
+          git show-ref --verify --quiet refs/tags/v2.4.2
+          if ($LASTEXITCODE -eq 0) { throw 'Existing tag will not be replaced' }
+          gh run download $env:GITHUB_RUN_ID --repo $env:GITHUB_REPOSITORY --name LCSC3D-release-assets --dir outputs
+          if ($LASTEXITCODE -ne 0) { throw 'Verified assets download failed' }
+          foreach ($line in Get-Content outputs/SHA256SUMS.txt) {
+            $expected, $name = $line -split '  ', 2
+            $actual = (Get-FileHash -LiteralPath (Join-Path outputs $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw 'Release asset checksum mismatch' }
+          }
+          python scripts/prepare_release_notes.py --tag v2.4.2 --source docs/releases/v2.4.2.md --output work/release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'Release notes preparation failed' }
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' tag -a v2.4.2 -m 'LCSC3D 2.4.2' $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Annotated tag creation failed' }
+          git push origin refs/tags/v2.4.2
+          if ($LASTEXITCODE -ne 0) { throw 'Tag publication failed' }
+          gh release create v2.4.2 outputs/LCSC3D.exe outputs/LCSC3D.zip outputs/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --verify-tag --draft --title 'LCSC3D 2.4.2' --notes-file work/release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+          gh release edit v2.4.2 --repo $env:GITHUB_REPOSITORY --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

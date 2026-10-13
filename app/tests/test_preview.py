@@ -810,6 +810,21 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertGreater(landmarks['bottom']['count'], 20)
         # WebGL framebuffer Y increases upwards, so +Z must be above -Z.
         self.assertGreater(landmarks['top']['y'], landmarks['bottom']['y'])
+        # The compact transport must produce the same actual framebuffer,
+        # including colors, normals, camera and the Z-up placement above.
+        framebuffer = '''(() => { draw();
+            const bytes=new Uint8Array(canvas.width*canvas.height*4);
+            gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,bytes);
+            let hash=2166136261; for(const b of bytes) hash=Math.imul(hash^b,16777619);
+            return hash>>>0; })()'''
+        original_pixels = self.evaluate(self.window.web, framebuffer)
+        from lcsc3d.models.model3d import Mesh, Material
+        mesh = Mesh(vertices=payload['vertices'], faces=[('red', (0,1,2)), ('blue', (3,4,5))],
+                    materials={'red': Material(tuple(payload['materials'][0])),
+                               'blue': Material(tuple(payload['materials'][1]))})
+        self.window.model_preview_loaded('C2040', revision, mesh.preview_transfer())
+        self.assertEqual(self.evaluate(self.window.web, framebuffer), original_pixels)
+        self.assertIsNone(self.window.web_model)
         self.assertFalse(self.evaluate(self.window.web, 'window.showMesh(' + json.dumps(payload) + ',"C20197",0)'))
         self.assertEqual(self.evaluate(self.window.web, 'window.getModelPreviewState()'), initial)
         target = self.window.web.focusProxy()

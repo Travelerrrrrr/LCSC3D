@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import OrderedDict
+from dataclasses import dataclass
+import threading
 from lcsc3d.core.i18n import text as ui_text, message as ui_message
 from PySide6.QtCore import Qt, QTimer, QSize, Signal, QPoint
 from PySide6.QtGui import QIcon, QImage, QPainter, QKeySequence, QPixmap, QShortcut
@@ -14,15 +17,72 @@ from lcsc3d.services.store import StoreError, check_cancelled, PART
 from lcsc3d.core.app_logging import traced, log_event, record_error, safe_part, submit_logged
 
 
+@dataclass(frozen=True)
+class DecodedPhoto:
+    image: QImage
+    source_bytes: int
+
+
+def decode_photo(value):
+    if isinstance(value, DecodedPhoto):
+        return value
+    return DecodedPhoto(QImage.fromData(value) if value else QImage(), len(value or b''))
+
+
+def fetch_photo(client, url, cancelled, edge=None):
+    check_cancelled(cancelled)
+    photo = decode_photo(client.image(url, cancelled))
+    check_cancelled(cancelled)
+    if edge and not photo.image.isNull():
+        photo = DecodedPhoto(photo.image.scaled(edge, edge, Qt.KeepAspectRatio, Qt.SmoothTransformation), photo.source_bytes)
+    return photo
+
+
+class PhotoCache(OrderedDict):
+    """Bound decoded pixels, not the usually much smaller JPEG/PNG payload."""
+    def __init__(self, max_bytes=32 * 1024 * 1024):
+        super().__init__()
+        self.max_bytes, self.size = max_bytes, 0
+
+    @staticmethod
+    def cost(pixmap):
+        return pixmap.width() * pixmap.height() * ((pixmap.depth() + 7) // 8)
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+    def __setitem__(self, key, value):
+        previous = super().pop(key, None)
+        if previous is not None:
+            self.size -= self.cost(previous)
+        cost = self.cost(value)
+        if not 0 < cost <= self.max_bytes:
+            return
+        super().__setitem__(key, value)
+        self.size += cost
+        while self.size > self.max_bytes:
+            _, removed = self.popitem(last=False)
+            self.size -= self.cost(removed)
+
+    def clear(self):
+        super().clear()
+        self.size = 0
+
+
 @traced('image.thumbnails', lambda requests, *args: {'count': len(requests)})
 def load_search_thumbnails(requests, client_factory, cancelled, progress):
     """Load distinct public URLs with bounded concurrency; never touch widgets."""
+    local = threading.local()
     def fetch(url, rows):
         check_cancelled(cancelled)
         image = QImage()
         resolved = url
         try:
-            client = client_factory()
+            if not hasattr(local, 'client'):
+                local.client = client_factory()
+            client = local.client
             if url.startswith('lcsc-part:'):
                 part = url.removeprefix('lcsc-part:')
                 if not PART.fullmatch(part):
@@ -178,7 +238,7 @@ class ImageGallery(QDialog):
         self.client = client
         self.jobs = jobs_factory(self)
         self.jobs.idle.connect(self.activity_finished)
-        self.cache = {}
+        self.cache = PhotoCache()
         self.setWindowTitle(ui_message('商品原图 · {0} · {1}', self.part, product.get('title', '')))
         self.resize(1080, 780)
         self.setMinimumSize(600, 460)
@@ -250,13 +310,14 @@ class ImageGallery(QDialog):
         if not self.isVisible() or not self.urls:
             return
         self.thumbnails.setCurrentRow(0)
+        self.thumbnail_edge = round(self.thumbnails.iconSize().width() * max(2., self.devicePixelRatioF()))
         self.jobs.start('thumbnails', self.fetch_thumbnails, lambda _: None, lambda _: None, self.thumbnail_loaded)
 
     def fetch_thumbnails(self, stop, progress):
         for index, url in enumerate(self.thumb_urls[:len(self.urls)]):
             check_cancelled(stop)
             try:
-                data = self.client.image(url, stop)
+                data = fetch_photo(self.client, url, stop, self.thumbnail_edge)
                 progress(index, data)
             except Cancelled:
                 raise
@@ -265,8 +326,9 @@ class ImageGallery(QDialog):
                 continue
 
     def thumbnail_loaded(self, index, data):
-        pixmap = QPixmap()
-        if data and pixmap.loadFromData(data):
+        photo = decode_photo(data)
+        if not photo.image.isNull():
+            pixmap = QPixmap.fromImage(photo.image)
             self.thumbnails.item(index).setIcon(QIcon(pixmap))
         else:
             log_event('WARNING', 'image.thumbnail_decode_failed', index=index, part=safe_part(self.part))
@@ -291,15 +353,16 @@ class ImageGallery(QDialog):
             log_event('DEBUG', 'image.cache_hit', index=index)
             self.show_photo(index, self.cache[index])
         else:
-            self.jobs.start('original', lambda stop, progress: self.client.image(self.urls[index], stop),
+            self.jobs.start('original', lambda stop, progress: fetch_photo(self.client, self.urls[index], stop),
                             lambda data: self.image_loaded(index, data), self.image_failed)
 
     def image_loaded(self, index, data):
-        pixmap = QPixmap()
-        if not data or not pixmap.loadFromData(data):
-            log_event('ERROR', 'image.decode_failed', index=index, part=safe_part(self.part), bytes=len(data or b''))
+        photo = decode_photo(data)
+        if photo.image.isNull():
+            log_event('ERROR', 'image.decode_failed', index=index, part=safe_part(self.part), bytes=photo.source_bytes)
             self.image_failed(StoreError(ui_text('商品原图加载失败，请重新选择图片重试。')))
             return
+        pixmap = QPixmap.fromImage(photo.image)
         self.cache[index] = pixmap
         self.show_photo(index, pixmap)
 
