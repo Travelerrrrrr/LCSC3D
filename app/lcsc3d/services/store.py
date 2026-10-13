@@ -198,6 +198,8 @@ def commercial_data(raw):
     minimum = (quantity(raw.get('minBuyNumber')) or 1) * (1 if raw.get('selfProductCode') else step)
     if any(key in raw for key in ('theRatio', 'convesionRatio', 'minBuyNumber')):
         data['quantity_step'] = step
+        data['purchase_rules_known'] = bool((quantity(raw.get('theRatio')) or quantity(raw.get('convesionRatio')))
+                                            and quantity(raw.get('minBuyNumber')))
     if 'minBuyNumber' in raw:
         data['min_quantity'] = minimum
     unit = text(raw.get('productUnit'), 20)
@@ -234,6 +236,22 @@ def commercial_data(raw):
     return data
 
 
+def purchase_availability(raw):
+    """Match the official item page's stopped-sale rules, not stock alone."""
+    if raw.get('selfProductCode'):
+        return {}
+    transit = quantity(raw.get('usableTransitNum')) or 0
+    stopped = (raw.get('productUnsealVendition') == 'no' or
+               raw.get('productCycle') in ('sold_out', 'stop_product') and
+               raw.get('productStockStatus') == 'no' and
+               not (transit > 0 and raw.get('isDisplayUsableTransitNum') is True))
+    if stopped:
+        return {'purchase_status': 'unavailable'}
+    if any(key in raw for key in ('productUnsealVendition', 'productCycle', 'productStockStatus')):
+        return {'purchase_status': 'available'}
+    return {}
+
+
 def storefront_product(raw, parameters=()):
     if not isinstance(raw, dict):
         return None
@@ -252,7 +270,7 @@ def storefront_product(raw, parameters=()):
             'image': images[0] if images else '', 'images': images, 'thumbnails': thumbnails,
             'store_url': f'https://item.szlcsc.com/{identity}.html' if identity else '',
             'parameters': list(parameters), 'details_complete': False, 'detail_source': '立创商城',
-            **commercial_data(raw)}
+            **commercial_data(raw), **purchase_availability(raw)}
 
 
 def search_page_products(payload, expected_page):
@@ -387,7 +405,8 @@ def favorite_products(payload, expected_page):
                          'package': text(raw.get('selfStandard') or raw.get('encapsulationModel') or raw.get('standard')),
                          'image': images[0] if images else '', 'images': images, 'thumbnails': thumbnails,
                          'product_id': identity, 'details_complete': False,
-                         'store_url': f'https://item.szlcsc.com/{identity}.html' if identity else ''})
+                         'store_url': f'https://item.szlcsc.com/{identity}.html' if identity else '',
+                         **commercial_data(raw), **purchase_availability(raw)})
     return products, total, size
 
 

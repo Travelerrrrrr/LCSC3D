@@ -158,7 +158,7 @@ def exception_details(error):
         details = {'error': type(current).__name__, 'frames': frames[-24:]}
         # Explicit conversion codes identify unsupported primitives without
         # recording exception text, raw source records, paths or source nets.
-        for key in ('eda_code', 'eda_domain', 'eda_primitive', 'eda_source_id'):
+        for key in ('eda_code', 'eda_domain', 'eda_primitive', 'eda_source_id', 'commerce_reason', 'commerce_stage'):
             value = getattr(current, key, None)
             if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,80}', value):
                 details[key] = value

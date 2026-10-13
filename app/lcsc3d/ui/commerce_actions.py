@@ -6,8 +6,8 @@ from PySide6.QtWidgets import QMenu
 from lcsc3d.core.app_logging import log_event, record_error, safe_part
 from lcsc3d.core.i18n import text as tr, message as msg, render
 from lcsc3d.services.store import StoreError, SessionExpired, normalize_items, check_cancelled, quantity
-from lcsc3d.services.commerce import (add_to_cart, read_cart, update_quantity, remove_items,
-                                      read_orders, CART_URL, ORDERS_URL)
+from lcsc3d.services.commerce import (add_cart_batch, read_cart, update_quantity, remove_items,
+                                      read_orders, CART_URL, ORDERS_URL, REJECTION_REASONS)
 from lcsc3d.ui.commerce import CartPanel, OrdersPanel
 from lcsc3d.ui.shell_ui import notify
 
@@ -233,8 +233,9 @@ class CommerceActions:
                 table.cellWidget(index, table.quantity_column).interpretText()
         products = list({p['part']: dict(p) for p in products}.values())
         for product in products:
-            if product['part'] in self.purchase_rules:
+            if self.purchase_rule_sources.get(product['part']):
                 product['min_quantity'], product['quantity_step'] = self.purchase_rules[product['part']]
+                product['purchase_rules_known'] = True
         rows = [(p, p.get('purchase_quantity', self.purchase_quantities.get(p['part'], quantity(p.get('min_quantity')) or 1))) for p in products]
         self.submit_cart(rows)
 
@@ -244,31 +245,82 @@ class CommerceActions:
         self.cart_busy = True; self.update_count()
         self.status.setText(tr('正在加入购物车…'))
         client = self.client
-        def add(stop, progress):
-            client.account_info(stop)
-            added = []
-            for index, (product, amount) in enumerate(rows):
-                check_cancelled(stop)
-                try:
-                    added.append(add_to_cart(client, product, amount, cancelled=stop))
-                except StoreError as exc:
-                    return dict(added=added, failed=[(product['part'], str(exc))], unattempted=rows[index + 1:])
-            return dict(added=added, failed=[], unattempted=[])
-        self.jobs.start('cart-add', add, self.cart_completed, self.cart_failed)
+        self.jobs.start('cart-add', lambda stop, progress: add_cart_batch(client, rows, cancelled=stop),
+                        self.cart_completed, self.cart_failed)
 
     def cart_completed(self, result):
-        self.cart_busy = False; self.update_count()
-        added, failed = len(result['added']), len(result['failed'])
+        self.cart_busy = False
+        rows = result['items']
+        resolved = {product['part']: product for product in result['products']}
+        for part, product in resolved.items():
+            self.set_purchase_rules(product)
+            self.set_purchase_quantity(part, self.purchase_quantities.get(part, 1))
+        counts = {status: sum(row['status'] == status for row in rows)
+                  for status in ('added', 'rejected', 'unconfirmed', 'not_sent')}
+        # Keep failed rows selected, so repeating the action does not also add
+        # the successfully handled products a second time.
+        added_parts = {row['part'] for row in rows if row['status'] == 'added'}
+        stopped_parts = {row['part'] for row in rows if row['status'] == 'rejected' and row['reason'] == 'unavailable'}
+        for part in added_parts:
+            self.search_selected.pop(part, None); self.favorite_checked.discard(part)
+        for table in (self.search_table, self.favorite_table):
+            table.blockSignals(True)
+            for index in range(table.rowCount()):
+                part = table.item(index, 1).text()
+                if part in resolved:
+                    product = table.item(index, 1).data(Qt.UserRole)
+                    product.update(resolved[part])
+                    table.item(index, 1).setData(Qt.UserRole, product)
+                    if part in self.search_selected:
+                        self.search_selected[part] = product
+                if part in added_parts:
+                    table.item(index, 0).setCheckState(Qt.Unchecked)
+                if part in stopped_parts:
+                    product = table.item(index, 1).data(Qt.UserRole)
+                    product['purchase_status'] = 'unavailable'
+                    table.item(index, 1).setData(Qt.UserRole, product)
+                    if part in self.search_selected:
+                        self.search_selected[part] = product
+                    self.show_purchase_availability(table, index, product)
+            table.blockSignals(False)
+        if result['session_expired']:
+            self.clear_session()
+        self.update_count()
         self.cart_panel.loaded = False
-        self.status.setText(msg('加购成功 {0} 项；未确认 {1} 项；未发送 {2} 项。', added, failed, len(result['unattempted'])))
-        if failed:
-            self.status.setText(self.status.text() + ' ' + tr('请先核对购物车再重试，避免重复增加数量。'))
-        notify(self, tr('购物车'), self.status.text(), severity='warning' if failed else 'success',
-               actions=((tr('查看购物车'), lambda: self.tabs.setCurrentIndex(2)),))
-        log_event('INFO' if not failed else 'WARNING', 'cart.batch_completed', count=added, failed_count=failed,
-                  pending_count=len(result['unattempted']))
-        self.save_session()
-        if self.tabs.currentIndex() == 2:
+        summary = msg('加购成功 {0} 项；失败 {1} 项；未确认 {2} 项；未发送 {3} 项。',
+                      counts['added'], counts['rejected'], counts['unconfirmed'], counts['not_sent'])
+        reason_text = {**REJECTION_REASONS,
+            'session_expired': '登录已失效，请重新登录后再试。',
+            'request_unconfirmed': '请求结果未确认，请先核对购物车，避免重复加购。',
+            'previous_unconfirmed': '前一项结果未确认，已停止发送。',
+            'account_check_failed': '账号校验未完成，本项未发送。'}
+        labels = {'added': tr('成功'), 'rejected': tr('失败'), 'unconfirmed': tr('未确认'), 'not_sent': tr('未发送')}
+        lines, issues = [], []
+        for row in rows:
+            line = msg('{0} × {1}：{2}', row['part'], row['quantity'], labels[row['status']])
+            if row['reason']:
+                rules = resolved.get(row['part'])
+                if row['reason'] == 'quantity_rule' and rules and rules.get('min_quantity') and rules.get('quantity_step'):
+                    line += ' · ' + msg('起订量 {0}，递增量 {1}；已更新数量，请确认后再加购。', rules['min_quantity'], rules['quantity_step'])
+                else:
+                    line += ' · ' + tr(reason_text.get(row['reason'], '请求结果未确认，请先核对购物车，避免重复加购。'))
+            if row['service_code'] is not None:
+                line += ' ' + msg('（错误码 {0}）', row['service_code'])
+            lines.append(render(line))
+            if row['status'] != 'added':
+                issues.append(render(line))
+        # A compact toast, with the complete per-item result in Messages.
+        preview = '\n'.join(issues[:2])
+        self.status.setText(summary + (' ' + issues[0] if issues else ''))
+        actions = [(tr('查看购物车'), lambda: self.tabs.setCurrentIndex(2))]
+        if self.app_window is not None and hasattr(self.app_window, 'open_messages'):
+            actions.append((tr('查看结果'), self.app_window.open_messages))
+        notify(self, tr('购物车'), summary + ('\n' + preview if preview else ''),
+               severity='warning' if issues else 'success', actions=tuple(actions), details='\n'.join(lines))
+        log_event('INFO', 'cart.batch_presented', count=len(rows))
+        if not result['session_expired']:
+            self.save_session()
+        if self.tabs.currentIndex() == 2 and not result['session_expired']:
             self.load_cart()
 
     def cart_failed(self, error):

@@ -10,7 +10,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from lcsc3d.core.app_logging import log_event, get_log_directory
 from lcsc3d.services.log_support import package_logs, clear_logs
 from lcsc3d.services.commerce import CART_URL
-from lcsc3d.selftests.favorites_selftest import OfflineStore
+from lcsc3d.selftests.favorites_selftest import OfflineStore, fixture_store_record
 from lcsc3d.ui import commerce_actions
 from lcsc3d.ui.favorites import FavoritesDialog
 
@@ -134,13 +134,56 @@ def start(window, folder):
                 dialog.tabs.setCurrentIndex(0)
                 assert dialog.search_table.cellWidget(0, dialog.search_table.quantity_column).value() == 5
                 report['quantity_preserved_between_tabs'] = True
+                batch_products = (
+                    dict(part='C20618009', title='OD1EL89CEIBXE6YLC-100M', details_complete=True),
+                    dict(part='C5832372', title='FTC252012S2R2MBCA', details_complete=True,
+                         product_id='6763492'))
+                service.details['6763492'] = {**fixture_store_record('C5832372'),
+                                              'productId': '6763492', 'convesionRatio': 20}
+                dialog.items = {product['part']: product for product in batch_products}
+                dialog.tabs.setCurrentIndex(1)
+                table = dialog.favorite_table
+                table.setRowCount(0)
+                for index, product in enumerate(batch_products):
+                    dialog.append_row(table, product)
+                    table.item(index, 0).setCheckState(Qt.Checked)
+                service.cart_replies['C20618009'] = {'code': 402, 'msg': '商品已停售'}
+                for toast in list(window.notifications.toasts):
+                    toast.close()
+                dialog.cart_button.click()
+                state['mode'] = 'favorite-rules'
+            elif mode == 'favorite-rules' and not dialog.cart_busy:
+                assert '失败 2 项' in dialog.status.text()
+                assert not any(row['productCode'][0] == 'C5832372' for row in service.cart_adds)
+                table = dialog.favorite_table
+                assert table.cellWidget(1, table.quantity_column).value() == 20
+                assert table.item(1, table.step_column).text() == '20'
+                report['favorite_rules_checked_before_write'] = True
+                for toast in list(window.notifications.toasts):
+                    toast.close()
+                dialog.cart_button.click()
+                state['mode'] = 'batch-result'
+            elif mode == 'batch-result' and not dialog.cart_busy:
+                assert [row['productCode'][0] for row in service.cart_adds[-2:]] == ['C20618009', 'C5832372']
+                assert '成功 1 项；失败 1 项；未确认 0 项；未发送 0 项' in dialog.status.text()
+                assert 'C20618009' in dialog.status.text()
+                assert '已停售' in dialog.favorite_table.item(0, 2).text()
+                assert dialog.favorite_table.item(1, 0).checkState() == Qt.Unchecked
+                entry = window.notifications.history.entries[0]
+                assert 'C20618009 × 1：失败' in entry['details'] and 'C5832372 × 20：成功' in entry['details']
+                report['batch_rejection_continues'] = report['per_item_cart_results'] = True
+                state['capture_after'] = time.monotonic() + .4
+                state['mode'] = 'batch-capture'
+            elif mode == 'batch-capture' and time.monotonic() >= state['capture_after']:
+                window.grab().save(str(root / 'native-batch-result.png'))
                 dialog.clear_session()
                 assert dialog.cart_panel.table.rowCount() == dialog.orders_panel.table.rowCount() == 0
                 report['logout_clears_account_tables'] = True
                 state['mode'] = 'finish'
             elif mode == 'finish' and not dialog.has_jobs():
                 events = (get_log_directory() / 'LCSC3D.log').read_text('utf-8')
-                assert all(event in events for event in ('cart.add_confirmed', 'cart.quantity.finished', 'orders.loaded', 'commerce.external_open'))
+                assert all(event in events for event in ('cart.add_confirmed', 'cart.quantity.finished', 'orders.loaded',
+                    'commerce.external_open', 'cart.response_rejected', 'cart.batch_item', 'cart.batch_completed', 'cart.batch_presented'))
                 assert package_logs()['path'].is_file()
                 assert not clear_logs()['failures']
                 assert log_event('INFO', 'verification.native_commerce_after_clear')

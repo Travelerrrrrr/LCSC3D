@@ -60,7 +60,7 @@ def fixture_store_record(part='C2040', title='RP2040'):
             'productType': '单片机(MCU)', 'productName': '本地离线测试商品',
             'remark': '本地离线测试数据，非真实商城账号。',
             'breviaryImageUrl': urls[0], 'luceneBreviaryImageUrls': '<$>'.join(urls),
-            'minBuyNumber': 1, 'productUnit': '个', 'stockNumber': 12345,
+            'minBuyNumber': 1, 'convesionRatio': 1, 'productUnit': '个', 'stockNumber': 12345,
             'productPriceList': [
                 {'startPurchasedNumber': 1, 'endPurchasedNumber': 9, 'productPrice': '0.012345'},
                 {'startPurchasedNumber': 10, 'endPurchasedNumber': 99, 'productPrice': '0.010111'},
@@ -109,6 +109,7 @@ class OfflineStore:
         self.removed_ids = set()
         self.cart_adds = []
         self.cart_code = 200
+        self.cart_replies = {}
         self.cart_rows = []
         self.cart_steps = {}
         self.cart_updates = []
@@ -142,7 +143,8 @@ class OfflineStore:
                 if parsed.path == '/cart/quick':
                     fields = parse_qs(body.decode())
                     owner.cart_adds.append(fields)
-                    if owner.cart_code == 200:
+                    reply = owner.cart_replies.get(fields['productCode'][0], {'code': owner.cart_code})
+                    if reply.get('code') == 200:
                         part, amount = fields['productCode'][0], int(fields['productNumber'][0])
                         row = next((row for row in owner.cart_rows if row['productCode'] == part), None)
                         if row is None:
@@ -152,7 +154,7 @@ class OfflineStore:
                             owner.cart_rows.append(row)
                         row['productNumber'] += amount / row['convesionRatio']
                         row['lineMoney'] = str(row['productNumber'] * row['convesionRatio'] * .5)
-                    value = {'code': owner.cart_code, 'result': {'cart_contains_count': len(owner.cart_adds)}}
+                    value = {'result': {'cart_contains_count': len(owner.cart_adds)}, **reply}
                 elif parsed.path == '/cart/display':
                     value = {'code': owner.cart_code, 'result': {'shoppingCartVO': {'rmbCnShoppingCart': {'currentlyProductList': owner.cart_rows}}}}
                 elif parsed.path == '/cart/update':

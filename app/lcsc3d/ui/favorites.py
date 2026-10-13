@@ -25,6 +25,7 @@ from lcsc3d.services.store_diagnostics import record_request_error
 from lcsc3d.core.app_logging import (log_event, new_context, log_context, contextual, record_error, traced, safe_part)
 from lcsc3d.ui.commerce_actions import CommerceActions
 from lcsc3d.ui.commerce import QuantityInput, PriceTierBox
+from lcsc3d.services.commerce import purchase_rules_known
 
 
 THUMBNAIL_COLUMN = 9
@@ -652,6 +653,7 @@ class FavoritesDialog(CommerceActions, QDialog):
         self.thumbnail_cache = OrderedDict()
         self.purchase_quantities = getattr(parent, 'purchase_quantities', {})
         self.purchase_rules = getattr(parent, 'purchase_rules', {})
+        self.purchase_rule_sources = getattr(parent, 'purchase_rule_sources', {})
         self.favorite_checked = set()
         self.galleries = []
         self.items, self.search_items = {}, []
@@ -1053,14 +1055,25 @@ class FavoritesDialog(CommerceActions, QDialog):
         table.setItem(row, table.step_column, QTableWidgetItem(str(step)))
         self.set_purchase_quantity(product['part'], spin.value())
         self.set_thumbnail(table, row, product)
+        self.show_purchase_availability(table, row, product)
         table.blockSignals(was_blocked)
+
+    def show_purchase_availability(self, table, row, product):
+        stopped = product.get('purchase_status') == 'unavailable'
+        title = product.get('title', '')
+        table.item(row, 2).setText((ui_text('已停售 · ') if stopped else '') + title)
+        table.item(row, 2).setToolTip(title + (ui_text('\n商品已停售，无法加购；仍可下载资料或收藏。') if stopped else ''))
 
     def set_purchase_rules(self, product):
         part = product['part']
         minimum, step = self.purchase_rules.get(part, (1, 1))
+        known = purchase_rules_known(product)
+        if not known and self.purchase_rule_sources.get(part):
+            return minimum, step
         minimum = max(1, min(999999999, int(product.get('min_quantity') or minimum)))
         step = max(1, min(999999999, int(product.get('quantity_step') or step)))
         self.purchase_rules[part] = (minimum, step)
+        self.purchase_rule_sources[part] = known
         return minimum, step
 
     def set_purchase_quantity(self, part, amount):
@@ -1079,7 +1092,8 @@ class FavoritesDialog(CommerceActions, QDialog):
                         spin.blockSignals(blocked)
                     cell = table.item(row, table.step_column)
                     if cell:
-                        cell.setText(str(step))
+                        cell.setText(str(step) if self.purchase_rule_sources.get(part) else '—')
+                        cell.setToolTip('' if self.purchase_rule_sources.get(part) else ui_text('购买规则待核实，加购前自动检查。'))
                     if table is self.search_table:
                         price = table.cellWidget(row, 5)
                         if price:
@@ -1504,6 +1518,7 @@ class FavoritesDialog(CommerceActions, QDialog):
         for column, key in ((2, 'title'), (3, 'manufacturer'), (4, 'package')):
             self.table.item(row, column).setText(product.get(key, ''))
             self.table.item(row, column).setToolTip(product.get(key, ''))
+        self.show_purchase_availability(self.table, row, selected)
         self.table.blockSignals(False)
         self.show_detail(selected)
         if not self.table.item(row, self.table.thumbnail_column).data(Qt.UserRole):
@@ -1518,6 +1533,8 @@ class FavoritesDialog(CommerceActions, QDialog):
         self.current_product = product
         self.product_title.setText(product.get('title') or product['part'])
         meta = [product['part'], product.get('manufacturer'), product.get('package'), product.get('category')]
+        if product.get('purchase_status') == 'unavailable':
+            meta.append(ui_text('已停售'))
         resources = product.get('resources', {})
         available = [label for key, label in (('Symbol', ui_text('符号')), ('Footprint', ui_text('封装')), ('3D Model', ui_text('3D 模型'))) if resources.get(key)]
         self.product_meta.setText(' · '.join(v for v in meta if v) + (ui_text('\n可用资源：') + ' / '.join(available) if available else ''))

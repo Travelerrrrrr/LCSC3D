@@ -281,6 +281,7 @@ class MainWindow(FramelessMainWindow):
         self.ids = []
         self.purchase_quantities = {}
         self.purchase_rules = {}
+        self.purchase_rule_sources = {}
         self.results = {}
         self.component_info = {}
         self.info_rows = {}
