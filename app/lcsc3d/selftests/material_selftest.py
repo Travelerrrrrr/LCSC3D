@@ -69,6 +69,10 @@ def start(window, folder):
             # Match the five-row layout regression's reference window size;
             # the startup size is clamped to the runner's available desktop.
             window.resize(1380, 880)
+            # Five rows are required in the default export state. PcbLib adds
+            # a model-options row, for which the table reserves four rows.
+            window.schlib_box.setChecked(False)
+            window.pcblib_box.setChecked(False)
             window.input.setPlainText('\n'.join(['C2040', 'C20197'] + ['C' + str(10000 + n) for n in range(38)]))
             window.load_queue()
             window.table.setFocus()
@@ -85,6 +89,13 @@ def start(window, folder):
                 row_height=window.table.rowHeight(0), header_height=window.table.horizontalHeader().height(),
                 scrollbar_width=window.table.verticalScrollBar().width(), progress_in_export_card=True)
             capture(window, 'workspace-queue-white-text')
+            window.schlib_box.setChecked(True)
+            window.pcblib_box.setChecked(True)
+            settle()
+            QTest.qWait(100)
+            export_rows = window.table.viewport().height() // window.table.rowHeight(0)
+            assert export_rows >= 4 and window.content_scroll.verticalScrollBar().maximum() == 0
+            report['queue_layout']['rows_with_model_options'] = export_rows
             window.input.setPlainText('C2040\nC20197')
             window.load_queue()
             window.table.item(1, main.DOWNLOAD_COLUMN).setCheckState(Qt.Unchecked)
@@ -166,12 +177,16 @@ def start(window, folder):
                     settle()
                     pixels = button.grab().toImage()
                     expected = theme_manager().tokens['accent_ink' if button.isEnabled() else 'disabled']
-                    half = round(button.iconSize().width() * pixels.devicePixelRatio() / 2)
+                    ratio = pixels.devicePixelRatio()
+                    half = round(button.iconSize().width() * ratio / 2)
                     cx, cy = pixels.width() // 2, pixels.height() // 2
                     ink = sum(max(abs(int(pixels.pixelColor(x, y).name()[i:i + 2], 16) - int(expected[i:i + 2], 16))
                                   for i in (1, 3, 5)) < 30
                               for y in range(cy - half, cy + half) for x in range(cx - half, cx + half))
-                    assert ink > 15, 'Missing file toolbar icon: ' + button.objectName()
+                    # Match test_file_picker: the parent arrow has only 14
+                    # solid pixels at 100%; compare logical area across DPI.
+                    assert ink / ratio ** 2 > 8, 'Missing file toolbar icon: ' + button.objectName()
+                    assert ink < (2 * half) ** 2 // 2, 'Solid file toolbar icon: ' + button.objectName()
                 assert picker.locations_panel.geometry().right() < picker.listing_panel.geometry().left()
                 capture(window, name)
             picker.toolbar_buttons['toParentButton'].click()
