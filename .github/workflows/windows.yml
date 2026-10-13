@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-and-build:
     runs-on: windows-latest
@@ -88,6 +92,8 @@ jobs:
         run: |
           $version = Select-String -LiteralPath app/lcsc3d/ui/main.py -Pattern "^VERSION = '2.4.2'$"
           if (-not $version) { throw 'Release version mismatch' }
+          $head = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:GITHUB_SHA) { throw 'A newer main commit must be verified before release' }
           git diff --exit-code v2.4.1 HEAD -- README.md README.en.md
           if ($LASTEXITCODE -ne 0) { throw 'Homepage README must remain unchanged' }
           git show-ref --verify --quiet refs/tags/v2.4.2

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,7 +27,7 @@ def main():
     outputs.mkdir(exist_ok=True)
     shutil.copyfile(executable, outputs / 'LCSC3D.exe')
     version = re.search(r"^VERSION = '([^']+)'", (ROOT / 'app/lcsc3d/ui/main.py').read_text('utf-8'), re.M)[1]
-    report = dict(version=version, source_commit=os.environ.get('GITHUB_SHA', ''), cases=[], success=False)
+    report = dict(version=version, source_commit=os.environ.get('GITHUB_SHA', ''), cases=[], errors=[], success=False)
     environment = os.environ.copy()
     environment['LOCALAPPDATA'] = str(work / 'driver-profile')
     environment['PYTHONPATH'] = str(ROOT / 'app')
@@ -43,6 +44,13 @@ def main():
 
     def script(name, *arguments, timeout=360):
         run(name, [sys.executable, str(ROOT / 'scripts' / (name + '.py')), *map(str, arguments)], timeout)
+
+    def attempt(name, operation):
+        try:
+            operation()
+        except Exception as error:
+            report['errors'].append(dict(name=name, error=str(error)))
+            traceback.print_exc()
 
     def frozen(name, flag, filename, timeout=180):
         case = work / name
@@ -85,30 +93,34 @@ def main():
             ('material-ui', '--self-test-material', 'material-verification.json'),
             ('live-resources', '--self-test-resources', 'verification.json'),
             ('live-store', '--self-test-store-live', 'store-live-verification.json')):
-            frozen(name, flag, filename)
-        script('verify_commerce_delivery', '--exe', executable, '--verify-dir', work / 'commerce')
-        script('verify_progress_delivery', '--exe', executable, '--verify-dir', work / 'progress')
+            attempt(name, lambda: frozen(name, flag, filename))
+        attempt('commerce', lambda: script('verify_commerce_delivery', '--exe', executable, '--verify-dir', work / 'commerce'))
+        attempt('progress', lambda: script('verify_progress_delivery', '--exe', executable, '--verify-dir', work / 'progress'))
         # Public model bytes are downloaded once, then all placement/export cases
         # run offline. No saved account or login is used.
-        sys.path.insert(0, str(ROOT / 'app'))
-        from lcsc3d.services.backend import NetworkApi
-        from lcsc3d.models.model3d import model_reference
-        model_fixtures = work / 'model-fixtures'
-        model_fixtures.mkdir()
-        source = ROOT / 'app/tests/fixtures/C2765186.json'
-        shutil.copyfile(source, model_fixtures / source.name)
-        reference = model_reference(json.loads(source.read_text('utf-8')))
-        api = NetworkApi(use_cache=False)
-        (model_fixtures / 'source.step').write_bytes(api.get_step_3d_model(reference.uuid))
-        (model_fixtures / 'source.obj').write_text(api.get_raw_3d_model_obj(reference.uuid), 'utf-8')
-        script('verify_model_delivery', '--exe', executable, '--fixtures', model_fixtures, '--verify-dir', work / 'models')
-        script('verify_portable', '--output-dir', outputs, '--verify-dir', work / '便携验证')
-        script('verify_app_data', '--output-dir', outputs, '--verify-dir', work / 'app-data')
+        def models():
+            sys.path.insert(0, str(ROOT / 'app'))
+            from lcsc3d.services.backend import NetworkApi
+            from lcsc3d.models.model3d import model_reference
+            model_fixtures = work / 'model-fixtures'
+            model_fixtures.mkdir()
+            source = ROOT / 'app/tests/fixtures/C2765186.json'
+            shutil.copyfile(source, model_fixtures / source.name)
+            reference = model_reference(json.loads(source.read_text('utf-8')))
+            api = NetworkApi(use_cache=False)
+            (model_fixtures / 'source.step').write_bytes(api.get_step_3d_model(reference.uuid))
+            (model_fixtures / 'source.obj').write_text(api.get_raw_3d_model_obj(reference.uuid), 'utf-8')
+            script('verify_model_delivery', '--exe', executable, '--fixtures', model_fixtures, '--verify-dir', work / 'models')
+        attempt('models', models)
+        attempt('portable', lambda: script('verify_portable', '--output-dir', outputs, '--verify-dir', work / '便携验证'))
+        attempt('app-data', lambda: script('verify_app_data', '--output-dir', outputs, '--verify-dir', work / 'app-data'))
         for scenario in ('success', 'bad-checksum', 'no-update', 'check-failure'):
-            run('update-' + scenario, [sys.executable, str(ROOT / 'scripts/local_update_test.py'),
-                                      '--exe', str(executable), '--auto', '--scenario', scenario])
-        run('update-startup', [sys.executable, str(ROOT / 'scripts/local_update_test.py'),
-                               '--exe', str(executable), '--auto', '--startup'])
+            attempt('update-' + scenario, lambda: run('update-' + scenario,
+                [sys.executable, str(ROOT / 'scripts/local_update_test.py'), '--exe', str(executable), '--auto', '--scenario', scenario]))
+        attempt('update-startup', lambda: run('update-startup', [sys.executable, str(ROOT / 'scripts/local_update_test.py'),
+                                                               '--exe', str(executable), '--auto', '--startup']))
+        if report['errors']:
+            raise RuntimeError('Frozen acceptance failed: ' + ', '.join(row['name'] for row in report['errors']))
         script('package_source', '--output-dir', outputs)
         script('verify_bundle', '--exe', outputs / 'LCSC3D.exe', '--source-zip', outputs / 'LCSC3D.zip',
                '--report', work / 'bundle-verification.json')

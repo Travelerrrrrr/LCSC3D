@@ -598,6 +598,14 @@ def start(window, destination):
                 assert dialog.search_total == 75 and dialog.search_pages == 4
                 assert not dialog.selected_items()
                 report['first_search_page'] = 20
+                # Images load as rows become visible. Exercise scrolling rather
+                # than requiring off-screen images to be fetched eagerly.
+                missing = [row for row in range(20) if dialog.search_table.item(row, THUMBNAIL_COLUMN).icon().isNull()]
+                if missing:
+                    dialog.search_table.scrollToItem(dialog.search_table.item(missing[0], THUMBNAIL_COLUMN))
+                    dialog.start_thumbnails(dialog.search_table)
+                    return
+                dialog.search_table.scrollToTop()
                 assert all(not dialog.search_table.item(row, THUMBNAIL_COLUMN).icon().isNull() for row in range(20))
                 report['row_thumbnails'] = 20
                 report['search_total'] = 75
