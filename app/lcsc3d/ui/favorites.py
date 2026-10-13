@@ -24,10 +24,10 @@ from lcsc3d.ui.store_images import ImageGallery, ProductImage, load_search_thumb
 from lcsc3d.services.store_diagnostics import record_request_error
 from lcsc3d.core.app_logging import (log_event, new_context, log_context, contextual, record_error, traced, safe_part)
 from lcsc3d.ui.commerce_actions import CommerceActions
-from lcsc3d.ui.commerce import QuantityInput
+from lcsc3d.ui.commerce import QuantityInput, PriceTierBox
 
 
-THUMBNAIL_COLUMN = 8
+THUMBNAIL_COLUMN = 9
 
 
 class ProductTable(QTableWidget):
@@ -650,8 +650,8 @@ class FavoritesDialog(CommerceActions, QDialog):
         self.search_keyword = ''
         self.search_selected = {}
         self.thumbnail_cache = OrderedDict()
-        self.price_choices = {}
         self.purchase_quantities = getattr(parent, 'purchase_quantities', {})
+        self.purchase_rules = getattr(parent, 'purchase_rules', {})
         self.favorite_checked = set()
         self.galleries = []
         self.items, self.search_items = {}, []
@@ -869,9 +869,10 @@ class FavoritesDialog(CommerceActions, QDialog):
         labels = [ui_text('选择'), ui_text('C 编号'), ui_text('型号'), ui_text('厂商'), ui_text('封装')]
         if commercial:
             labels += [ui_text('单价 / 梯度'), ui_text('库存')]
-        labels += [ui_text('数量'), ui_text('图片')]
+        labels += [ui_text('数量'), ui_text('递增量'), ui_text('图片')]
         table = ProductTable(0, len(labels))
-        table.quantity_column = table.columnCount() - 2
+        table.quantity_column = table.columnCount() - 3
+        table.step_column = table.columnCount() - 2
         table.setHorizontalHeaderLabels(labels)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -893,13 +894,17 @@ class FavoritesDialog(CommerceActions, QDialog):
         table.horizontalHeader().setSectionResizeMode(table.thumbnail_column, QHeaderView.Fixed)
         table.horizontalHeader().setSectionResizeMode(table.quantity_column, QHeaderView.Fixed)
         table.setColumnWidth(table.quantity_column, 130)
+        table.horizontalHeader().setSectionResizeMode(table.step_column, QHeaderView.Fixed)
+        table.setColumnWidth(table.step_column, 85)
         # Stable data/price columns; visually place photos after checkboxes.
         table.horizontalHeader().moveSection(table.thumbnail_column, 1)
         table.horizontalHeader().moveSection(table.horizontalHeader().visualIndex(table.quantity_column), 4)
+        table.horizontalHeader().moveSection(table.horizontalHeader().visualIndex(table.step_column), 5)
         table.cellDoubleClicked.connect(lambda row, column: self.open_gallery() if column == table.thumbnail_column else None)
         if commercial:
             table.setColumnWidth(5, 210)
             table.setColumnWidth(6, 85)
+            table.horizontalHeader().moveSection(table.horizontalHeader().visualIndex(5), 6)
         if self.international:
             for column in (0, 1, 3, 4) + ((5, 6) if commercial else ()):
                 title = table.horizontalHeaderItem(column).text()
@@ -941,7 +946,6 @@ class FavoritesDialog(CommerceActions, QDialog):
         self.category_combo.hide()
         self.category_combo.blockSignals(False)
         self.search_selected.clear()
-        self.price_choices.clear()
         self.search_page = 0
         self.search_total, self.search_pages = 0, 0
         self.search_items = []
@@ -1041,28 +1045,52 @@ class FavoritesDialog(CommerceActions, QDialog):
         table.item(row, 1).setData(Qt.UserRole, product)
         if table is self.search_table:
             self.append_commerce(row, product)
-        minimum = max(1, int(product.get('min_quantity') or 1))
-        spin = QuantityInput(self.purchase_quantities.get(product['part'], minimum), minimum)
-        spin.setToolTip(str(ui_text('本次加入购物车的数量；右键即可按此数量加购')))
+        minimum, step = self.set_purchase_rules(product)
+        spin = QuantityInput(self.purchase_quantities.get(product['part'], minimum), minimum, step=step)
         self.purchase_quantities[product['part']] = spin.value()
         spin.valueChanged.connect(lambda amount, part=product['part']: self.set_purchase_quantity(part, amount))
         table.setCellWidget(row, table.quantity_column, spin)
+        table.setItem(row, table.step_column, QTableWidgetItem(str(step)))
+        self.set_purchase_quantity(product['part'], spin.value())
         self.set_thumbnail(table, row, product)
         table.blockSignals(was_blocked)
 
+    def set_purchase_rules(self, product):
+        part = product['part']
+        minimum, step = self.purchase_rules.get(part, (1, 1))
+        minimum = max(1, min(999999999, int(product.get('min_quantity') or minimum)))
+        step = max(1, min(999999999, int(product.get('quantity_step') or step)))
+        self.purchase_rules[part] = (minimum, step)
+        return minimum, step
+
     def set_purchase_quantity(self, part, amount):
+        minimum, step = self.purchase_rules.get(part, (1, 1))
+        amount = min(999999999 // step * step, (max(minimum, amount) + step - 1) // step * step)
+        if self.purchase_quantities.get(part) != amount:
+            log_event('DEBUG', 'store.purchase_quantity', part=safe_part(part), quantity=amount, increment=step)
         self.purchase_quantities[part] = amount
         for table in (self.search_table, self.favorite_table):
             for row in range(table.rowCount()):
                 if table.item(row, 1).text() == part:
                     spin = table.cellWidget(row, table.quantity_column)
-                    if spin and spin.value() != amount:
-                        blocked = spin.blockSignals(True); spin.setValue(amount); spin.blockSignals(blocked)
+                    if spin:
+                        blocked = spin.blockSignals(True)
+                        spin.set_rules(minimum, step); spin.setValue(amount)
+                        spin.blockSignals(blocked)
+                    cell = table.item(row, table.step_column)
+                    if cell:
+                        cell.setText(str(step))
+                    if table is self.search_table:
+                        price = table.cellWidget(row, 5)
+                        if price:
+                            price.set_quantity(amount)
         parent = self.app_window
         if parent is not None and hasattr(parent, 'ids') and part in parent.ids:
             spin = parent.table.cellWidget(parent.ids.index(part), 4)
             if spin is not None:
-                blocked = spin.blockSignals(True); spin.setValue(amount); spin.blockSignals(blocked)
+                blocked = spin.blockSignals(True)
+                spin.set_rules(minimum, step); spin.setValue(amount)
+                spin.blockSignals(blocked)
 
     def set_thumbnail(self, table, row, product):
         urls = product.get('thumbnails') or product.get('images') or [product.get('image', '')]
@@ -1138,16 +1166,9 @@ class FavoritesDialog(CommerceActions, QDialog):
             cell.setToolTip(ui_text('商城暂未提供可显示的价格。'))
             self.search_table.setItem(row, 5, cell)
             return
-        combo = QComboBox()
-        combo.setMaxVisibleItems(12)
-        unit = product.get('unit', ui_text('个'))
-        for tier in tiers:
-            combo.addItem(ui_message('{0}+  {1}{2}/{3}', tier['quantity'], product.get('currency_symbol', '¥'), tier['price'], unit), tier['quantity'])
-        index = combo.findData(self.price_choices.get(product['part']))
-        combo.setCurrentIndex(max(0, index))
-        combo.setToolTip(ui_text('选择该商品的实际价格梯度，价格按') + unit + ui_text('计。'))
+        combo = PriceTierBox(product)
+        combo.set_quantity(self.purchase_quantities.get(product['part'], product.get('min_quantity', 1)))
         self.search_table.setCellWidget(row, 5, combo)
-        combo.currentIndexChanged.connect(lambda _: self.price_choices.__setitem__(product['part'], combo.currentData()))
 
     def checkbox_changed(self, table, item):
         if item.column() == 0:
@@ -1474,11 +1495,12 @@ class FavoritesDialog(CommerceActions, QDialog):
         if selected['part'] in self.search_selected:
             self.search_selected[selected['part']] = selected
         row = self.table.currentRow()
-        minimum = product.get('min_quantity')
-        if type(minimum) is int and 1 <= minimum <= 999999999:
-            self.table.cellWidget(row, self.table.quantity_column).setMinimum(minimum)
+        self.set_purchase_rules(selected)
+        self.set_purchase_quantity(selected['part'], self.purchase_quantities.get(selected['part'], 1))
         self.table.blockSignals(True)
         self.table.item(row, 1).setData(Qt.UserRole, selected)
+        if self.table is self.search_table:
+            self.append_commerce(row, selected)
         for column, key in ((2, 'title'), (3, 'manufacturer'), (4, 'package')):
             self.table.item(row, column).setText(product.get(key, ''))
             self.table.item(row, column).setToolTip(product.get(key, ''))

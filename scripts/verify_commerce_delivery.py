@@ -31,7 +31,8 @@ def verify(exe, root):
     report = json.loads((destination / 'commerce-verification.json').read_text('utf-8'))
     assert process.returncode == 0 and report['success'] and report['frozen'], report
     for flag in ('context_download_and_quantity_sync', 'inline_add_without_navigation', 'no_storefront_webview',
-                 'native_cart_quantity_saved', 'submit_then_external_browser_once', 'native_order_list',
+                 'native_cart_quantity_saved', 'external_cart_without_checkout', 'native_order_list',
+                 'quantity_increments_and_price_tiers',
                  'quantity_preserved_between_tabs', 'logout_clears_account_tables',
                  'logs_package_and_continue_after_clear', 'single_native_window'):
         assert report[flag], flag

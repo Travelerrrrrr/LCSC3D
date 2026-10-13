@@ -280,6 +280,7 @@ class MainWindow(FramelessMainWindow):
         self.batch_ids = []
         self.ids = []
         self.purchase_quantities = {}
+        self.purchase_rules = {}
         self.results = {}
         self.component_info = {}
         self.info_rows = {}
@@ -1123,7 +1124,8 @@ class MainWindow(FramelessMainWindow):
         menu.exec(self.table.viewport().mapToGlobal(position))
 
     def add_purchase_quantity(self, row, part):
-        spin = QuantityInput(self.purchase_quantities.get(part, 1))
+        minimum, step = self.purchase_rules.get(part, (1, 1))
+        spin = QuantityInput(self.purchase_quantities.get(part, minimum), minimum, step=step)
         spin.setToolTip(str(ui_text('本次加入购物车的数量；右键即可按此数量加购')))
         def changed(amount):
             self.purchase_quantities[part] = amount

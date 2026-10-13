@@ -29,7 +29,7 @@ LCSC3D is a portable Windows tool for hardware development, PCB design and mecha
 
 - Fix missing datasheets caused by the mainland store's new file metadata and manufacturer links.
 - Add native mainland Cart and My Orders tables. Edit quantities inline and add selected rows directly through the context menu.
-- Submit selected cart items before opening checkout in the external browser. International accounts continue to use LCSC.com. This is a local delivery, not a published Release.
+- Quantities follow each part’s increment, prices follow the entered quantity, and all price tiers remain available to inspect. Open cart in browser goes directly to the official cart without submitting checkout. International accounts continue to use LCSC.com. This is a local delivery, not a published Release.
 
 ## What's new in 2.4.0
 
@@ -167,7 +167,7 @@ See the [architecture and compatibility guide (Chinese)](docs/EDA中间层.md) f
 | Feature | What it provides |
 | --- | --- |
 | Store and favorites | Search by C-number, MPN or keyword, with 20 results per page and selections retained across pages. Search and favorites show thumbnails; double-click to view original images. |
-| Prices and information | View stock, choose price tiers independently, read full specifications, and open datasheets and original images. |
+| Prices and information | View stock, match prices to quantities and inspect all price tiers, read full specifications, and open datasheets and original images. |
 | Four previews | Switch between 3D models, symbols, footprints and product photos, with zoom, pan and fit-to-window controls. |
 | Batch downloads | Combine STEP / OBJ with the selected target's two library formats; track per-part results, stop and retry. |
 | Library organization | Reuse identical footprints and optionally retain individual parts. Without per-part copies, models use a shared `library-name_3D` folder. |

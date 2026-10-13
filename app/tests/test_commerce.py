@@ -13,10 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import Qt, QUrl, QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 from lcsc3d.core import app_logging as logs
-from lcsc3d.services.store import StoreClient, StoreError, SessionExpired, product_page, datasheet_url
-from lcsc3d.services.commerce import (add_to_cart, cart_items, order_page, update_quantity, prepare_checkout, read_cart, read_orders, CHECKOUT_URL)
+from lcsc3d.services.store import StoreClient, StoreError, SessionExpired, product_page, datasheet_url, commercial_data
+from lcsc3d.services.commerce import (add_to_cart, cart_items, order_page, update_quantity, read_cart, read_orders, CART_URL)
 from lcsc3d.selftests.favorites_selftest import OfflineStore
-from lcsc3d.ui.commerce import QuantityInput
+from lcsc3d.ui.commerce import QuantityInput, PriceTierBox
 from lcsc3d.ui.favorites import FavoritesDialog
 
 
@@ -87,6 +87,25 @@ class CartApiTests(unittest.TestCase):
         with self.assertRaises(SessionExpired):
             add_to_cart(self.client, product, 10)
 
+    def test_purchase_increment_uses_ratio_and_converts_minimum_and_tiers_to_pieces(self):
+        for step in (5, 50):
+            with self.subTest(step=step):
+                data = commercial_data({'minBuyNumber': 2, 'theRatio': step, 'convesionRatio': step,
+                    'productMinEncapsulationNumber': 3000, 'productPriceList': [
+                        {'startPurchasedNumber': 1, 'endPurchasedNumber': 9, 'productPrice': '0.125'},
+                        {'startPurchasedNumber': 10, 'endPurchasedNumber': -1, 'productPrice': '0.10'}]})
+                self.assertEqual((data['min_quantity'], data['quantity_step']), (2 * step, step))
+                self.assertEqual([r['quantity'] for r in data['price_tiers']], [2 * step, 10 * step])
+                self.assertEqual(data['price_tiers'][0]['end'], 9 * step)
+                self.assertEqual(data['price_tiers'][0]['price'], '0.125')
+
+    def test_invalid_increment_is_rejected_before_cart_write(self):
+        with self.assertRaises(StoreError):
+            add_to_cart(self.client, {'part': 'C2040', 'min_quantity': 5, 'quantity_step': 5}, 7)
+        with self.assertRaises(StoreError):
+            update_quantity(self.client, {'part': 'C2040', 'minimum': 10, 'quantity_step': 5}, 12)
+        self.assertFalse(self.service.cart_adds or self.service.cart_updates)
+
     def test_transport_error_is_never_retried_and_logs_exclude_secret(self):
         with patch.object(self.client, '_json', side_effect=StoreError('SENSITIVE fixture')) as request:
             with self.assertRaises(StoreError):
@@ -105,14 +124,13 @@ class CartApiTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual((rows[0]['quantity'], rows[0]['price'], rows[0]['total']), (20, '0.125', '2.50'))
         self.assertEqual(rows[1]['region'], 'overseas')
+        self.assertEqual((rows[0]['minimum'], rows[0]['quantity_step']), (10, 10))
         unavailable = {**row, 'errStatus': 'cannot_buy'}
         blocked = cart_items({'code': 200, 'result': {'shoppingCartVO': {'rmbCnShoppingCart': {'currentlyProductList': [unavailable]}}}})[0]
         self.assertFalse(blocked['available'])
         with patch.object(self.client, '_json', return_value={'code': 200}) as request:
             update_quantity(self.client, rows[0], 50)
             self.assertEqual(request.call_args.kwargs['form']['productNumber'], '5')
-            prepare_checkout(self.client, rows)
-            self.assertEqual(request.call_args.kwargs['form']['ck'], '0~123~RMB~CN@1~345')
 
     def test_order_list_uses_customer_order_list_and_rejects_truncated_pages(self):
         self.client.session.request('https://www.szlcsc.com/cas/login')
@@ -166,6 +184,67 @@ class CommerceUiTests(unittest.TestCase):
             self.dialog.append_row(self.dialog.search_table, product)
         return rows
 
+    def test_search_increment_typed_quantity_and_price_tiers_stay_in_sync(self):
+        rows = [dict(part='C1', title='One', min_quantity=5, quantity_step=5, details_complete=True,
+                     price_tiers=[{'quantity': 5, 'end': 45, 'price': '1.2345'},
+                                  {'quantity': 50, 'end': None, 'price': '0.99'}])]
+        table = self.dialog.search_table
+        self.dialog.append_row(table, rows[0])
+        spin, price = table.cellWidget(0, table.quantity_column), table.cellWidget(0, 5)
+        self.assertEqual(table.item(0, table.step_column).text(), '5')
+        self.assertEqual((spin.minimum(), spin.singleStep(), spin.value()), (5, 5, 5))
+        spin.stepUp(); self.assertEqual(spin.value(), 10)
+        spin.stepDown(); self.assertEqual(spin.value(), 5)
+        spin.lineEdit().setText('46'); spin.interpretText()
+        self.assertEqual(spin.value(), 50)
+        self.assertEqual(price.currentData(), 50)
+        self.assertIn('0.99', price.currentText())
+        self.assertIn('5–45', price.itemText(0))
+        price.setCurrentIndex(0); price.activated.emit(0)
+        self.assertEqual(price.currentData(), 50)  # Viewing a tier cannot override the actual price.
+        self.assertEqual(spin.value(), 50)
+        self.dialog.append_row(self.dialog.favorite_table, rows[0])
+        favorite = self.dialog.favorite_table
+        favorite.cellWidget(0, favorite.quantity_column).setValue(15)
+        self.assertEqual(spin.value(), 15)
+        self.assertEqual(price.currentData(), 5)
+        self.dialog.make_product_menu(rows, table).actions()[2].trigger()
+        self.wait(lambda: not self.dialog.cart_busy)
+        self.assertEqual(self.service.cart_adds[0]['productNumber'], ['15'])
+
+    def test_cart_increment_saves_physical_quantity_as_pack_count(self):
+        self.service.cart_steps['C2040'] = 5
+        add_to_cart(self.client, {'part': 'C2040'}, 10)
+        self.dialog.tabs.setCurrentIndex(2)
+        self.wait(lambda: self.dialog.cart_panel.loaded)
+        panel = self.dialog.cart_panel
+        self.assertEqual(panel.table.item(0, 8).text(), '5')
+        spin = panel.table.cellWidget(0, 5)
+        self.assertEqual(spin.singleStep(), 5)
+        spin.lineEdit().setText('12'); spin.interpretText()
+        self.wait(lambda: bool(self.service.cart_updates) and not self.dialog.cart_mutating)
+        self.assertEqual(self.service.cart_updates[0]['productNumber'], ['3'])
+        self.assertEqual(panel.rows[0]['quantity'], 15)
+        self.assertEqual(panel.table.cellWidget(0, 5).value(), 15)
+
+    def test_quantity_upper_bound_is_a_valid_multiple_and_price_can_be_unknown(self):
+        spin = QuantityInput(1, 100, step=50)
+        self.assertEqual(spin.value(), 100)
+        spin.lineEdit().setText('999999999'); spin.interpretText()
+        self.assertEqual(spin.value() % 50, 0)
+        self.assertLessEqual(spin.value(), 999999999)
+        price = PriceTierBox({'price_tiers': [{'quantity': 10, 'end': 20, 'price': '0.01'}]})
+        price.set_quantity(25)
+        self.assertEqual(price.currentIndex(), -1)
+
+    def test_existing_cart_quantity_is_displayed_exactly_until_edited(self):
+        spin = QuantityInput(7, 10, step=5, preserve_initial=True)
+        self.assertEqual(spin.value(), 7)
+        spin.stepUp()
+        self.assertEqual(spin.value(), 10)
+        spin.stepDown()
+        self.assertEqual(spin.value(), 10)
+
     def test_right_click_adds_inline_quantities_without_page_or_dialog(self):
         from PySide6.QtWebEngineWidgets import QWebEngineView
         products = self.products(); table = self.dialog.search_table
@@ -210,7 +289,7 @@ class CommerceUiTests(unittest.TestCase):
         self.assertEqual(add.call_count, 2)
         self.assertIn('成功 1 项；未确认 1 项；未发送 1 项', self.dialog.status.text())
 
-    def test_native_cart_updates_quantity_then_submits_and_opens_external_browser(self):
+    def test_native_cart_updates_quantity_then_opens_browser_without_checkout(self):
         self.dialog.add_cart_products([dict(part='C2040', purchase_quantity=5)])
         self.wait(lambda: not self.dialog.cart_busy)
         self.dialog.tabs.setCurrentIndex(2)
@@ -218,7 +297,7 @@ class CommerceUiTests(unittest.TestCase):
         panel = self.dialog.cart_panel
         spin = panel.table.cellWidget(0, 5)
         spin.setValue(12); spin.setValue(25)
-        self.assertFalse(panel.checkout.isEnabled())
+        self.assertFalse(panel.remove.isEnabled())
         self.wait(lambda: bool(self.service.cart_updates) and not self.dialog.cart_mutating)
         self.assertEqual(len(self.service.cart_updates), 1)
         self.assertEqual(panel.rows[0]['quantity'], 25)
@@ -227,23 +306,38 @@ class CommerceUiTests(unittest.TestCase):
         self.assertFalse(panel.download.isEnabled())
         self.dialog.set_import_enabled(True)
         with patch('lcsc3d.ui.commerce_actions.QDesktopServices.openUrl', return_value=True) as opened:
-            panel.checkout.click(); panel.checkout.click()
-            self.wait(lambda: not self.dialog.cart_mutating)
-        self.assertEqual(len(self.service.checkout_requests), 1)
-        self.assertEqual(opened.call_args.args[0].toString(), CHECKOUT_URL)
+            before = len(self.service.requests)
+            panel.open_cart.click()
+            self.assertEqual(len(self.service.requests), before)
+        self.assertFalse(self.service.checkout_requests)
+        self.assertEqual(opened.call_count, 1)
+        self.assertEqual(opened.call_args.args[0].toString(), CART_URL)
         self.assertFalse(panel.table.isHidden())
 
-    def test_failed_checkout_never_opens_browser_and_does_not_repeat(self):
-        self.dialog.add_cart_products([dict(part='C2040', purchase_quantity=5)])
-        self.wait(lambda: not self.dialog.cart_busy)
-        self.dialog.tabs.setCurrentIndex(2); self.wait(lambda: self.dialog.cart_panel.loaded)
-        self.service.cart_code = 500
-        with patch('lcsc3d.ui.commerce_actions.QDesktopServices.openUrl') as opened:
-            self.dialog.cart_panel.checkout.click()
-            self.wait(lambda: not self.dialog.cart_mutating)
-        opened.assert_not_called()
-        self.assertEqual(len(self.service.checkout_requests), 1)
-        self.assertTrue(self.dialog.cart_panel.stale)
+    def test_cart_link_works_without_selection_account_or_native_requests(self):
+        self.dialog.clear_session()
+        panel = self.dialog.cart_panel
+        self.assertEqual(panel.open_cart.text(), '跳转到购物车')
+        self.assertTrue(panel.open_cart.isEnabled())
+        with patch.object(self.client, '_json') as request, \
+                patch('lcsc3d.ui.commerce_actions.QDesktopServices.openUrl', return_value=True) as opened:
+            panel.open_cart.click()
+            request.assert_not_called()
+            self.assertEqual(opened.call_args.args[0].toString(), CART_URL)
+        self.assertFalse(self.service.checkout_requests)
+
+    def test_browser_failure_retry_only_reopens_cart_and_is_logged(self):
+        logs.configure_logging(version='2.4.1')
+        with patch('lcsc3d.ui.commerce_actions.QDesktopServices.openUrl', side_effect=[False, True]) as opened, \
+                patch('lcsc3d.ui.commerce_actions.notify') as notice, patch.object(self.client, '_json') as request:
+            self.dialog.cart_panel.open_cart.click()
+            notice.call_args.kwargs['actions'][0][1]()
+            self.assertEqual([call.args[0].toString() for call in opened.call_args_list], [CART_URL, CART_URL])
+            request.assert_not_called()
+        events = (logs.get_log_directory() / 'LCSC3D.log').read_text('utf-8')
+        self.assertIn('commerce.external_open', events)
+        self.assertIn('"opened": false', events)
+        self.assertIn('"opened": true', events)
 
     def test_native_orders_pagination_filter_and_logout(self):
         self.service.order_rows = [{**self.service.order_rows[0], 'uuid': f'fixture-{n}', 'orderCode': f'TEST-{n:02}'} for n in range(25)]

@@ -12,7 +12,6 @@ from lcsc3d.services.store import (PART, StoreError, check_cancelled, quantity, 
 
 CART_URL = 'https://cart.szlcsc.com/cart/display.html'
 ORDERS_URL = 'https://member.szlcsc.com/member/order/list.html'
-CHECKOUT_URL = 'https://order.szlcsc.com/member/perfect.html'
 CART_API = 'https://cart-api.szlcsc.com'
 ORDERS_API = 'https://order-api.szlcsc.com/member/order/list'
 CART_QUICK_API = CART_API + '/cart/quick'
@@ -104,7 +103,8 @@ def cart_items(payload):
                         quantity=amount, ratio=str(ratio), price=price, total=money(raw.get('lineMoney')),
                         currency=currency, region=region, checked=bool(raw.get('checked') or raw.get('isChecked')),
                         unit=text(raw.get('productUnit'), 20) or '个',
-                        minimum=quantity(raw.get('minBuyNumber')) or 1,
+                        minimum=(quantity(raw.get('minBuyNumber')) or 1) * (quantity(ratio) or 1),
+                        quantity_step=(quantity(ratio) or 1) if region in ('cn', 'overseas') else 1,
                         available=raw.get('errStatus') not in CART_ERRORS,
                         status=CART_ERRORS.get(raw.get('errStatus')) or ('待订货' if kind == 'isNeedProductList' else '现货'),
                         image=public_url(raw.get('breviaryImageUrl'))))
@@ -124,9 +124,11 @@ def read_cart(client, cancelled=None):
     return rows
 
 
-def validate_quantity(amount, minimum=1):
+def validate_quantity(amount, minimum=1, step=1):
     if type(amount) is not int or not max(1, minimum) <= amount <= MAX_CART_QUANTITY:
         raise StoreError('请输入不低于起订量的有效数量。')
+    if amount % max(1, step):
+        raise StoreError('购买数量必须是递增量的整数倍。')
 
 
 @traced('cart.add', lambda client, product, amount, **kw: {'part': safe_part(product.get('part')), 'quantity': amount}, level='INFO')
@@ -134,7 +136,7 @@ def add_to_cart(client, product, amount, cancelled=None):
     part = str(product.get('part', '')).upper()
     if not PART.fullmatch(part):
         raise StoreError('器件编号无效。')
-    validate_quantity(amount, quantity(product.get('min_quantity')) or 1)
+    validate_quantity(amount, quantity(product.get('min_quantity')) or 1, quantity(product.get('quantity_step')) or 1)
     check_cancelled(cancelled)
     cart_request(client, '/cart/quick', form={'productCode': part, 'productNumber': amount,
                  'cartCode': current_cart(client)}, cancelled=cancelled)
@@ -151,7 +153,7 @@ def cart_key(row):
 
 @traced('cart.quantity', lambda client, row, amount, **kw: {'part': safe_part(row.get('part')), 'quantity': amount}, level='INFO')
 def update_quantity(client, row, amount, cancelled=None):
-    validate_quantity(amount, row.get('minimum', 1))
+    validate_quantity(amount, row.get('minimum', 1), row.get('quantity_step', 1))
     ratio = decimal_number(row.get('ratio'))
     if not ratio:
         raise StoreError('商品包装换算数据无效，请刷新购物车。')
@@ -163,21 +165,6 @@ def update_quantity(client, row, amount, cancelled=None):
 def remove_items(client, rows, cancelled=None):
     return cart_request(client, '/cart/delete', payload={'cartKeyList': [cart_key(row) for row in rows],
         'isSelectAll': False, 'cartCode': current_cart(client)}, cancelled=cancelled)
-
-
-@traced('cart.checkout', lambda client, rows, **kw: {'count': len(rows)}, level='INFO')
-def prepare_checkout(client, rows, cancelled=None):
-    if not rows or not all(row.get('available') for row in rows):
-        raise StoreError('请勾选有库存的购物车商品后下单。')
-    if any(row.get('region') not in ('cn', 'hk-rmb', 'hk-usd', 'overseas') for row in rows):
-        raise StoreError('商品仓库资料无法识别，请刷新购物车。')
-    local = ','.join(cart_key(row) for row in rows if row['region'] != 'overseas')
-    overseas = ','.join(cart_key(row) for row in rows if row['region'] == 'overseas')
-    # Official cart submit: prepare selected goods, then continue externally.
-    cart_request(client, '/async/validate/perfect', form={'ck': local + '@' + overseas,
-        'cartCode': current_cart(client)}, cancelled=cancelled)
-    log_event('INFO', 'cart.checkout_prepared', count=len(rows))
-    return {'url': CHECKOUT_URL, 'count': len(rows)}
 
 
 def safe_display(value, limit=240):

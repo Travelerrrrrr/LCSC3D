@@ -110,6 +110,7 @@ class OfflineStore:
         self.cart_adds = []
         self.cart_code = 200
         self.cart_rows = []
+        self.cart_steps = {}
         self.cart_updates = []
         self.checkout_requests = []
         self.order_rows = [{'uuid': 'fixture-order-1', 'orderCode': 'TEST-20261013', 'orderTime': '2026-10-13 10:00:00',
@@ -146,11 +147,11 @@ class OfflineStore:
                         row = next((row for row in owner.cart_rows if row['productCode'] == part), None)
                         if row is None:
                             row = dict(productCode=part, productModel='Fixture ' + part, shopCarMapKey='0~' + part + '~RMB~CN',
-                                       productNumber=0, convesionRatio=1, productConsultPrice='0.50',
+                                       productNumber=0, convesionRatio=owner.cart_steps.get(part, 1), productConsultPrice='0.50',
                                        checked=True, encapsulationModel='SOT-23', productUnit='个', minBuyNumber=1)
                             owner.cart_rows.append(row)
-                        row['productNumber'] += amount
-                        row['lineMoney'] = str(row['productNumber'] * .5)
+                        row['productNumber'] += amount / row['convesionRatio']
+                        row['lineMoney'] = str(row['productNumber'] * row['convesionRatio'] * .5)
                     value = {'code': owner.cart_code, 'result': {'cart_contains_count': len(owner.cart_adds)}}
                 elif parsed.path == '/cart/display':
                     value = {'code': owner.cart_code, 'result': {'shoppingCartVO': {'rmbCnShoppingCart': {'currentlyProductList': owner.cart_rows}}}}
@@ -159,7 +160,7 @@ class OfflineStore:
                     if owner.cart_code == 200:
                         row = next(row for row in owner.cart_rows if row['shopCarMapKey'] == fields['cartKey'][0])
                         row['productNumber'] = float(fields['productNumber'][0])
-                        row['lineMoney'] = str(row['productNumber'] * .5)
+                        row['lineMoney'] = str(row['productNumber'] * row['convesionRatio'] * .5)
                     value = {'code': owner.cart_code, 'result': {}}
                 elif parsed.path == '/cart/delete':
                     fields = json.loads(body)
@@ -577,7 +578,7 @@ def start(window, destination):
                 assert dialog.search_table.item(0, 6).text() == '12,345'
                 assert dialog.search_table.item(1, 6).text() == '0'
                 assert dialog.search_table.item(2, 5).text() == '—' and dialog.search_table.item(2, 6).text() == '—'
-                first.setCurrentIndex(2)
+                dialog.search_table.cellWidget(0, dialog.search_table.quantity_column).setValue(100)
                 assert second.currentData() == 5
                 report['independent_price_tiers'] = True
                 report['minimum_order_tier'] = 5
@@ -838,7 +839,7 @@ def start_live(window, destination):
                 report['dcdc_commerce'] = {'part': product['part'], 'tiers': combo.count(),
                     'default_quantity': combo.currentData(), 'stock': product.get('stock'),
                     'description_length': len(product['description']), 'parameter_count': len(product['parameters'])}
-                combo.setCurrentIndex(1)
+                dialog.search_table.cellWidget(0, dialog.search_table.quantity_column).setValue(product['price_tiers'][1]['quantity'])
                 assert combo.currentData() == product['price_tiers'][1]['quantity']
                 report['real_price_tier_switch'] = True
                 dialog.account_label.setText('已登录 · 实网验证（账号信息已隐藏）')

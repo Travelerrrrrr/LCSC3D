@@ -12,14 +12,74 @@ from lcsc3d.ui.ui_components import surface
 
 class QuantityInput(QSpinBox):
     """Commit typed quantities on focus loss; scrolling never changes a purchase."""
-    def __init__(self, value=1, minimum=1, parent=None):
+    def __init__(self, value=1, minimum=1, parent=None, *, step=1, preserve_initial=False):
         super().__init__(parent)
-        self.setRange(minimum, MAX_CART_QUANTITY)
-        self.setValue(value)
+        self.set_rules(minimum, step)
+        if preserve_initial:
+            # A pre-existing cart may contain a nonconforming quantity. Display
+            # what the server actually has until the user explicitly edits it.
+            self.setRange(min(value, self.minimum()), max(value, self.maximum()))
+            super().setValue(value)
+        else:
+            self.setValue(value)
         self.setKeyboardTracking(False)
         self.setAlignment(Qt.AlignRight)
         self.setContextMenuPolicy(Qt.NoContextMenu)
         self.setAccessibleName(str(tr('数量')))
+
+    def set_rules(self, minimum=1, step=1):
+        step = max(1, min(int(step), MAX_CART_QUANTITY))
+        upper = MAX_CART_QUANTITY // step * step
+        lower = min(upper, (max(1, minimum) + step - 1) // step * step)
+        self.purchase_minimum = lower
+        self.setSingleStep(step)
+        self.setRange(lower, upper)
+        self.setValue(self.value())
+        self.setToolTip(str(msg('起订量 {0}，递增量 {1}；输入后向上取整到有效数量。', lower, step)))
+
+    def rounded(self, value):
+        step = self.singleStep()
+        return min(MAX_CART_QUANTITY // step * step,
+                   max(self.purchase_minimum, (value + step - 1) // step * step))
+
+    def setValue(self, value):
+        super().setValue(self.rounded(value))
+
+    def valueFromText(self, value):
+        return self.rounded(super().valueFromText(value))
+
+    def stepBy(self, steps):
+        step = self.singleStep()
+        base = (self.value() + (step - 1 if steps < 0 else 0)) // step
+        self.setValue((base + steps) * step)
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
+class PriceTierBox(QComboBox):
+    """Display the entered quantity's price; the popup is a tier reference."""
+    def __init__(self, product, parent=None):
+        super().__init__(parent)
+        self.tiers = product.get('price_tiers') or []
+        self.actual_index = -1
+        self.setMaxVisibleItems(12)
+        self.setPlaceholderText('—')
+        unit, symbol = product.get('unit') or tr('个'), product.get('currency_symbol', '¥')
+        for index, tier in enumerate(self.tiers):
+            end = tier.get('end')
+            if end is None and index + 1 < len(self.tiers):
+                end = self.tiers[index + 1]['quantity'] - 1
+            span = f"{tier['quantity']}–{end}" if end is not None else f"{tier['quantity']}+"
+            self.addItem(f"{span}  {symbol}{tier['price']}/{unit}", tier['quantity'])
+        self.setToolTip(str(tr('单价按输入数量自动匹配；展开查看全部价格区间。')))
+        self.activated.connect(lambda _: self.setCurrentIndex(self.actual_index))
+
+    def set_quantity(self, amount):
+        self.actual_index = next((index for index in range(len(self.tiers) - 1, -1, -1)
+            if amount >= self.tiers[index]['quantity'] and
+            (self.tiers[index].get('end') is None or amount <= self.tiers[index]['end'])), -1)
+        self.setCurrentIndex(self.actual_index)
 
     def wheelEvent(self, event):
         event.ignore()
@@ -53,7 +113,7 @@ def table_cell(table, row, column, value, right=False):
 class CartPanel(QWidget):
     refresh_requested = Signal()
     quantity_changed = Signal(object, int)
-    checkout_requested = Signal()
+    open_cart_requested = Signal()
     remove_requested = Signal()
     download_requested = Signal(object)
 
@@ -76,9 +136,10 @@ class CartPanel(QWidget):
         layout.addLayout(toolbar)
         card, body = surface()
         body.setContentsMargins(0, 0, 0, 0)
-        self.table = native_table(['选择', 'C 编号', '型号', '封装', '单价', '数量', '小计', '状态'], 2)
-        for column, width in ((0, 50), (1, 110), (3, 120), (4, 115), (5, 150), (6, 120), (7, 90)):
+        self.table = native_table(['选择', 'C 编号', '型号', '封装', '单价', '数量', '小计', '状态', '递增量'], 2)
+        for column, width in ((0, 50), (1, 110), (3, 120), (4, 115), (5, 150), (6, 120), (7, 90), (8, 85)):
             self.table.setColumnWidth(column, width)
+        self.table.horizontalHeader().moveSection(8, 5)
         self.table.itemChanged.connect(lambda item: self.update_summary() if item.column() == 0 else None)
         body.addWidget(self.table)
         layout.addWidget(card, 1)
@@ -95,10 +156,11 @@ class CartPanel(QWidget):
         actions.addWidget(self.download)
         self.summary = QLabel(''); self.summary.setObjectName('section')
         actions.addWidget(self.summary, 1, Qt.AlignRight)
-        self.checkout = QPushButton(tr('快捷下单'))
-        self.checkout.setObjectName('primary')
-        self.checkout.clicked.connect(self.checkout_requested)
-        actions.addWidget(self.checkout)
+        self.open_cart = QPushButton(tr('跳转到购物车'))
+        self.open_cart.setObjectName('primary')
+        self.open_cart.setToolTip(str(tr('在外部浏览器打开商城购物车')))
+        self.open_cart.clicked.connect(self.open_cart_requested)
+        actions.addWidget(self.open_cart)
         layout.addLayout(actions)
         self.update_summary()
 
@@ -124,15 +186,16 @@ class CartPanel(QWidget):
                 if key == 'price' and amount:
                     amount = amount.rstrip('0').rstrip('.')
                 table_cell(self.table, index, column, row['currency'] + amount if amount else '—', True)
-            spin = QuantityInput(row['quantity'], row['minimum'])
-            spin.setToolTip(str(tr('修改后自动保存到购物车')))
+            step = row.get('quantity_step', 1)
+            table_cell(self.table, index, 8, step, True)
+            spin = QuantityInput(row['quantity'], row['minimum'], step=step, preserve_initial=True)
             spin.ensurePolished()
             self.table.setRowHeight(index, max(54, spin.sizeHint().height() + 12))
             spin.valueChanged.connect(lambda amount, data=row: self.quantity_changed.emit(data, amount))
             self.table.setCellWidget(index, 5, spin)
         self.table.blockSignals(False)
         self.loaded = True; self.stale = self.uncertain = False
-        self.hint.setText(msg('共 {0} 项 · 修改数量自动保存，勾选后可快捷下单。', len(rows)) if rows else tr('购物车为空，去搜索商品并添加。'))
+        self.hint.setText(msg('共 {0} 项 · 修改数量自动保存，可跳转到浏览器购物车。', len(rows)) if rows else tr('购物车为空，去搜索商品并添加。'))
         self.set_busy(False)
 
     def toggle_selection(self):
@@ -155,7 +218,6 @@ class CartPanel(QWidget):
                 totals[row['currency']] = totals.get(row['currency'], Decimal(0)) + Decimal(row['total'])
         amounts = ' + '.join(symbol + format(amount, '.2f') for symbol, amount in totals.items())
         self.summary.setText(msg('已选 {0} 项', len(selected)) + (' · ' + amounts if amounts else ''))
-        self.checkout.setEnabled(bool(selected) and not self.busy and not self.stale and all(row['available'] for row in selected))
         self.remove.setEnabled(bool(selected) and not self.busy and not self.stale)
         self.download.setEnabled(bool(selected) and not self.busy and self.import_enabled)
 

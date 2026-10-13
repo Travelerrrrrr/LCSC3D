@@ -7,7 +7,7 @@ from lcsc3d.core.app_logging import log_event, record_error, safe_part
 from lcsc3d.core.i18n import text as tr, message as msg, render
 from lcsc3d.services.store import StoreError, SessionExpired, normalize_items, check_cancelled, quantity
 from lcsc3d.services.commerce import (add_to_cart, read_cart, update_quantity, remove_items,
-                                      prepare_checkout, read_orders, CART_URL, ORDERS_URL, CHECKOUT_URL)
+                                      read_orders, CART_URL, ORDERS_URL)
 from lcsc3d.ui.commerce import CartPanel, OrdersPanel
 from lcsc3d.ui.shell_ui import notify
 
@@ -25,7 +25,7 @@ class CommerceActions:
         self.tabs.addTab(self.orders_panel, tr('我的订单'))
         self.cart_panel.refresh_requested.connect(self.load_cart)
         self.cart_panel.quantity_changed.connect(self.cart_quantity_changed)
-        self.cart_panel.checkout_requested.connect(self.checkout_cart)
+        self.cart_panel.open_cart_requested.connect(lambda: self.open_commerce_link(CART_URL, 'cart'))
         self.cart_panel.remove_requested.connect(self.remove_cart_selection)
         self.cart_panel.download_requested.connect(lambda rows: self.import_requested.emit(normalize_items(rows)) if self.import_enabled else None)
         self.orders_panel.read_requested.connect(self.load_orders)
@@ -58,7 +58,7 @@ class CommerceActions:
 
     def reset_commerce(self):
         self.quantity_timer.stop(); self.quantity_updates.clear()
-        for channel in ('cart-read', 'cart-write', 'cart-checkout', 'orders-read'):
+        for channel in ('cart-read', 'cart-write', 'orders-read'):
             self.jobs.cancel(channel)
         self.cart_loading = self.cart_mutating = self.orders_loading = False
         self.cart_panel.clear(); self.orders_panel.clear()
@@ -132,31 +132,15 @@ class CommerceActions:
         notify(self, tr('移除购物车商品'), msg('从购物车移除选中的 {0} 项？', len(rows)),
                actions=((tr('移除'), remove),), persistent=True)
 
-    def checkout_cart(self):
-        if not self.cart_panel.checkout.isEnabled() or not self.require_commerce_account():
-            return
-        rows = [dict(row) for row in self.cart_panel.selected_rows()]
-        self.cart_mutating = True; self.cart_panel.set_busy(True)
-        self.cart_panel.hint.setText(tr('正在提交所选商品…'))
-        client = self.client
-        self.jobs.start('cart-checkout', lambda stop, progress: prepare_checkout(client, rows, cancelled=stop),
-                        self.checkout_prepared, self.cart_write_failed)
-
-    def checkout_prepared(self, result):
-        self.cart_mutating = False; self.cart_panel.set_busy(False)
-        self.cart_panel.hint.setText(tr('所选商品已提交，请在外部浏览器使用同一商城账号继续。'))
-        self.open_commerce_link(result['url'], 'checkout')
-        self.orders_panel.loaded = False
-
     def open_commerce_link(self, url, kind):
         # Only URLs constructed from trusted store routes, never a response redirect.
-        valid = url in (CART_URL, ORDERS_URL, CHECKOUT_URL) or url.startswith('https://member.szlcsc.com/member/order/details.html?uuid=')
+        valid = url in (CART_URL, ORDERS_URL) or url.startswith('https://member.szlcsc.com/member/order/details.html?uuid=')
         if not valid:
             return
         opened = QDesktopServices.openUrl(QUrl(url))
         log_event('INFO' if opened else 'WARNING', 'commerce.external_open', kind=kind, opened=opened)
         if not opened:
-            notify(self, tr('浏览器未打开'), tr('已提交的操作无需重复，点击按钮重新打开浏览器。'), severity='warning',
+            notify(self, tr('浏览器未打开'), tr('请点击按钮重新打开浏览器。'), severity='warning',
                    actions=((tr('打开浏览器'), lambda: self.open_commerce_link(url, kind)),))
 
     def load_orders(self, page=1):
@@ -248,6 +232,9 @@ class CommerceActions:
             for index in range(table.rowCount()):
                 table.cellWidget(index, table.quantity_column).interpretText()
         products = list({p['part']: dict(p) for p in products}.values())
+        for product in products:
+            if product['part'] in self.purchase_rules:
+                product['min_quantity'], product['quantity_step'] = self.purchase_rules[product['part']]
         rows = [(p, p.get('purchase_quantity', self.purchase_quantities.get(p['part'], quantity(p.get('min_quantity')) or 1))) for p in products]
         self.submit_cart(rows)
 

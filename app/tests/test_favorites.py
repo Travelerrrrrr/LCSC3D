@@ -804,17 +804,18 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.assertIn('0.012345', first.currentText())
         self.assertEqual(table.item(0, 6).text(), '12,345')
         count = len(self.service.requests)
-        first.setCurrentIndex(2)
+        table.cellWidget(0, table.quantity_column).setValue(100)
         self.assertEqual((first.currentData(), second.currentData()), (100, 5))
         self.assertEqual(len(self.service.requests), count)
         self.assertEqual(table.item(0, 0).checkState(), Qt.Unchecked)
 
-    def test_price_tier_selection_survives_pages_and_resets_for_new_search(self):
+    def test_quantity_driven_price_survives_pages_and_search_refresh(self):
         rows = [(f'C{1000+i}', f'MCU{i}') for i in range(75)]
         for page in range(1, 4):
             self.service.search_pages[('分页报价', page)] = fixture_search(rows[(page-1)*30:page*30], page, 75)
         self.search_ready('分页报价')
-        self.dialog.search_table.cellWidget(0, 5).setCurrentIndex(2)
+        table = self.dialog.search_table
+        table.cellWidget(0, table.quantity_column).setValue(100)
         self.dialog.next_page_button.click()
         self.wait_until(lambda: not self.dialog.searching and not self.dialog.has_jobs())
         self.assertEqual(self.dialog.search_table.cellWidget(0, 5).currentData(), 1)
@@ -823,7 +824,7 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.assertEqual(self.dialog.search_table.cellWidget(0, 5).currentData(), 100)
         self.dialog.start_search()
         self.wait_until(lambda: not self.dialog.searching and not self.dialog.has_jobs())
-        self.assertEqual(self.dialog.search_table.cellWidget(0, 5).currentData(), 1)
+        self.assertEqual(self.dialog.search_table.cellWidget(0, 5).currentData(), 100)
 
     def test_unknown_search_price_and_stock_and_zero_stock_are_distinct(self):
         products = [{'part': 'C404', 'title': 'Unknown', 'details_complete': True},

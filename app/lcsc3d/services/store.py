@@ -194,7 +194,10 @@ def quantity(value):
 def commercial_data(raw):
     """Use mainland unit-price tiers, independently of package and SMT stock."""
     data = {}
-    minimum = quantity(raw.get('minBuyNumber')) or 1
+    step = quantity(raw.get('theRatio')) or quantity(raw.get('convesionRatio')) or 1
+    minimum = (quantity(raw.get('minBuyNumber')) or 1) * (1 if raw.get('selfProductCode') else step)
+    if any(key in raw for key in ('theRatio', 'convesionRatio', 'minBuyNumber')):
+        data['quantity_step'] = step
     if 'minBuyNumber' in raw:
         data['min_quantity'] = minimum
     unit = text(raw.get('productUnit'), 20)
@@ -217,6 +220,10 @@ def commercial_data(raw):
         amount = decimal_number(row.get('productPrice') if row.get('productPrice') is not None else row.get('thePrice'))
         end_value = row.get('endPurchasedNumber', row.get('epNumber'))
         end = quantity(end_value)
+        if start is not None:
+            start *= step
+        if end is not None:
+            end *= step
         if not start or amount is None or end is not None and (end < start or end < minimum):
             continue
         tiers.append({'quantity': max(start, minimum), 'end': end, 'price': format(amount, 'f')})
@@ -409,7 +416,7 @@ def request_operation(url):
         return '加载二维码图片'
     if parsed.hostname == 'cart-api.szlcsc.com':
         return {'/cart/quick': '加入购物车', '/cart/display': '读取购物车', '/cart/update': '修改购物车数量',
-                '/cart/delete': '移除购物车商品', '/async/validate/perfect': '提交购物车结算'}.get(parsed.path, '购物车请求')
+                '/cart/delete': '移除购物车商品'}.get(parsed.path, '购物车请求')
     if parsed.hostname == 'order-api.szlcsc.com' and parsed.path == '/member/order/list':
         return '读取订单列表'
     return '商城请求'
