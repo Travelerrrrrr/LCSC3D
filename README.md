@@ -52,6 +52,24 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 搜索商品无需登录；收藏、购物车和订单使用立创商城账号。上述账号采购页面适用于中文模式；English 模式使用 LCSC 国际商城搜索，国际站账号在 LCSC.com 管理。
 
+以下为用户提供的商城界面原图，点击可查看大图。
+
+**商品搜索、行内数量与价格区间**
+
+<a href="docs/images/storefront/search.png"><img src="docs/images/storefront/search.png" alt="商品搜索、行内数量与价格区间" width="1100"></a>
+
+**官方分类浏览**
+
+<a href="docs/images/storefront/categories.png"><img src="docs/images/storefront/categories.png" alt="官方分类浏览" width="1100"></a>
+
+**多条件与器件参数筛选**
+
+<a href="docs/images/storefront/filters.png"><img src="docs/images/storefront/filters.png" alt="多条件与器件参数筛选" width="1100"></a>
+
+**原生购物车、递增量与批量加购结果**
+
+<a href="docs/images/storefront/cart.png"><img src="docs/images/storefront/cart.png" alt="原生购物车、递增量与批量加购结果" width="1100"></a>
+
 ## 封装内嵌 3D 模型
 
 勾选 AD **PcbLib** 或 KiCad **封装库**，保持 **封装关联 3D 模型** 开启，软件会取得所需官方 STEP 并写入封装。**无需另勾“STEP”下载，也无需在 EDA 中逐个手动关联模型。**

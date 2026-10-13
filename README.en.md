@@ -52,6 +52,24 @@ Add checked parts from search, favorites, cart or orders to the download list. C
 
 Public search requires no login; favorites, cart and orders use a mainland LCSC account. These account purchasing pages are available in Chinese mode. English mode uses LCSC International search, with international account management on LCSC.com.
 
+User-provided storefront screenshots. Click an image to view the original.
+
+**Product search, inline quantities and price tiers**
+
+<a href="docs/images/storefront/search.png"><img src="docs/images/storefront/search.png" alt="Product search, inline quantities and price tiers" width="1100"></a>
+
+**Official category browser**
+
+<a href="docs/images/storefront/categories.png"><img src="docs/images/storefront/categories.png" alt="Official category browser" width="1100"></a>
+
+**Product filters and component parameters**
+
+<a href="docs/images/storefront/filters.png"><img src="docs/images/storefront/filters.png" alt="Product filters and component parameters" width="1100"></a>
+
+**Native cart, quantity increments and batch results**
+
+<a href="docs/images/storefront/cart.png"><img src="docs/images/storefront/cart.png" alt="Native cart, quantity increments and batch results" width="1100"></a>
+
 ## Embedded 3D models
 
 Select AD **PcbLib** or KiCad **Footprints** and leave **Attach 3D models to footprints** enabled. LCSC3D fetches the required official STEP and writes its placement into the footprint. **You do not need to select standalone STEP downloads or attach each model manually in the EDA application.**
