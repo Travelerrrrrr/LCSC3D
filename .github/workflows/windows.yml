@@ -35,6 +35,18 @@ jobs:
             app/requirements-test.txt
       - name: Install dependencies
         run: python -m pip install -r app/requirements-test.txt
+      - name: Run Material UI preflight
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $verification = Join-Path $pwd 'work/material-preflight'
+          New-Item -ItemType Directory -Force $verification | Out-Null
+          Copy-Item -Recurse app/tests/fixtures (Join-Path $verification 'fixtures')
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'LCSC3D-ui-preflight'
+          python app/main.py --self-test-material $verification 2>&1 | Tee-Object -FilePath (Join-Path $verification 'stdout.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Material UI preflight failed' }
+          $report = Get-Content (Join-Path $verification 'material-verification.json') -Raw | ConvertFrom-Json
+          if (-not $report.success) { throw 'Material UI verification failed' }
       - name: Run regression tests
         shell: pwsh
         run: |
@@ -57,6 +69,10 @@ jobs:
           name: LCSC3D-verification
           path: |
             work/unit-tests.log
+            work/material-preflight/*.json
+            work/material-preflight/*.png
+            work/material-preflight/*.log
+            work/material-preflight/logs/*.log
             work/release-verification/**/*.log
             work/release-verification/**/*verification.json
             work/release-verification/material-ui/LocalAppData/LCSC3D/verification/*.png

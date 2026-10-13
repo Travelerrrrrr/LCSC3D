@@ -100,6 +100,15 @@ def start(window, folder):
             window.load_queue()
             window.table.item(1, main.DOWNLOAD_COLUMN).setCheckState(Qt.Unchecked)
             window.apply_preferences(Preferences(theme_mode='light'))
+            # Native restore clamps oversized windows to the available work
+            # area. Test exact restoration from an on-screen normal geometry,
+            # as test_window_chrome does, after the independent row-count test.
+            available = window.screen().availableGeometry()
+            window.resize(min(1060, available.width()), min(740, available.height()))
+            window.move(available.topLeft() + QPoint((available.width() - window.width()) // 2,
+                                                    (available.height() - window.height()) // 2))
+            settle()
+            QTest.qWait(100)
             normal_geometry, hwnd = window.geometry(), int(window.winId())
             window.title_bar.maximize_button.click()
             settle()
@@ -108,15 +117,16 @@ def start(window, folder):
             capture(window, 'workspace-maximized')
             window.title_bar.maximize_button.click()
             settle()
-            assert not window.isMaximized() and window.geometry() == normal_geometry
+            assert not window.isMaximized() and window.geometry() == normal_geometry, (window.geometry(), normal_geometry)
             window.title_bar.minimize_button.click()
             settle()
             assert window.isMinimized()
             window.showNormal()
             settle()
-            assert int(window.winId()) == hwnd and window.geometry() == normal_geometry
+            assert int(window.winId()) == hwnd and window.geometry() == normal_geometry, (window.geometry(), normal_geometry)
             report['integrated_window_controls'] = report['maximize_respects_work_area'] = True
             report['minimize_restore_preserves_window'] = True
+            window.resize(1380, 880)
             assert 'Qt-Material' in app.styleSheet()
             window.lib_merge_box.setChecked(True)
             capture(window, 'workspace-merge-light')
