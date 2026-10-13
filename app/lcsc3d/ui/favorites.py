@@ -6,7 +6,7 @@ import threading
 import time
 from collections import OrderedDict
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot, QEvent, QSize
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot, QEvent, QSize, QPersistentModelIndex
 from PySide6.QtGui import QDesktopServices, QPixmap, QIcon
 from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget)
 from lcsc3d.ui.localized_widgets import (QCheckBox, QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget)
@@ -20,7 +20,7 @@ from lcsc3d.ui.app_theme import theme_manager
 from lcsc3d.ui.ui_components import IconButton, title_block, scroll_page, surface, ColumnSplitter
 from lcsc3d.ui.shell_ui import notify
 from shiboken6 import isValid
-from lcsc3d.ui.store_images import ImageGallery, ProductImage, load_search_thumbnails
+from lcsc3d.ui.store_images import ImageGallery, ProductImage, load_search_thumbnails, fetch_photo, decode_photo
 from lcsc3d.services.store_diagnostics import record_request_error
 from lcsc3d.core.app_logging import (log_event, new_context, log_context, contextual, record_error, traced, safe_part)
 
@@ -42,6 +42,8 @@ class ProductTable(QTableWidget):
     def viewportEvent(self, event):
         if event.type() == QEvent.Resize and hasattr(self, 'column_timer'):
             self.column_timer.start(0)
+            if hasattr(self, 'thumbnail_timer'):
+                self.thumbnail_timer.start(60)
         return super().viewportEvent(event)
 
     def fit_model_column(self):
@@ -621,7 +623,7 @@ class FavoritesDialog(QDialog):
     activity_finished = Signal()
     account_changed = Signal()
 
-    def __init__(self, parent=None, *, client_factory=None, vault=None):
+    def __init__(self, parent=None, *, client_factory=None, vault=None, deferred=False):
         super().__init__(parent)
         self.app_window = parent
         if parent is not None:
@@ -648,6 +650,7 @@ class FavoritesDialog(QDialog):
         self.search_keyword = ''
         self.search_selected = {}
         self.thumbnail_cache = OrderedDict()
+        self.thumbnail_cells = {}
         self.price_choices = {}
         self.favorite_checked = set()
         self.galleries = []
@@ -655,6 +658,20 @@ class FavoritesDialog(QDialog):
         self.current_product = None
         self.pending_gallery_part = ''
         self.pages_read = 0
+        self.ui_ready = False
+        self.account_label = plain_label(ui_text('未登录'), 'muted')
+        self.account_label.setParent(self)
+        self.status = plain_label(ui_text('输入关键词搜索，或登录后获取账号收藏。'), 'muted')
+        self.status.setParent(self)
+        if not deferred:
+            self.setup_ui()
+        if self.vault.exists():
+            QTimer.singleShot(0, self.restore_session)
+
+    def setup_ui(self):
+        if self.ui_ready:
+            return
+        self.ui_ready = True
         self.setWindowTitle(ui_text('立创商城 · 搜索与收藏'))
         self.resize(1420, 860)
         self.setMinimumSize(1100, 680)
@@ -663,7 +680,6 @@ class FavoritesDialog(QDialog):
         layout.setSpacing(12)
         account_row = QHBoxLayout()
         account_row.addWidget(title_block(ui_text('立创商城'), ui_text('发现元件 · 查看资料 · 同步收藏'), large=True), 1)
-        self.account_label = plain_label(ui_text('未登录'), 'muted')
         self.account_label.setObjectName('badge')
         if self._page_host is None:
             account_row.addWidget(self.account_label)
@@ -812,7 +828,6 @@ class FavoritesDialog(QDialog):
         self.import_button.clicked.connect(self.import_selected)
         actions.addWidget(self.import_button)
         layout.addLayout(actions)
-        self.status = plain_label(ui_text('输入关键词搜索，或登录后获取账号收藏。'), 'muted')
         layout.addWidget(self.status)
         self.clear_detail()
         self.update_count()
@@ -825,8 +840,11 @@ class FavoritesDialog(QDialog):
             self.read_button.setText('Manage favorites on LCSC.com')
             self.filter_input.setEnabled(False)
             self.status.setText('Search LCSC International. Prices are shown in USD; choose a category for broad keywords.')
-        if self.vault.exists():
-            QTimer.singleShot(0, self.restore_session)
+        self.refresh_account_action()
+
+    def show(self):
+        self.setup_ui()
+        super().show()
 
     @property
     def table(self):
@@ -891,9 +909,15 @@ class FavoritesDialog(QDialog):
                 table.setColumnWidth(column, max(table.columnWidth(column), table.fontMetrics().horizontalAdvance(title) + 28))
         table.currentCellChanged.connect(self.selection_changed)
         table.itemChanged.connect(lambda item, source=table: self.checkbox_changed(source, item))
+        table.thumbnail_timer = QTimer(table)
+        table.thumbnail_timer.setSingleShot(True)
+        table.thumbnail_timer.timeout.connect(lambda: self.start_thumbnails(table))
+        table.verticalScrollBar().valueChanged.connect(lambda _: table.thumbnail_timer.start(60))
+        self.thumbnail_cells[table] = OrderedDict()
         return table
 
     def set_mode(self, mode):
+        self.setup_ui()
         self.tabs.setCurrentIndex(1 if mode == 'favorites' else 0)
 
     def tab_changed(self):
@@ -1047,10 +1071,18 @@ class FavoritesDialog(QDialog):
         if any(worker.channel == channel and self.jobs.current(worker) for worker in self.jobs.workers):
             return
         requests = {}
-        for row in range(table.rowCount()):
+        held = self.thumbnail_cells[table]
+        for key, (_, index, _) in list(held.items()):
+            if not index.isValid():
+                held.pop(key)
+        for row in self.thumbnail_rows(table):
             cell = table.item(row, table.thumbnail_column)
             url = cell.data(Qt.UserRole)
-            if not url or not cell.icon().isNull():
+            if not url:
+                continue
+            if not cell.icon().isNull():
+                if id(cell) in held:
+                    held.move_to_end(id(cell))
                 continue
             if url in self.thumbnail_cache:
                 self.thumbnail_loaded(table, row, (url, self.thumbnail_cache[url]))
@@ -1068,12 +1100,28 @@ class FavoritesDialog(QDialog):
             worker.finished.connect(lambda: self.start_thumbnails(table)
                                     if self.jobs.revisions.get(channel) == worker.revision else None)
 
+    def thumbnail_rows(self, table):
+        """Keep a small page eager; prefetch around the viewport for large lists."""
+        if table.rowCount() <= 128:
+            return range(table.rowCount())
+        first = max(0, table.rowAt(0) - 16)
+        rows = []
+        for row in range(first, table.rowCount()):
+            if not table.isRowHidden(row):
+                rows.append(row)
+                if len(rows) == 128:
+                    break
+        return rows
+
     def thumbnail_loaded(self, table, row, result):
         url, image = result
         if row >= table.rowCount():
             return
         cell = table.item(row, table.thumbnail_column)
         if cell is None or cell.data(Qt.UserRole) != url:
+            return
+        if table.rowCount() > 128 and row not in self.thumbnail_rows(table):
+            cell.setData(Qt.UserRole + 1, False)
             return
         cell.setText('—' if image.isNull() else '')
         cell.setToolTip(ui_text('图片加载失败') if image.isNull() else ui_text('双击查看商品原图'))
@@ -1083,6 +1131,15 @@ class FavoritesDialog(QDialog):
             for mode in (QIcon.Normal, QIcon.Active, QIcon.Selected):
                 icon.addPixmap(pixmap, mode)
             cell.setIcon(icon)
+            held = self.thumbnail_cells[table]
+            held[id(cell)] = cell, QPersistentModelIndex(table.indexFromItem(cell)), url
+            held.move_to_end(id(cell))
+            while len(held) > 128:
+                _, (old, index, old_url) = held.popitem(last=False)
+                if index.isValid() and old.data(Qt.UserRole) == old_url:
+                    old.setIcon(QIcon())
+                    old.setText('…')
+                    old.setData(Qt.UserRole + 1, False)
             self.thumbnail_cache[url] = image
             self.thumbnail_cache.move_to_end(url)
             while len(self.thumbnail_cache) > 128:
@@ -1112,19 +1169,20 @@ class FavoritesDialog(QDialog):
         combo.currentIndexChanged.connect(lambda _: self.price_choices.__setitem__(product['part'], combo.currentData()))
 
     def checkbox_changed(self, table, item):
-        if item.column() == 0:
-            cell = table.item(item.row(), 1)
-            if cell is not None:
-                product = cell.data(Qt.UserRole)
-                if table is self.search_table:
-                    if item.checkState() == Qt.Checked:
-                        self.search_selected[product['part']] = product
-                    else:
-                        self.search_selected.pop(product['part'], None)
-                elif item.checkState() == Qt.Checked:
-                    self.favorite_checked.add(product['part'])
+        if item.column() != 0:
+            return
+        cell = table.item(item.row(), 1)
+        if cell is not None:
+            product = cell.data(Qt.UserRole)
+            if table is self.search_table:
+                if item.checkState() == Qt.Checked:
+                    self.search_selected[product['part']] = product
                 else:
-                    self.favorite_checked.discard(product['part'])
+                    self.search_selected.pop(product['part'], None)
+            elif item.checkState() == Qt.Checked:
+                self.favorite_checked.add(product['part'])
+            else:
+                self.favorite_checked.discard(product['part'])
         self.update_count()
 
     def open_login(self):
@@ -1305,6 +1363,7 @@ class FavoritesDialog(QDialog):
         if self.tabs.currentIndex() == 1 and self.favorite_table.isRowHidden(self.favorite_table.currentRow()):
             self.clear_detail()
         self.update_count()
+        self.favorite_table.thumbnail_timer.start(60)
 
     def selected_items(self):
         if self.tabs.currentIndex() == 0:
@@ -1465,15 +1524,16 @@ class FavoritesDialog(QDialog):
         if product.get('image'):
             url, client = product['image'], self.factory()
             self.image_label.setText(ui_text('正在加载图片…'))
-            self.jobs.start('image', lambda stop, progress: client.image(url, stop),
+            self.jobs.start('image', lambda stop, progress: fetch_photo(client, url, stop),
                             self.image_loaded, lambda _: self.image_label.setText(ui_text('图片加载失败')))
 
     def image_loaded(self, image):
-        pixmap = QPixmap()
-        if image and pixmap.loadFromData(image):
+        photo = decode_photo(image)
+        if not photo.image.isNull():
+            pixmap = QPixmap.fromImage(photo.image)
             self.image_label.set_image(pixmap)
         else:
-            log_event('WARNING', 'image.product_decode_failed', bytes=len(image or b''))
+            log_event('WARNING', 'image.product_decode_failed', bytes=photo.source_bytes)
             self.image_label.setText(ui_text('暂无商品图片'))
 
     def open_link(self, key):
@@ -1626,6 +1686,10 @@ class FavoritesDialog(QDialog):
             gallery.close()
 
     def closeEvent(self, event):
+        if not self.ui_ready:
+            self.jobs.cancel_all(except_channels=('save',))
+            event.accept()
+            return
         self.stop_read()
         if self.searching:
             self.stop_search()

@@ -17,6 +17,7 @@ def resolve_models(component, step_fetch, check=lambda: None, *, prepare_altium=
     """Keep each failed placement unresolved; successful 2D domains survive."""
     assets, payloads, models = {}, {}, []
     diagnostics = list(component.diagnostics)
+    steps, origins = {}, {}
     for model in component.models:
         check()
         resolved = model
@@ -30,10 +31,13 @@ def resolve_models(component, step_fetch, check=lambda: None, *, prepare_altium=
             if placement.convention not in ('source-anchor-zxy', 'step-origin-zxy'):
                 raise DownloadError('模型放置规则尚不支持')
             reference = ModelReference(model.name,model.identifier)
-            step = step_fetch(reference)
+            step = steps.get(reference.uuid)
+            if step is None:
+                step = step_fetch(reference)
             if not step.data:
                 raise DownloadError('官方 STEP 模型不可用')
             validate_step(step.data)
+            steps[reference.uuid] = step
             check()
             rotation = rotation_zxy(placement.angles)
             offset = placement.position
@@ -43,10 +47,14 @@ def resolve_models(component, step_fetch, check=lambda: None, *, prepare_altium=
                     raise DownloadError('缺少官方模型放置基准，已跳过关联')
                 # A fallback STEP may have a different raw origin. Always use
                 # the companion OBJ of the actual file asset, not the library ID.
-                origin = origin_fetch(ModelReference(model.name, getattr(step, 'identifier', '') or model.identifier))
+                identifier = getattr(step, 'identifier', '') or model.identifier
+                origin = origins.get(identifier)
+                if origin is None:
+                    origin = origin_fetch(ModelReference(model.name, identifier))
                 anchor = tuple(D(str(v)) for v in origin.position)
                 if len(anchor) != 3 or not all(v.is_finite() for v in anchor):
                     raise DownloadError('官方模型放置基准无效，已跳过关联')
+                origins[identifier] = origin
                 offset = tuple(placement.position[i] - sum(D(str(rotation[i][j]))*anchor[j]
                                for j in range(3)) for i in range(3))
                 reference_digest = origin.sha256

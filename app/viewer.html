@@ -140,27 +140,60 @@
       if (token !== desired.token || part !== desired.part) return false;
       try {
         if (!program || gl.isContextLost()) throw Error('3D 渲染器不可用，请重新加载');
-        const vertices = mesh.vertices;
+        const packed = mesh.encoding === 'base64-le-v1';
+        const decode = (encoded, Type) => {
+          const binary = atob(encoded), bytes = new Uint8Array(binary.length);
+          for (let i=0; i<binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          return new Type(bytes.buffer);
+        };
+        const vertices = packed ? decode(mesh.vertices, Float64Array) : mesh.vertices;
+        const faces = packed ? decode(mesh.faces, Uint32Array) : mesh.faces;
+        const totalVertices = packed ? vertices.length/3 : vertices.length;
+        const vertex = index => packed ? vertices.subarray(index*3,index*3+3) : vertices[index];
         const lo = [Infinity,Infinity,Infinity], hi = [-Infinity,-Infinity,-Infinity];
-        vertices.forEach(v => v.forEach((x,i) => { lo[i]=Math.min(lo[i],x); hi[i]=Math.max(hi[i],x); }));
+        for (let i=0; i<totalVertices; i++) {
+          const v = vertex(i);
+          for (let j=0; j<3; j++) { lo[j]=Math.min(lo[j],v[j]); hi[j]=Math.max(hi[j],v[j]); }
+        }
         const center = lo.map((x,i) => (x+hi[i])/2);
         const radius = Math.hypot(...lo.map((x,i) => hi[i]-x))/2 || 1;
-        const geometry = [];
-        mesh.faces.forEach(face => {
-          const color = mesh.materials[face[0]];
-          for (let i=2; i<face.length-1; i++) {
-            const triangle = [vertices[face[1]],vertices[face[i]],vertices[face[i+1]]];
+        let maximum = 0, totalFaces = 0;
+        const visitFaces = visit => {
+          if (packed) {
+            for (let i=0; i<faces.length;) {
+              const material=faces[i++], length=faces[i++];
+              if (length < 3 || i+length > faces.length) throw Error('模型没有可显示的面');
+              visit(material, faces, i, i+length); i+=length;
+            }
+          } else faces.forEach(face => visit(face[0],face,1,face.length));
+        };
+        visitFaces((material, indices, start, end) => { maximum+=(end-start-2)*27; totalFaces++; });
+        // Small meshes allocate exactly once. A large degenerate input cannot
+        // force allocation for triangles that will never reach the GPU.
+        let geometry = new Float32Array(Math.min(maximum,4*1024*1024)), used=0;
+        visitFaces((material, indices, start, end) => {
+          const color = mesh.materials[material];
+          for (let i=start+1; i<end-1; i++) {
+            const triangle = [vertex(indices[start]),vertex(indices[i]),vertex(indices[i+1])];
             const u = triangle[1].map((x,j) => x-triangle[0][j]);
             const v = triangle[2].map((x,j) => x-triangle[0][j]);
             const n = [u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
             const length = Math.hypot(...n);
             if (length < 1e-15) continue;
-            triangle.forEach(point => geometry.push(...point.map((x,j) => (x-center[j])/radius),...n.map(x=>x/length),...color));
+            if (used+27 > geometry.length) {
+              const larger = new Float32Array(Math.min(maximum,Math.max(used+27,geometry.length*2)));
+              larger.set(geometry.subarray(0,used)); geometry=larger;
+            }
+            for (const point of triangle) {
+              for (let j=0;j<3;j++) geometry[used++]=(point[j]-center[j])/radius;
+              for (let j=0;j<3;j++) geometry[used++]=n[j]/length;
+              for (let j=0;j<3;j++) geometry[used++]=color[j];
+            }
           }
         });
-        if (!geometry.length) throw Error('模型没有可显示的面');
-        gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(geometry),gl.STATIC_DRAW);
-        count = geometry.length/9; vertexCount = vertices.length; faceCount = mesh.faces.length;
+        if (!used) throw Error('模型没有可显示的面');
+        gl.bufferData(gl.ARRAY_BUFFER,geometry.subarray(0,used),gl.STATIC_DRAW);
+        count = used/9; vertexCount = totalVertices; faceCount = totalFaces;
         window.fitModel();
         state('ready',part + ' · ' + faceCount + ' 个面 · 拖动旋转，滚轮缩放');
         return true;

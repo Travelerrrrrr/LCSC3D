@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import gzip
+import io
 import json
 import os
 import re
@@ -15,7 +16,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, unquote
 
 from lcsc3d.core.errors import Cancelled, DownloadError
 from lcsc3d.services.download_progress import BatchProgress
@@ -27,6 +28,7 @@ from lcsc3d.services.store_diagnostics import record_request_error
 from lcsc3d.core.app_paths import temporary_directory, replace_file
 from lcsc3d.models.model3d import (ModelReference, document, model_reference,
                      model_library_reference, model_library_asset)
+from lcsc3d.models.model_cache import cached_model, reuse_models
 from lcsc3d.eda.altium import export_schlib, export_pcblib, export_linked_schlib, export_linked_pcblib, MergedLibrary
 from lcsc3d.eda.library_merge import read_library, append_library
 from lcsc3d.eda.altium_project import commit_user_file, add_libraries_to_project, read_project
@@ -136,7 +138,14 @@ def shared_ssl_context():
 @lru_cache(maxsize=4)
 def connection_pool(proxy=None):
     kwargs = dict(num_pools=8, maxsize=6, block=True, ssl_context=shared_ssl_context())
-    return urllib3.ProxyManager(proxy, **kwargs) if proxy else urllib3.PoolManager(**kwargs)
+    if not proxy:
+        return urllib3.PoolManager(**kwargs)
+    proxy = proxy if '://' in proxy else 'http://' + proxy
+    parsed = urlsplit(proxy)
+    if parsed.username is not None:
+        credentials = unquote(parsed.username) + ':' + unquote(parsed.password or '')
+        kwargs['proxy_headers'] = urllib3.util.make_headers(proxy_basic_auth=credentials)
+    return urllib3.ProxyManager(proxy, **kwargs)
 
 
 def parse_part_numbers(text: str) -> tuple[list[str], list[str], int]:
@@ -189,7 +198,7 @@ class NetworkApi:
     """Official component/model APIs with bounded requests and cancellation."""
     def __init__(self, cancelled: threading.Event | None = None, use_cache=True):
         self.cancelled = cancelled or threading.Event()
-        self.headers = {'User-Agent': 'LCSC3D/2.4.0-demo.2', 'Accept-Encoding': 'gzip',
+        self.headers = {'User-Agent': 'LCSC3D/2.4.1', 'Accept-Encoding': 'gzip',
                         'Accept': '*/*'}
         self.use_cache = use_cache
 
@@ -238,14 +247,14 @@ class NetworkApi:
                         if response.status < 500 or transient_failures >= 2 or attempt == RESOURCE_REQUEST_ATTEMPTS - 1:
                             raise DownloadError(f'服务器返回 HTTP {response.status}')
                 else:
-                    chunks = []
+                    chunks = io.BytesIO()
                     while True:
                         self.check_cancelled()
                         block = response.read(64 * 1024, decode_content=True)
                         if not block:
                             break
-                        chunks.append(block)
-                    raw = b''.join(chunks)
+                        chunks.write(block)
+                    raw = chunks.getvalue()
                     status = response.status
                     response.release_conn()
                     response = None
@@ -338,6 +347,10 @@ class NetworkApi:
         return self._model_payload(uuid, ENDPOINT_3D_MODEL, 'obj')
 
     def get_model_origin(self, uuid: str):
+        return cached_model(('origin', uuid), lambda: self._model_origin(uuid),
+                            size=lambda value: 512, check=self.check_cancelled)
+
+    def _model_origin(self, uuid: str):
         """Reuse a tiny session-local anchor; never retain parsed mesh geometry."""
         from lcsc3d.models.model_geometry import ModelOrigin, obj_origin
         self.check_cancelled()
@@ -399,6 +412,11 @@ class NetworkApi:
     def _model_payload(self, uuid, template, kind):
         if not isinstance(uuid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', uuid):
             raise DownloadError('3D 模型编号不受支持')
+        return cached_model(('resource', template, kind, uuid),
+            lambda: self._fetch_model_payload(uuid, template, kind),
+            size=lambda value: len(value) * (4 if isinstance(value, str) else 1), check=self.check_cancelled)
+
+    def _fetch_model_payload(self, uuid, template, kind):
         key = kind + ':' + uuid
         self.check_cancelled()
         raw = PAYLOAD_CACHE.get(key) if self.use_cache else None
@@ -671,6 +689,7 @@ def get_component_metadata(part: str, api: NetworkApi) -> dict[str, str]:
 
 
 @traced('download.part', lambda part, options, *a, **kw: {'part': safe_part(part), 'formats': options.formats}, level='INFO')
+@reuse_models
 def download_part(part: str, options: Options, api: NetworkApi,
                   progress: Callable[[str, str], None] | None = None, *, libraries=None, merge_lock=None,
                   deferred_outputs=None, kicad_entries=None, on_progress=None) -> Result:
@@ -842,6 +861,7 @@ def download_part(part: str, options: Options, api: NetworkApi,
 
 
 @traced('download.batch', lambda parts, options, *a, **kw: {'count': len(parts), 'formats': options.formats}, level='INFO')
+@reuse_models
 def download_batch(parts, options, cancelled=None, progress=None, on_result=None, api=None, workers=3, on_progress=None):
     """Download with bounded concurrency; callbacks may finish out of row order."""
     if not parts:

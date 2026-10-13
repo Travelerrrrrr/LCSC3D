@@ -9,6 +9,7 @@ from dataclasses import dataclass, fields, is_dataclass
 import base64
 from decimal import ROUND_HALF_UP
 import hashlib
+from lcsc3d.models.model_cache import cached_model, reuse_models
 import json
 import math
 import re
@@ -404,7 +405,9 @@ def footprint_definition(component, name, check=lambda: None, *, model_assets=No
                           f'(rotate (xyz {" ".join(n(-v) for v in angles)})))')
             if model_mode == 'embedded' and filename not in embedded:
                 import zstandard
-                encoded = base64.b64encode(zstandard.ZstdCompressor(level=15,write_content_size=True).compress(raw)).decode('ascii')
+                encoded = cached_model(('kicad-step-zstd15', model.asset_id),
+                    lambda: base64.b64encode(zstandard.ZstdCompressor(level=15,write_content_size=True).compress(raw)).decode('ascii'),
+                    check=check)
                 embedded[filename] = f'(file (name {q(filename)}) (type model) (data |{encoded}|) (checksum {q(model.asset_id)}))'
         if embedded:
             result.append('(embedded_fonts no)')
@@ -451,6 +454,7 @@ class Artifact:
     parts: tuple[str, ...]
 
 
+@reuse_models
 def build_library(components, requested, name, check=lambda: None, *, electrical_policy='source',
                   symbol_libraries=None, footprint_libraries=None, footprint_references=None,
                   model_assets=None, model_mode='embedded'):

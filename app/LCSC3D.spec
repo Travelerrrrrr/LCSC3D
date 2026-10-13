@@ -40,6 +40,10 @@ a.binaries = [entry for entry in a.binaries
 # browser resources, developer tools and unused browser translations.
 def needed_resource(entry):
     name = entry[0].replace('\\', '/').lower()
+    # PDF documents open externally. This image-format plugin is the sole
+    # native importer of QtPdf; the SVG/WebGL previews use WebEngine.
+    if name in {'pyside6/plugins/imageformats/qpdf.dll', 'pyside6/qt6pdf.dll'}:
+        return False
     # The package's own hook collects fonts, example UI and even source caches.
     # We render with the user's installed font and only need the QSS/SVG inputs.
     if name.startswith('qt_material/'):

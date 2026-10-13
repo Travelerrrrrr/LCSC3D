@@ -4,6 +4,7 @@ from __future__ import annotations
 from lcsc3d.core.app_logging import traced, safe_part, network_target, record_error
 
 import gzip
+import io
 import base64
 from html.parser import HTMLParser
 import http.cookiejar
@@ -21,6 +22,7 @@ from urllib.parse import urlencode, urlsplit
 import zlib
 
 from lcsc3d.services.backend import shared_ssl_context
+from lcsc3d.services.pooled_http import PooledHandler
 from lcsc3d.core.errors import Cancelled
 from lcsc3d.services.store_crypto import encrypt_login_value, decode_login_values
 from lcsc3d.services.store_diagnostics import record_request_error
@@ -399,9 +401,9 @@ class MemorySession:
 
     def _build_opener(self, proxies):
         return urllib.request.build_opener(
-            urllib.request.ProxyHandler(proxies),
+            urllib.request.ProxyHandler({}),
             urllib.request.HTTPCookieProcessor(self.cookies),
-            urllib.request.HTTPSHandler(context=shared_ssl_context()))
+            PooledHandler(proxies))
 
     @traced('store.http', lambda self, url, **kw: {'host': network_target(url), 'operation': request_operation(url)})
     def request(self, url, *, method='GET', data=None, headers=None, cancelled=None, limit=8 * 1024 * 1024):
@@ -429,7 +431,7 @@ class MemorySession:
                           proxy_mode=proxy_mode('store'))
                 with self.opener.open(req, timeout=12) as response:
                     log_event('DEBUG', 'store.http_response', status=getattr(response, 'status', None))
-                    chunks, size = [], 0
+                    chunks, size = io.BytesIO(), 0
                     while True:
                         check_cancelled(cancelled)
                         chunk = response.read(65536)
@@ -438,8 +440,8 @@ class MemorySession:
                         size += len(chunk)
                         if size > limit:
                             raise StoreError('商城返回的数据过大，已停止读取。')
-                        chunks.append(chunk)
-                    body = b''.join(chunks)
+                        chunks.write(chunk)
+                    body = chunks.getvalue()
                     if response.headers.get('Content-Encoding') == 'gzip' or body.startswith(b'\x1f\x8b'):
                         body = gzip.decompress(body)
                         if len(body) > limit:
@@ -449,6 +451,7 @@ class MemorySession:
                               elapsed_ms=round((time.monotonic() - started) * 1000))
                     return body, response.geturl()
             except urllib.error.HTTPError as exc:
+                exc.close()
                 if exc.code == 401:
                     raise SessionExpired('商城登录已失效，请重新登录。') from None
                 failed(exc, f'服务器返回 HTTP {exc.code}，请稍后重试。')

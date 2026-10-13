@@ -49,7 +49,7 @@ from lcsc3d.core.assets import SOURCE_APP_DIR, RESOURCE_ROOT
 from lcsc3d.ui.progress_ui import SmoothProgressBar
 from lcsc3d.ui.messages_ui import MessagesPage
 
-VERSION = '2.4.0'
+VERSION = '2.4.1'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = RESOURCE_ROOT
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else SOURCE_APP_DIR
@@ -242,9 +242,11 @@ class ModelPreviewWorker(QThread):
             raw = api.get_raw_3d_model_obj(model.uuid)
             if not raw:
                 raise ValueError(ui_text('官方库没有可预览的 OBJ 模型'))
-            mesh = read_obj(raw, api.check_cancelled)
+            mesh = read_obj(raw, api.check_cancelled, packed=True)
             api.check_cancelled()
-            self.loaded.emit(self.part, self.revision, mesh.preview_payload())
+            payload = mesh.preview_transfer(api.check_cancelled)
+            del mesh, raw
+            self.loaded.emit(self.part, self.revision, payload)
             log_event('DEBUG', 'preview.model_load_completed')
         except Cancelled:
             log_event('INFO', 'preview.model_load_cancelled')
@@ -292,6 +294,8 @@ class MainWindow(FramelessMainWindow):
         self.viewer_started = False
         self.viewer_page_loads = 0
         self.viewer_ready = False
+        self.viewer_displayed_revision = None
+        self.viewer_mesh_revision = None
         self.web_model = None
         self.web_error = ''
         self.model_worker = None
@@ -324,7 +328,7 @@ class MainWindow(FramelessMainWindow):
         self.setMinimumHeight(min(available.height(), max(self.minimumHeight(), self.minimumSizeHint().height())))
         self._restore_settings()
         if self.settings_enabled:
-            QTimer.singleShot(0, self.ensure_store)
+            QTimer.singleShot(0, lambda: self.ensure_store(deferred=True))
 
     def _setup_ui(self):
         canvas = QWidget()
@@ -1096,9 +1100,11 @@ class MainWindow(FramelessMainWindow):
         self.refresh_store_account()
         return dialog
 
-    def ensure_store(self):
+    def ensure_store(self, *, deferred=False):
         if self.favorites_dialog is None:
-            self.bind_store(FavoritesDialog(self, vault=None if self.settings_enabled else False))
+            self.bind_store(FavoritesDialog(self, vault=None if self.settings_enabled else False, deferred=deferred))
+        elif not deferred:
+            self.favorites_dialog.setup_ui()
         return self.favorites_dialog
 
     def refresh_store_account(self):
@@ -1883,12 +1889,13 @@ class MainWindow(FramelessMainWindow):
         self.request_model_preview(part, self.web_revision, reload)
 
     def update_viewer_part(self):
-        if not self.viewer_ready:
+        if not self.viewer_ready or self.viewer_displayed_revision == self.web_revision:
             return
         args = json.dumps(self.current_3d) + ',' + str(self.web_revision)
         self.web.page().runJavaScript(ui_message('window.loadLcscPart && window.loadLcscPart({0})', args))
         if self.web_model is not None:
-            payload = json.dumps(self.web_model, separators=(',', ':'))
+            payload = self.web_model if isinstance(self.web_model, str) else json.dumps(self.web_model, separators=(',', ':'))
+            self.viewer_mesh_revision = self.web_revision
             self.web.page().runJavaScript(ui_message('window.showMesh && window.showMesh({0},{1})', payload, args))
         elif self.web_error:
             message = json.dumps(self.web_error)
@@ -1921,6 +1928,7 @@ class MainWindow(FramelessMainWindow):
             log_event('DEBUG', 'preview.stale_result_ignored', part=safe_part(part), revision=revision)
             return
         self.web_model = payload
+        self.viewer_displayed_revision = None
         self.update_viewer_part()
 
     def model_preview_failed(self, part, revision, message):
@@ -1951,6 +1959,9 @@ class MainWindow(FramelessMainWindow):
     def on_web_preview_state(self, token, status, message):
         if token not in (-1, self.web_revision):
             return
+        if status == 'ready' and token == self.web_revision and self.viewer_mesh_revision == token:
+            self.viewer_displayed_revision = token
+            self.web_model = None  # The GPU now owns the mesh; discard transfer data.
         self.web_state = (status, message)
         if self.preview_mode == '3d':
             self.fit_button.setEnabled(status == 'ready')

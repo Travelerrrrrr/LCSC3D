@@ -8,7 +8,7 @@ from lcsc3d.ui.localized_widgets import (QPushButton, QLabel)
 from lcsc3d.ui.favorites import Jobs
 from lcsc3d.services.store import StoreClient, StoreError
 from lcsc3d.services.international_store import catalog_client
-from lcsc3d.ui.store_images import PhotoView
+from lcsc3d.ui.store_images import PhotoView, PhotoCache, fetch_photo, decode_photo
 
 
 class ProductPreview(QWidget):
@@ -19,7 +19,7 @@ class ProductPreview(QWidget):
         self.factory = client_factory or catalog_client
         self.jobs = Jobs(self)
         self.part, self.urls, self.index = '', [], -1
-        self.cache, self.cache_size = {}, 0
+        self.cache = PhotoCache()
         self.load_state = ('empty', ui_text('选择器件后查看商品图片'))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -44,7 +44,7 @@ class ProductPreview(QWidget):
     def clear(self):
         self.jobs.cancel_all()
         self.part, self.urls, self.index = '', [], -1
-        self.cache, self.cache_size = {}, 0
+        self.cache.clear()
         self.view.clear_photo()
         self.update_controls()
 
@@ -81,18 +81,14 @@ class ProductPreview(QWidget):
             self.loaded(self.cache[index])
         else:
             client, url = self.factory(), self.urls[index]
-            self.jobs.start('product-photo', lambda stop, progress: client.image(url, stop), self.loaded, self.failed)
+            self.jobs.start('product-photo', lambda stop, progress: fetch_photo(client, url, stop), self.loaded, self.failed)
 
     def loaded(self, data):
-        pixmap = QPixmap()
-        if not data or not pixmap.loadFromData(data):
+        pixmap = data if isinstance(data, QPixmap) else QPixmap.fromImage(decode_photo(data).image)
+        if pixmap.isNull():
             self.failed(StoreError(ui_text('商品图片无法解码，请重新加载')))
             return
-        if self.index not in self.cache and len(data) <= 16 * 1024 * 1024:
-            if self.cache_size + len(data) > 16 * 1024 * 1024:
-                self.cache, self.cache_size = {}, 0
-            self.cache[self.index] = data
-            self.cache_size += len(data)
+        self.cache[self.index] = pixmap
         self.view.set_photo(pixmap)
         self.notify('ready', ui_message('商品实物图 · {0} × {1} · 滚轮缩放，拖动平移', pixmap.width(), pixmap.height()))
 

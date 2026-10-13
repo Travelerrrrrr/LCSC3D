@@ -1,5 +1,7 @@
 """Validate official model association and geometry for local preview."""
 import json
+import base64
+import struct
 from pathlib import Path
 import sys
 import unittest
@@ -44,6 +46,9 @@ class ModelTests(unittest.TestCase):
     def test_multiple_materials_keep_face_assignments(self):
         raw = OBJ.replace('endmtl', 'd 0.0\nendmtl') + 'usemtl pin\nf 1 3 2\n'
         mesh = read_obj(raw)
+        compact = read_obj(raw, packed=True)
+        self.assertEqual(compact.preview_payload(), mesh.preview_payload())
+        self.assertEqual(compact.preview_transfer(), mesh.preview_transfer())
         self.assertEqual(len(mesh.vertices), 3)
         self.assertEqual([name for name, _ in mesh.faces], ['body', 'pin'])
 
@@ -59,6 +64,29 @@ class ModelTests(unittest.TestCase):
             raise Cancelled()
         with self.assertRaises(Cancelled):
             read_obj(OBJ, cancel)
+
+    def test_binary_preview_preserves_full_precision_materials_and_polygons(self):
+        raw = OBJ.replace('2.54', '2.540000000000001') + 'usemtl second\nf -3 -2 -1\n'
+        mesh = read_obj(raw)
+        payload = json.loads(mesh.preview_transfer())
+        vertices = base64.b64decode(payload['vertices'])
+        self.assertEqual(struct.unpack('<' + 'd' * (len(vertices) // 8), vertices),
+                         tuple(v for vertex in mesh.vertices for v in vertex))
+        faces = base64.b64decode(payload['faces'])
+        decoded = struct.unpack('<' + 'I' * (len(faces) // 4), faces)
+        self.assertEqual(decoded, (1, 3, 0, 1, 2, 2, 3, 0, 1, 2))
+        self.assertEqual(payload['materials'], mesh.preview_payload()['materials'])
+        def cancel():
+            raise Cancelled()
+        with self.assertRaises(Cancelled):
+            mesh.preview_transfer(cancel)
+
+    def test_compact_reader_preserves_line_numbers_and_all_splitlines_separators(self):
+        for separator in ('\n', '\r\n', '\r', '\v', '\f', '\x85', '\u2028', '\u2029'):
+            with self.subTest(separator=repr(separator)):
+                self.assertEqual(read_obj(separator.join(OBJ.splitlines()), packed=True).preview_payload(), read_obj(OBJ).preview_payload())
+                with self.assertRaisesRegex(DownloadError, '第 3 行'):
+                    read_obj(separator.join(('', '# comment', 'v nan 0 0')), packed=True)
 
 
 if __name__ == '__main__':

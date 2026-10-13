@@ -197,6 +197,27 @@ class BackupTests(unittest.TestCase):
 
 
 class BackupUiTests(unittest.TestCase):
+    def test_slow_backup_scan_leaves_ui_responsive_and_preserves_close_wait(self):
+        from PySide6.QtCore import QTimer
+        import threading
+        entered, release = threading.Event(), threading.Event()
+        def scan():
+            entered.set()
+            release.wait(3)
+            return []
+        with patch('lcsc3d.ui.backup_ui.list_backups', side_effect=scan):
+            self.panel.refresh()
+            try:
+                self.assertTrue(entered.wait(1))
+                ticks = []
+                QTimer.singleShot(0, lambda: ticks.append(True))
+                self.app.processEvents()
+                self.assertTrue(ticks)
+                self.assertFalse(self.window.close())
+            finally:
+                release.set()
+                self.wait()
+
     @classmethod
     def setUpClass(cls):
         from PySide6.QtCore import Qt
@@ -226,6 +247,7 @@ class BackupUiTests(unittest.TestCase):
         self.panel = self.settings.backup_panel
         self.settings.section_buttons[4].click()
         self.app.processEvents()
+        self.wait()
         self.addCleanup(self.close_window)
 
     def close_window(self):
@@ -259,6 +281,7 @@ class BackupUiTests(unittest.TestCase):
         target.write_bytes(old)
         commit_user_file(target, old, new)
         self.panel.refresh()
+        self.wait()
         self.assertIn('1 ', self.panel.usage.text())
         self.panel.restore_button.click()
         page = self.panel.restore_page
@@ -287,6 +310,7 @@ class BackupUiTests(unittest.TestCase):
         target.write_bytes(b'[Design]')
         create_backup(target, b'[Design]')
         self.panel.refresh()
+        self.wait()
         self.window.set_running(True)
         self.assertFalse(self.panel.restore_button.isEnabled())
         self.assertFalse(self.panel.clear_button.isEnabled())
