@@ -314,14 +314,35 @@ def product_page(html, expected_part):
         product = storefront_product(data.get('productRecord'), params)
         if not product or product['part'] != expected_part:
             raise ValueError()
-        pdf = data.get('pdfFileDetailVO') or {}
-        path = pdf.get('fileUrl') if isinstance(pdf, dict) else ''
-        product['datasheet'] = public_url(path) or ('https://datasheet.lcsc.com' + path
-                                                  if isinstance(path, str) and path.startswith('/upload/public/pdf/') else '')
+        product['datasheet'] = datasheet_url(data)
         product['details_complete'] = True
         return product
     except (ValueError, KeyError, TypeError, UnicodeError):
         raise StoreError('商城商品详细资料暂不可用，请稍后重试。') from None
+
+
+def datasheet_url(data):
+    """Read only datasheets, never a similarly named certificate or PCN file."""
+    record = data.get('productRecord') or {}
+    groups = record.get('fileTypeVOList', []) if isinstance(record, dict) else []
+    files = []
+    for group in groups if isinstance(groups, list) else []:
+        if isinstance(group, dict) and group.get('fileType') == 'pdf_property':
+            rows = group.get('detailVOList')
+            if isinstance(rows, list):
+                files.extend(rows)
+    files.append(data.get('pdfFileDetailVO'))
+    for file in files:
+        if not isinstance(file, dict):
+            continue
+        for key in ('linkAddress', 'fileUrl'):
+            path = file.get(key)
+            url = public_url(path)
+            if url:
+                return url
+            if isinstance(path, str) and path.startswith('/upload/public/pdf/'):
+                return 'https://atta.szlcsc.com' + path
+    return ''
 
 
 def favorite_products(payload, expected_page):
@@ -386,6 +407,8 @@ def request_operation(url):
                 }.get(parsed.path, '登录服务请求')
     if parsed.hostname == 'mp.weixin.qq.com':
         return '加载二维码图片'
+    if parsed.hostname == 'cart-api.szlcsc.com' and parsed.path == '/cart/quick':
+        return '加入购物车'
     return '商城请求'
 
 
@@ -868,6 +891,10 @@ class StoreClient:
             if catalog:
                 for key in ('model', 'resources'):
                     base[key] = catalog[key]
+                if not base.get('datasheet'):
+                    base['datasheet'] = catalog.get('datasheet', '')
+            log_event('DEBUG', 'catalog.datasheet_resolved', part=safe_part(part),
+                      available=bool(base.get('datasheet')))
             return base
         if catalog:
             base.update({key: value for key, value in catalog.items() if value or key not in base})

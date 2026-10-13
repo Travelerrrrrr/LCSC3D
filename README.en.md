@@ -21,9 +21,15 @@ LCSC3D is a portable Windows tool for hardware development, PCB design and mecha
 
 **2.4.0 attaches 3D models to footprints by default.** AD PcbLib and KiCad 9/10 footprints embed STEP models, keeping the model with the library file. KiCad 8 uses portable external models. The original STEP size is preserved and the source placement anchor is converted before applying the official pose.
 
-**Current version: 2.4.0** · **[Download for Windows](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [User guide (Chinese)](app/README.md) · [Release notes (Chinese)](docs/releases/v2.4.0.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**Local development version: 2.4.1** · **[Download for Windows](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [Full source package](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [User guide (Chinese)](app/README.md) · [Release notes (Chinese)](docs/releases/v2.4.1.md) · [Report an issue](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
 ![LCSC3D 2.4.0 workspace: Type-C 3D preview, enabled footprint model binding, Messages navigation and download progress](docs/images/2.4.0-release/main.png)
+
+## What's new in 2.4.1
+
+- Fix missing datasheets caused by the mainland store's new file metadata and manufacturer links.
+- Add mainland Cart and My Orders tabs, batch cart quantities and table context menus.
+- Reuse one on-demand embedded view for official checkout and orders. International accounts continue to use LCSC.com. This is a local delivery, not a published Release.
 
 ## What's new in 2.4.0
 

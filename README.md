@@ -21,9 +21,15 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 
 **2.4.0 默认开启封装关联 3D 模型。** AD PcbLib 与 KiCad 9/10 封装直接内嵌 STEP，模型随库文件保存，无需逐个手动关联；KiCad 8 提供外部模型兼容模式。保留 STEP 原始尺寸，并按官方位姿换算放置基准。
 
-**当前版本：2.4.0** · **[下载 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.4.0.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
+**本地开发版本：2.4.1** · **[下载 Windows 程序](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.exe)** · [完整源码包](https://github.com/Travelerrrrrr/LCSC3D/releases/latest/download/LCSC3D.zip) · [使用说明](app/README.md) · [本版更新](docs/releases/v2.4.1.md) · [问题反馈](https://github.com/Travelerrrrrr/LCSC3D/issues)
 
 ![LCSC3D 2.4.0 工作台：Type-C 三维预览、默认开启封装关联 3D 模型、新消息入口与下载进度](docs/images/2.4.0-release/main.png)
+
+## 2.4.1 更新重点
+
+- 修复部分器件数据手册缺失，兼容新版资料字段与厂商链接。
+- 商城新增购物车、我的订单；支持勾选批量加购、数量编辑及表格右键快捷操作。
+- 软件内使用官方购物车、结算及订单页面，共用按需加载的组件；本地交付尚未发布 Release。
 
 ## 2.4.0 更新重点
 
@@ -39,7 +45,7 @@ LCSC3D 是面向硬件开发、PCB 设计和结构配合的 Windows 便携工具
 ## 开始使用
 
 1. 从 [Releases](https://github.com/Travelerrrrrr/LCSC3D/releases/latest) 下载 `LCSC3D.exe`，在 Windows 10/11 x64 上运行。
-2. 点击 **立创商城** 搜索元件，或登录后从 **账号收藏** 勾选并加入下载列表；也可输入 `C2040, C20197, C456013` 后点击 **载入列表**。
+2. 点击 **立创商城** 搜索元件，或登录后从 **我的收藏** 勾选并加入下载列表；也可输入 `C2040, C20197, C456013` 后点击 **载入列表**。
 3. 单击器件行查看预览，勾选需要导出的器件，选择保存目录。
 4. 在 **导出到** 中选择 **Altium Designer / KiCad**，勾选所需模型和元件库格式；需要汇总时启用 **Lib → 合并**，分别设置库名。
 5. 点击 **开始下载**，完成后点击 **打开器件目录**。在 AD 中打开 SchLib / PcbLib；在 KiCad 库管理器中添加符号库文件和封装库目录。

@@ -107,6 +107,8 @@ class OfflineStore:
         self.toggle_code = 200
         self.cancel_code = 200
         self.removed_ids = set()
+        self.cart_adds = []
+        self.cart_code = 200
         from gmalg import SM2
         self.login_secret, self.login_public = SM2().generate_keypair()
         self.transport_secret, self.transport_public = SM2().generate_keypair()
@@ -130,7 +132,10 @@ class OfflineStore:
                 owner.requests.append((self.command, parsed.path, parse_qs(parsed.query), body))
                 headers = {}
                 mime = 'application/json'
-                if parsed.path == '/api/cas/config/get-public-key':
+                if parsed.path == '/cart/quick':
+                    owner.cart_adds.append(parse_qs(body.decode()))
+                    value = {'code': owner.cart_code, 'result': {'cart_contains_count': len(owner.cart_adds)}}
+                elif parsed.path == '/api/cas/config/get-public-key':
                     value = {'code': 200, 'data': owner.login_public.hex()}
                 elif parsed.path == '/api/cas/secret/update':
                     # The SDK returns a minimal-width integer; the CAS wire

@@ -1,0 +1,291 @@
+{
+  "C2861386": {
+    "productRecord": {
+      "productCode": "C2861386",
+      "productId": "3066063",
+      "productModel": "TLV75718PDRVR",
+      "fileTypeVOList": [
+        {
+          "detailVOList": [
+            {
+              "fileName": "wj183347",
+              "linkAddress": "https://www.ti.com/cn/lit/ds/symlink/tlv757p.pdf"
+            }
+          ],
+          "fileType": "pdf_property"
+        },
+        {
+          "detailVOList": [
+            {
+              "fileName": "TI(德州仪器)+产品标识与命名变更+2023-12-07.pdf.pdf.pdf",
+              "fileUrl": "/upload/public/pdf/source/20250320/E3BB32F82911CCE086245F74F40B1459.pdf"
+            }
+          ],
+          "fileType": "industry_information"
+        },
+        {
+          "detailVOList": [
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器)",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq088t/szzq088t.pdf?ts=1777249348149"
+            },
+            {
+              "fileName": "全量通用_HF (无卤素)认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq077h/szzq077h.pdf?ts=1765430053461"
+            },
+            {
+              "fileName": "全量通用_REACH认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq087ao/szzq087ao.pdf"
+            },
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq088s/szzq088s.pdf"
+            },
+            {
+              "fileName": "全量通用_REACH认证(英文版)_TI(德州仪器).pdf",
+              "fileUrl": "/upload/public/pdf/source/20250103/AA09B2CB471DDD2344193BFCDD3BAD52.pdf"
+            },
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器).pdf",
+              "fileUrl": "/upload/public/pdf/source/20250912/CE8B300B165F06F19AF9E8E2EE2DE390.pdf"
+            }
+          ],
+          "fileType": "certification_data_property"
+        }
+      ]
+    },
+    "expected": "https://www.ti.com/cn/lit/ds/symlink/tlv757p.pdf"
+  },
+  "C507270": {
+    "productRecord": {
+      "productCode": "C507270",
+      "productId": "520837",
+      "productModel": "TLV75718PDBVR",
+      "fileTypeVOList": [
+        {
+          "detailVOList": [
+            {
+              "fileName": "wj160917",
+              "linkAddress": "https://www.ti.com/cn/lit/ds/symlink/tlv757p.pdf"
+            }
+          ],
+          "fileType": "pdf_property"
+        },
+        {
+          "detailVOList": [
+            {
+              "fileName": "TI(德州仪器)+产品标识与命名变更+2023-12-07.pdf.pdf.pdf",
+              "fileUrl": "/upload/public/pdf/source/20250320/E3BB32F82911CCE086245F74F40B1459.pdf"
+            }
+          ],
+          "fileType": "industry_information"
+        },
+        {
+          "detailVOList": [
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器)",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq088t/szzq088t.pdf?ts=1777249348149"
+            },
+            {
+              "fileName": "全量通用_HF (无卤素)认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq077h/szzq077h.pdf?ts=1765430053461"
+            },
+            {
+              "fileName": "全量通用_REACH认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq087ao/szzq087ao.pdf"
+            },
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq088s/szzq088s.pdf"
+            },
+            {
+              "fileName": "全量通用_REACH认证(英文版)_TI(德州仪器).pdf",
+              "fileUrl": "/upload/public/pdf/source/20250103/AA09B2CB471DDD2344193BFCDD3BAD52.pdf"
+            },
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器).pdf",
+              "fileUrl": "/upload/public/pdf/source/20250912/CE8B300B165F06F19AF9E8E2EE2DE390.pdf"
+            }
+          ],
+          "fileType": "certification_data_property"
+        }
+      ]
+    },
+    "expected": "https://www.ti.com/cn/lit/ds/symlink/tlv757p.pdf"
+  },
+  "C34678": {
+    "productRecord": {
+      "productCode": "C34678",
+      "productId": "35647",
+      "productModel": "TPS72301DBVR",
+      "fileTypeVOList": [
+        {
+          "detailVOList": [
+            {
+              "fileName": "wj12940",
+              "linkAddress": "https://www.ti.com/cn/lit/ds/symlink/tps723.pdf"
+            }
+          ],
+          "fileType": "pdf_property"
+        },
+        {
+          "detailVOList": [
+            {
+              "fileName": "TI(德州仪器)+产品标识与命名变更+2023-12-07.pdf.pdf.pdf",
+              "fileUrl": "/upload/public/pdf/source/20250320/E3BB32F82911CCE086245F74F40B1459.pdf"
+            },
+            {
+              "fileName": "PCN20260331001.1.pdf",
+              "fileUrl": "/search_file/pdf/242b/1b7f/52d1/5dc2/c9b9/b57f/800e/154e/242b1b7f52d15dc2c9b9b57f800e154e.pdf"
+            }
+          ],
+          "fileType": "industry_information"
+        },
+        {
+          "detailVOList": [
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器)",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq088t/szzq088t.pdf?ts=1777249348149"
+            },
+            {
+              "fileName": "全量通用_HF (无卤素)认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq077h/szzq077h.pdf?ts=1765430053461"
+            },
+            {
+              "fileName": "全量通用_REACH认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq087ao/szzq087ao.pdf"
+            },
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq088s/szzq088s.pdf"
+            },
+            {
+              "fileName": "全量通用_REACH认证(英文版)_TI(德州仪器).pdf",
+              "fileUrl": "/upload/public/pdf/source/20250103/AA09B2CB471DDD2344193BFCDD3BAD52.pdf"
+            },
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器).pdf",
+              "fileUrl": "/upload/public/pdf/source/20250912/CE8B300B165F06F19AF9E8E2EE2DE390.pdf"
+            }
+          ],
+          "fileType": "certification_data_property"
+        }
+      ]
+    },
+    "expected": "https://www.ti.com/cn/lit/ds/symlink/tps723.pdf"
+  },
+  "C74511": {
+    "productRecord": {
+      "productCode": "C74511",
+      "productId": "75633",
+      "productModel": "LP2985-50DBVR",
+      "fileTypeVOList": [
+        {
+          "detailVOList": [
+            {
+              "fileName": "wj343328",
+              "linkAddress": "https://www.ti.com/cn/lit/ds/symlink/lp2985.pdf"
+            }
+          ],
+          "fileType": "pdf_property"
+        },
+        {
+          "detailVOList": [
+            {
+              "fileName": "TI(德州仪器)+产品标识与命名变更+2023-12-07.pdf.pdf.pdf",
+              "fileUrl": "/upload/public/pdf/source/20250320/E3BB32F82911CCE086245F74F40B1459.pdf"
+            }
+          ],
+          "fileType": "industry_information"
+        },
+        {
+          "detailVOList": [
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器)",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq088t/szzq088t.pdf?ts=1777249348149"
+            },
+            {
+              "fileName": "全量通用_HF (无卤素)认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq077h/szzq077h.pdf?ts=1765430053461"
+            },
+            {
+              "fileName": "全量通用_REACH认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq087ao/szzq087ao.pdf"
+            },
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq088s/szzq088s.pdf"
+            },
+            {
+              "fileName": "全量通用_REACH认证(英文版)_TI(德州仪器).pdf",
+              "fileUrl": "/upload/public/pdf/source/20250103/AA09B2CB471DDD2344193BFCDD3BAD52.pdf"
+            },
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器).pdf",
+              "fileUrl": "/upload/public/pdf/source/20250912/CE8B300B165F06F19AF9E8E2EE2DE390.pdf"
+            }
+          ],
+          "fileType": "certification_data_property"
+        }
+      ]
+    },
+    "expected": "https://www.ti.com/cn/lit/ds/symlink/lp2985.pdf"
+  },
+  "C69527": {
+    "productRecord": {
+      "productCode": "C69527",
+      "productId": "70644",
+      "productModel": "LM2776DBVR",
+      "fileTypeVOList": [
+        {
+          "detailVOList": [
+            {
+              "fileName": "wj257394",
+              "linkAddress": "https://www.ti.com/cn/lit/ds/symlink/lm2776.pdf"
+            }
+          ],
+          "fileType": "pdf_property"
+        },
+        {
+          "detailVOList": [
+            {
+              "fileName": "TI(德州仪器)+产品标识与命名变更+2023-12-07.pdf.pdf.pdf",
+              "fileUrl": "/upload/public/pdf/source/20250320/E3BB32F82911CCE086245F74F40B1459.pdf"
+            }
+          ],
+          "fileType": "industry_information"
+        },
+        {
+          "detailVOList": [
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器)",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq088t/szzq088t.pdf?ts=1777249348149"
+            },
+            {
+              "fileName": "全量通用_HF (无卤素)认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq077h/szzq077h.pdf?ts=1765430053461"
+            },
+            {
+              "fileName": "全量通用_REACH认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq087ao/szzq087ao.pdf"
+            },
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器).pdf",
+              "linkAddress": "https://www.ti.com/lit/cr/szzq088s/szzq088s.pdf"
+            },
+            {
+              "fileName": "全量通用_REACH认证(英文版)_TI(德州仪器).pdf",
+              "fileUrl": "/upload/public/pdf/source/20250103/AA09B2CB471DDD2344193BFCDD3BAD52.pdf"
+            },
+            {
+              "fileName": "全量通用_ROHS认证_TI(德州仪器).pdf",
+              "fileUrl": "/upload/public/pdf/source/20250912/CE8B300B165F06F19AF9E8E2EE2DE390.pdf"
+            }
+          ],
+          "fileType": "certification_data_property"
+        }
+      ]
+    },
+    "expected": "https://www.ti.com/cn/lit/ds/symlink/lm2776.pdf"
+  }
+}

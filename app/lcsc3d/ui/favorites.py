@@ -23,6 +23,7 @@ from shiboken6 import isValid
 from lcsc3d.ui.store_images import ImageGallery, ProductImage, load_search_thumbnails
 from lcsc3d.services.store_diagnostics import record_request_error
 from lcsc3d.core.app_logging import (log_event, new_context, log_context, contextual, record_error, traced, safe_part)
+from lcsc3d.ui.commerce_actions import CommerceActions
 
 
 THUMBNAIL_COLUMN = 7
@@ -614,7 +615,7 @@ class LoginDialog(QDialog):
         event.accept()
 
 
-class FavoritesDialog(QDialog):
+class FavoritesDialog(CommerceActions, QDialog):
     """Persistent in-app page for public search and account favorites."""
     import_requested = Signal(object)
     preview_requested = Signal(str)
@@ -740,9 +741,11 @@ class FavoritesDialog(QDialog):
         favorite_layout.addWidget(self.favorite_hint)
         self.favorite_table = self.make_table()
         favorite_layout.addWidget(self.favorite_table, 1)
-        self.tabs.addTab(favorite_panel, ui_text('账号收藏'))
+        self.tabs.addTab(favorite_panel, ui_text('我的收藏'))
+        self.setup_commerce()
         splitter.addWidget(self.tabs)
         inspector, detail = surface()
+        self.inspector = inspector
         inspector.setMinimumWidth(280)
         detail.addWidget(plain_label(ui_text('商品详情'), 'section'))
         self.image_label = ProductImage()
@@ -799,7 +802,9 @@ class FavoritesDialog(QDialog):
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter, 1)
-        actions = QHBoxLayout()
+        self.product_actions = QWidget()
+        actions = QHBoxLayout(self.product_actions)
+        actions.setContentsMargins(0, 0, 0, 0)
         self.select_button = QPushButton(ui_text('全选 / 取消'))
         self.select_button.clicked.connect(self.toggle_selection)
         actions.addWidget(self.select_button)
@@ -808,10 +813,13 @@ class FavoritesDialog(QDialog):
         self.preview_button = QPushButton(ui_text('预览选中元件'))
         self.preview_button.clicked.connect(self.preview_selected)
         actions.addWidget(self.preview_button)
+        self.cart_button = QPushButton(ui_text('添加到购物车'))
+        self.cart_button.clicked.connect(lambda: self.add_cart_products(self.selected_items()))
+        actions.addWidget(self.cart_button)
         self.import_button = IconButton(ui_text('加入下载列表'), 'add', role='primary')
         self.import_button.clicked.connect(self.import_selected)
         actions.addWidget(self.import_button)
-        layout.addLayout(actions)
+        layout.addWidget(self.product_actions)
         self.status = plain_label(ui_text('输入关键词搜索，或登录后获取账号收藏。'), 'muted')
         layout.addWidget(self.status)
         self.clear_detail()
@@ -891,14 +899,17 @@ class FavoritesDialog(QDialog):
                 table.setColumnWidth(column, max(table.columnWidth(column), table.fontMetrics().horizontalAdvance(title) + 28))
         table.currentCellChanged.connect(self.selection_changed)
         table.itemChanged.connect(lambda item, source=table: self.checkbox_changed(source, item))
+        table.setContextMenuPolicy(Qt.CustomContextMenu)
+        table.customContextMenuRequested.connect(lambda position: self.product_context_menu(table, position))
         return table
 
     def set_mode(self, mode):
-        self.tabs.setCurrentIndex(1 if mode == 'favorites' else 0)
+        self.tabs.setCurrentIndex({'favorites': 1, 'cart': 2, 'orders': 3}.get(mode, 0))
 
     def tab_changed(self):
-        if not hasattr(self, 'parameters'):
+        if not hasattr(self, 'product_actions'):
             return
+        self.commerce_tab_changed()
         self.update_count()
         self.selection_changed()
         if self.tabs.currentIndex() == 1 and self.isVisible() and self.client.account and not self.items and not self.busy:
@@ -1149,6 +1160,7 @@ class FavoritesDialog(QDialog):
         if self.closing:
             return
         self.client = client
+        self.reset_commerce()
         self.remember_session = bool(self.login_dialog and self.login_dialog.remember_box.isChecked())
         self.account_label.setText(ui_text('已登录 · ') + client.account['name'])
         self.account_changed.emit()
@@ -1158,6 +1170,8 @@ class FavoritesDialog(QDialog):
             self.vault.delete()
         if self.isVisible() and self.tabs.currentIndex() == 1:
             self.start_read()
+        elif self.isVisible() and self.tabs.currentIndex() >= 2:
+            self.commerce_tab_changed()
 
     def save_session(self):
         if not self.remember_session or not self.client.account:
@@ -1185,6 +1199,7 @@ class FavoritesDialog(QDialog):
 
     def session_restored(self, client):
         self.client = client
+        self.reset_commerce()
         self.restoring = False
         self.remember_session = True
         self.account_label.setText(ui_text('已登录 · ') + client.account['name'])
@@ -1193,6 +1208,8 @@ class FavoritesDialog(QDialog):
         self.save_session()
         if self.isVisible() and self.tabs.currentIndex() == 1 and not self.busy:
             self.start_read()
+        elif self.isVisible() and self.tabs.currentIndex() >= 2:
+            self.commerce_tab_changed()
 
     def restore_failed(self, error):
         self.restoring = False
@@ -1203,6 +1220,11 @@ class FavoritesDialog(QDialog):
         self.status.setText(str(error))
 
     def clear_session(self):
+        self.jobs.cancel('cart-add')
+        self.cart_busy = False
+        if self.cart_dialog is not None and isValid(self.cart_dialog):
+            self.cart_dialog.reject()
+        self.reset_commerce()
         self.stop_read()
         self.jobs.cancel('favorite-thumbnails')
         self.jobs.cancel('restore')
@@ -1307,6 +1329,8 @@ class FavoritesDialog(QDialog):
         self.update_count()
 
     def selected_items(self):
+        if self.tabs.currentIndex() >= 2:
+            return []
         if self.tabs.currentIndex() == 0:
             return list(self.search_selected.values())
         return [self.table.item(row, 1).data(Qt.UserRole) for row in range(self.table.rowCount())
@@ -1324,6 +1348,7 @@ class FavoritesDialog(QDialog):
             self.count.setText(ui_message('已勾选 {0} / {1}', count, visible))
         loading = self.busy if self.tabs.currentIndex() == 1 else self.searching
         self.import_button.setEnabled(self.import_enabled and bool(count) and not loading)
+        self.cart_button.setEnabled(bool(count) and not loading and not self.cart_busy)
         self.import_button.setToolTip(ui_text('请等待当前下载完成。') if not self.import_enabled else ui_text('按 C 编号去重加入下载列表'))
         self.preview_button.setEnabled(bool(self.selected_product()))
         self.update_pagination()
@@ -1361,6 +1386,8 @@ class FavoritesDialog(QDialog):
                                     message, severity='success' if success else 'warning')
 
     def selected_product(self):
+        if self.tabs.currentIndex() >= 2:
+            return None
         row = self.table.currentRow()
         return self.table.item(row, 1).data(Qt.UserRole) if row >= 0 and not self.table.isRowHidden(row) else None
 
@@ -1617,6 +1644,7 @@ class FavoritesDialog(QDialog):
         if self.closing:
             return
         self.closing = True
+        self.reset_commerce()
         self.jobs.cancel_all(except_channels=('save',))
         if not any(w.channel == 'save' and self.jobs.current(w) for w in self.jobs.workers):
             self.save_session()

@@ -218,7 +218,7 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(len(product['images']), 4)
         self.assertIn('/product/source/', product['images'][0])
         self.assertIn('/brand/product/certificate/', product['images'][3])
-        self.assertTrue(product['datasheet'].startswith('https://datasheet.lcsc.com/upload/public/pdf/'))
+        self.assertTrue(product['datasheet'].startswith('https://atta.szlcsc.com/upload/public/pdf/'))
 
     def test_reported_resistor_has_all_three_native_photos(self):
         product = product_page(captured_detail('C5879483'), 'C5879483')

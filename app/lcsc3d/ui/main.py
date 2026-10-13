@@ -49,7 +49,7 @@ from lcsc3d.core.assets import SOURCE_APP_DIR, RESOURCE_ROOT
 from lcsc3d.ui.progress_ui import SmoothProgressBar
 from lcsc3d.ui.messages_ui import MessagesPage
 
-VERSION = '2.4.0'
+VERSION = '2.4.1'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = RESOURCE_ROOT
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else SOURCE_APP_DIR
@@ -645,6 +645,8 @@ class MainWindow(FramelessMainWindow):
         self.table.setColumnWidth(RESULT_COLUMN, 100)
         self.table.currentCellChanged.connect(self.selection_changed)
         self.table.itemChanged.connect(self.download_selection_changed)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.download_context_menu)
         list_layout.addWidget(self.table, 1)
         self.progress_bar = SmoothProgressBar()
         self.progress_bar.setAccessibleName(ui_text('下载进度'))
@@ -1100,6 +1102,18 @@ class MainWindow(FramelessMainWindow):
         if self.favorites_dialog is None:
             self.bind_store(FavoritesDialog(self, vault=None if self.settings_enabled else False))
         return self.favorites_dialog
+
+    def download_context_menu(self, position):
+        row = self.table.rowAt(position.y())
+        if row < 0:
+            return
+        self.table.setCurrentCell(row, PART_COLUMN)
+        parts = [self.ids[r] for r in self.checked_rows()] if self.table.item(row, DOWNLOAD_COLUMN).checkState() == Qt.Checked else [self.ids[row]]
+        products = [{'part': part, 'title': self.component_info.get(part, {}).get('title', '')} for part in parts]
+        store = self.ensure_store()
+        store.set_import_enabled(not self.batch_running)
+        menu = store.make_product_menu(products, self.table)
+        menu.exec(self.table.viewport().mapToGlobal(position))
 
     def refresh_store_account(self):
         if self.preferences.language == 'en_US':
@@ -2286,6 +2300,7 @@ def main():
     parser.add_argument('--self-test-kicad', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-models', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-progress', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-commerce', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--capture-docs', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-material', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--update-ack', metavar='PLAN', help=argparse.SUPPRESS)
@@ -2319,7 +2334,7 @@ def main():
     test_destination = next((value for value in (args.self_test, args.self_test_ad, args.self_test_favorites,
                                                   args.self_test_store_live, args.self_test_settings, args.self_test_backups,
                                                   args.self_test_export, args.self_test_resources, args.self_test_kicad, args.self_test_models,
-                                                  args.capture_docs, args.self_test_material, args.self_test_progress) if value), None)
+                                                  args.capture_docs, args.self_test_material, args.self_test_progress, args.self_test_commerce) if value), None)
     configure_logging('DEBUG' if test_destination else initial_log_level(SETTINGS_PATH), version=VERSION,
                       directory=Path(test_destination) / 'logs' if test_destination else None)
     install_exception_hooks()
@@ -2344,6 +2359,10 @@ def main():
     if args.self_test_progress:
         from lcsc3d.selftests.progress_selftest import start
         start(window, args.self_test_progress)
+        return app.exec()
+    if args.self_test_commerce:
+        from lcsc3d.selftests.commerce_selftest import start
+        start(window, args.self_test_commerce)
         return app.exec()
     if args.self_test_backups:
         from lcsc3d.selftests.backup_selftest import start
