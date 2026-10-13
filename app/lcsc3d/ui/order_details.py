@@ -1,7 +1,7 @@
 """An order's goods, displayed inside the existing Orders content area."""
 from decimal import Decimal
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSize, QEvent, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 from lcsc3d.core.i18n import text as tr, message as msg
 from lcsc3d.ui.localized_widgets import QLabel, QPushButton, QTableWidgetItem
@@ -13,6 +13,8 @@ class OrderDetailPanel(QWidget):
     refresh_requested = Signal()
     open_requested = Signal(str)
     download_requested = Signal(object)
+    thumbnails_requested = Signal()
+    preview_requested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -39,7 +41,17 @@ class OrderDetailPanel(QWidget):
         self.hint.setTextFormat(Qt.PlainText); self.hint.setWordWrap(True)
         layout.addWidget(self.hint)
         card, body = surface(); body.setContentsMargins(0, 0, 0, 0)
-        self.table = native_table(['选择', '商品编号', '商品 / 型号', '封装', '购买数量', '单价', '金额', '类别'], 2)
+        self.table = native_table(['选择', '商品编号', '商品 / 型号', '封装', '购买数量', '单价', '金额', '类别', '图片'], 2)
+        self.table.thumbnail_column = 8
+        self.table.thumbnail_channel = 'order-thumbnails'
+        self.table.thumbnail_visible_only = True
+        self.thumbnail_timer = QTimer(self); self.thumbnail_timer.setSingleShot(True)
+        self.thumbnail_timer.timeout.connect(self.thumbnails_requested)
+        self.table.setIconSize(QSize(48, 48)); self.table.setColumnWidth(8, 70)
+        self.table.horizontalHeader().moveSection(8, 1)
+        self.table.verticalScrollBar().valueChanged.connect(lambda: self.thumbnail_timer.start(0))
+        self.table.viewport().installEventFilter(self)
+        self.table.cellDoubleClicked.connect(self.preview)
         for column, width in ((0, 50), (1, 135), (3, 130), (4, 120), (5, 120), (6, 130), (7, 100)):
             self.table.setColumnWidth(column, width)
         self.table.itemChanged.connect(lambda item: self.update_actions() if item.column() == 0 else None)
@@ -85,6 +97,10 @@ class OrderDetailPanel(QWidget):
                     value = (format(Decimal(value), '.2f') if key == 'total' else value) + ('/' + row['unit'] if key == 'price' and row['unit'] else '')
                 table_cell(self.table, index, col, result['currency'] + value if value else '—', True)
             self.table.setRowHeight(index, max(60, self.table.fontMetrics().height() * 2 + 18))
+            photo = QTableWidgetItem('…' if row.get('image') or row.get('part') else '—')
+            photo.setTextAlignment(Qt.AlignCenter)
+            photo.setData(Qt.UserRole, row.get('image') or ('lcsc-part:' + row['part'] if row.get('part') else ''))
+            self.table.setItem(index, self.table.thumbnail_column, photo)
         self.table.blockSignals(False)
         self.loaded = True
         self.refresh.setEnabled(True)
@@ -95,6 +111,15 @@ class OrderDetailPanel(QWidget):
             amounts.append(tr(title) + ' ' + (result['currency'] + value if result[key] else value))
         self.summary.setText(tr(' · ').join(amounts))
         self.update_actions()
+
+    def eventFilter(self, watched, event):
+        if watched is self.table.viewport() and event.type() in (QEvent.Show, QEvent.Resize):
+            self.thumbnail_timer.start(0)
+        return super().eventFilter(watched, event)
+
+    def preview(self, index, column):
+        if column == self.table.thumbnail_column and 0 <= index < len(self.rows):
+            self.preview_requested.emit(self.rows[index])
 
     def fail(self, error):
         self.loaded = False

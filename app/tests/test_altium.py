@@ -47,7 +47,8 @@ class LibraryTests(unittest.TestCase):
                     self.assertEqual(designators[0]['OWNERPARTID'], '-1')
                     self.assertTrue(designators[0]['TEXT'])
                     comments = [record for record in records if record.get('NAME') == 'Comment']
-                    self.assertEqual(comments[0]['ISHIDDEN'], 'T')
+                    self.assertEqual(comments[0]['ISHIDDEN'], 'F')
+                    self.assertNotEqual(comments[0]['LOCATION.Y'], designators[0]['LOCATION.Y'])
 
     def test_type_c_keeps_all_pin_names_numbers_and_native_footprint_reference(self):
         header, records, pins = schematic(export_schlib(fixture(), 'C2765186'))

@@ -202,3 +202,18 @@ class OrderUiTests(unittest.TestCase):
         self.dialog.thumbnail_loaded(table, 0, ('https://alimg.szlcsc.com/old.png', picture))
         self.assertTrue(table.item(0, table.thumbnail_column).icon().isNull())
         self.assertTrue(self.dialog.cart_panel.open_cart.isEnabled())
+
+    def test_order_photo_is_resolved_lazily_cached_and_can_open_original(self):
+        panel = self.orders(); panel.open_row(0)
+        self.wait(lambda: panel.detail.loaded)
+        table = panel.detail.table
+        self.wait(lambda: not table.item(0, table.thumbnail_column).icon().isNull())
+        self.wait(lambda: not self.dialog.has_jobs())
+        before = len([row for row in self.service.requests if row[1] == '/query/product'])
+        with patch.object(self.dialog, 'show_product_gallery') as gallery:
+            table.cellDoubleClicked.emit(0, table.thumbnail_column)
+        self.assertIn('/product/source/', gallery.call_args.args[0]['images'][0])
+        panel.detail.refresh.click()
+        self.wait(lambda: panel.detail.loaded and not self.dialog.has_jobs())
+        self.assertEqual(len([row for row in self.service.requests if row[1] == '/query/product']), before)
+        self.assertFalse(table.item(0, table.thumbnail_column).icon().isNull())

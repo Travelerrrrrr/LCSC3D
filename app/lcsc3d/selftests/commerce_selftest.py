@@ -19,7 +19,7 @@ def start(window, folder):
     main = sys.modules[type(window).__module__]
     root = Path(folder).resolve(); root.mkdir(parents=True, exist_ok=True)
     report = dict(version=main.VERSION, frozen=bool(getattr(sys, 'frozen', False)))
-    state = dict(mode='start', deadline=time.monotonic() + 45, done=False)
+    state = dict(mode='catalog-start', deadline=time.monotonic() + 60, done=False)
     service = OfflineStore(); client = service.client()
     service.cart_steps = {'C2861386': 5, 'C507270': 10}
     client.session.request('https://www.szlcsc.com/cas/login')
@@ -58,7 +58,32 @@ def start(window, folder):
             if time.monotonic() > state['deadline']:
                 raise AssertionError('Native commerce verification timed out')
             mode = state['mode']
-            if mode == 'start':
+            if mode == 'catalog-start':
+                window.open_favorites(); dialog.open_categories(); state['mode'] = 'categories'
+            elif mode == 'categories' and dialog.categories:
+                assert dialog.search_content.currentWidget() is dialog.category_panel
+                assert not dialog.category_panel.isWindow()
+                window.grab().save(str(root / 'native-categories.png'))
+                dialog.browse_category({'id': '11329', 'name': '单片机(MCU/MPU/SOC)'})
+                state['mode'] = 'category-results'
+            elif mode == 'category-results' and not dialog.searching and dialog.search_items:
+                dialog.open_filters(); state['mode'] = 'filter-options'
+            elif mode == 'filter-options' and dialog.filter_cache:
+                panel = dialog.filter_panel
+                assert dialog.search_content.currentWidget() is panel and not panel.isWindow()
+                panel.groups.setCurrentRow(next(i for i, group in enumerate(panel.facets) if group['key'] == 'param_31013_n'))
+                panel.low.setText('64'); panel.high.setText('128'); panel.unit.setCurrentText('KB'); panel.range_apply.click()
+                window.grab().save(str(root / 'native-filters.png'))
+                panel.apply.click(); state['mode'] = 'filtered'
+            elif mode == 'filtered' and not dialog.searching:
+                from urllib.parse import unquote
+                requests = [json.loads(row[3]) for row in service.requests if row[1] == '/category/product']
+                assert '64KB~128KB@param_31013_n#range' in unquote(requests[-1]['queryParameterValue'])
+                assert dialog.search_content.currentWidget() is dialog.search_results
+                report['native_catalog_and_filters'] = True
+                dialog.search_table.setRowCount(0); dialog.search_items = []; dialog.search_selected.clear()
+                state['mode'] = 'start'
+            elif mode == 'start':
                 window.open_favorites()
                 assert [dialog.tabs.tabText(i) for i in range(4)] == ['搜索商品', '我的收藏', '购物车', '我的订单']
                 rows = [dict(part='C2861386', title='TLV75718PDRVR', manufacturer='TI', package='WSON-6',
@@ -88,7 +113,9 @@ def start(window, folder):
                 menu = dialog.make_product_menu(dialog.context_products(table, 0), table)
                 menu.actions()[0].trigger()
                 assert 'C2861386' in window.ids
-                assert window.table.cellWidget(window.ids.index('C2861386'), 4).value() == 5
+                assert window.table.columnCount() == 4
+                assert window.purchase_quantities['C2861386'] == 5
+                report['download_list_without_quantity'] = True
                 report['context_download_and_quantity_sync'] = True
                 for toast in list(window.notifications.toasts):
                     toast.close()
@@ -143,6 +170,9 @@ def start(window, folder):
             elif mode == 'order-items' and dialog.orders_panel.detail.loaded:
                 panel = dialog.orders_panel
                 detail = panel.detail
+                if detail.table.item(0, detail.table.thumbnail_column).icon().isNull():
+                    return
+                report['order_product_photos'] = True
                 assert panel.content.currentWidget() is detail and not detail.isWindow()
                 assert detail.table.rowCount() == 2 and '¥12.50' in detail.summary.text()
                 assert len(opened) == state['browser_count']

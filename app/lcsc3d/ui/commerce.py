@@ -8,6 +8,7 @@ from lcsc3d.core.i18n import text as tr, message as msg
 from lcsc3d.services.commerce import MAX_CART_QUANTITY
 from lcsc3d.ui.localized_widgets import QLabel, QPushButton, QTableWidget, QTableWidgetItem, QLineEdit, QComboBox
 from lcsc3d.ui.ui_components import surface
+from lcsc3d.ui.table_utils import FlexibleTable
 
 
 class QuantityInput(QSpinBox):
@@ -86,7 +87,7 @@ class PriceTierBox(QComboBox):
 
 
 def native_table(headers, stretch):
-    table = QTableWidget(0, len(headers))
+    table = FlexibleTable(0, len(headers), stretch_column=stretch)
     table.setHorizontalHeaderLabels([tr(title) for title in headers])
     table.setEditTriggers(QAbstractItemView.NoEditTriggers)
     table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -96,7 +97,6 @@ def native_table(headers, stretch):
     table.setWordWrap(False)
     table.verticalHeader().hide()
     table.verticalHeader().setDefaultSectionSize(54)
-    table.horizontalHeader().setSectionResizeMode(stretch, QHeaderView.Stretch)
     table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
     return table
 
@@ -121,6 +121,8 @@ class CartPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.thumbnail_timer = QTimer(self); self.thumbnail_timer.setSingleShot(True)
+        self.thumbnail_timer.timeout.connect(self.thumbnails_requested)
         self.rows = []
         self.loaded = False
         self.busy = False
@@ -244,11 +246,11 @@ class CartPanel(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        QTimer.singleShot(0, self.thumbnails_requested.emit)
+        self.thumbnail_timer.start(0)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        QTimer.singleShot(0, self.thumbnails_requested.emit)
+        self.thumbnail_timer.start(0)
 
 
 class OrdersPanel(QWidget):

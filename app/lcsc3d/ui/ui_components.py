@@ -13,6 +13,7 @@ class ColumnHandle(QSplitterHandle):
         super().__init__(orientation, parent)
         self.setCursor(Qt.SplitHCursor)
         self.setMouseTracking(True)
+        self.setToolTip(str(ui_text('拖动调整两侧宽度')))
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -35,6 +36,7 @@ class ColumnHandle(QSplitterHandle):
 class ColumnSplitter(QSplitter):
     def __init__(self):
         super().__init__(Qt.Horizontal)
+        self.setObjectName('productColumns')
         self.setHandleWidth(24)
         self.setChildrenCollapsible(False)
 
@@ -43,6 +45,7 @@ class ColumnSplitter(QSplitter):
 
 
 ICON_PATHS = {
+    'filter': '<path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"/>',
     'workspace': '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
     'store': '<path d="M3 9h18l-2-6H5L3 9Zm1 0v12h16V9M9 21v-7h6v7M3 9c0 4 6 4 6 0 0 4 6 4 6 0 0 4 6 4 6 0"/>',
     'messages': '<path d="M5 17V9a7 7 0 0 1 14 0v8l2 2H3l2-2ZM9 21h6"/>',

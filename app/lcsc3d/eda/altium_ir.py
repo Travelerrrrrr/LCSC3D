@@ -191,9 +191,23 @@ def schematic(component, check, *, merged=False, merge_pcb=False, fonts=None, fo
     if component.description:
         parameters['Description'] = component.description
     parameters.update({key: value for key, value in params.items() if key not in ('name', 'pre', 'package')})
+    # Visible fields belong above the complete symbol, on separate text lines.
+    tops = [D(0)]
+    for unit in symbol.units:
+        for item in unit.items:
+            if isinstance(item, Pin):
+                tops.extend((item.connection.y, item.body.y))
+            else:
+                tops.extend(p.y for p in item.points)
+                if item.points and item.kind == 'rect':
+                    tops.append(item.points[0].y + item.size.y)
+                elif item.points and item.kind in ('circle', 'ellipse', 'arc'):
+                    tops.append(item.points[0].y + item.radius.y)
+    field_y = max(tops) + D('2.54')
     designator = common(34)
     designator.update(OwnerPartId=-1, Name='Designator', Text=symbol.reference, FontID=1,
                       **{'Location.X': 0, 'Location.Y': 0, 'IsHidden': 'F'})
+    coord(designator, 'Location.Y', field_y + D('2.54'))
     if style:
         designator.update(Color=a._color(style.text), FontID=font())
     records.append(a._parameters(designator))
@@ -201,10 +215,13 @@ def schematic(component, check, *, merged=False, merge_pcb=False, fonts=None, fo
     for key, value in parameters.items():
         record = common(41)
         record.update(OwnerPartId=-1, Name=key, Text=value, FontID=1,
-                      **{'Location.X': 0, 'Location.Y': 0, 'IsHidden': 'T'})
+                      **{'Location.X': 0, 'Location.Y': 0, 'IsHidden': 'F' if key == 'Comment' else 'T'})
+        if key == 'Comment':
+            coord(record, 'Location.Y', field_y)
         if style:
             record.update(Color=a._color(style.text), FontID=font())
         records.append(a._parameters(record))
+    log_event('DEBUG', 'export.schlib_comment', part=safe_part(part), visible=True)
     if component.has_footprint or component.footprint is not None or component.footprint_name:
         list_index = len(records)
         records.append(a._parameters({'RECORD': 44, 'OwnerIndex': 0}))

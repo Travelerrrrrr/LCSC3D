@@ -36,6 +36,8 @@ class CommerceActions:
         self.orders_panel.detail_requested.connect(self.load_order_detail)
         self.orders_panel.back_requested.connect(self.close_order_detail)
         self.orders_panel.download_requested.connect(self.import_order_products)
+        self.orders_panel.detail.thumbnails_requested.connect(lambda: self.start_thumbnails(self.orders_panel.detail.table))
+        self.orders_panel.detail.preview_requested.connect(self.preview_order_image)
 
     def commerce_tab_changed(self):
         shopping = self.tabs.currentIndex() >= 2
@@ -64,7 +66,7 @@ class CommerceActions:
 
     def reset_commerce(self):
         self.quantity_timer.stop(); self.quantity_updates.clear()
-        for channel in ('cart-read', 'cart-write', 'cart-thumbnails', 'orders-read', 'order-detail'):
+        for channel in ('cart-read', 'cart-write', 'cart-thumbnails', 'orders-read', 'order-detail', 'order-thumbnails'):
             self.jobs.cancel(channel)
         self.cart_loading = self.cart_mutating = self.orders_loading = False
         self.cart_panel.clear(); self.orders_panel.clear()
@@ -181,6 +183,7 @@ class CommerceActions:
     def load_order_detail(self, order):
         if not order or not self.require_commerce_account():
             return
+        self.jobs.cancel('order-thumbnails')
         self.orders_panel.begin_detail(order)
         client, selected = self.client, order['identity']
         self.jobs.start('order-detail', lambda stop, progress: read_order_details(client, selected, stop),
@@ -190,6 +193,7 @@ class CommerceActions:
         panel = self.orders_panel.detail
         if panel.order and panel.order['identity'] == selected:
             panel.show_result(result)
+            self.start_thumbnails(panel.table)
 
     def order_detail_failed(self, error):
         if isinstance(error, SessionExpired):
@@ -200,7 +204,14 @@ class CommerceActions:
 
     def close_order_detail(self):
         self.jobs.cancel('order-detail')
+        self.jobs.cancel('order-thumbnails')
         self.orders_panel.show_list()
+
+    def preview_order_image(self, row):
+        url = row.get('image') or self.thumbnail_sources.get('lcsc-part:' + row.get('part', ''), '')
+        if url:
+            self.show_product_gallery(dict(part=row.get('part') or row['code'], title=row['title'],
+                images=[original_image(url)], thumbnails=[url]))
 
     def import_order_products(self, rows):
         if not self.import_enabled:

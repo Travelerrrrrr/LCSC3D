@@ -6,9 +6,9 @@ import threading
 import time
 from collections import OrderedDict
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot, QEvent, QSize
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot, QEvent, QSize, QPersistentModelIndex
 from PySide6.QtGui import QDesktopServices, QPixmap, QIcon
-from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget, QStackedWidget)
 from lcsc3d.ui.localized_widgets import (QCheckBox, QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget)
 
 from lcsc3d.core.errors import Cancelled
@@ -26,31 +26,34 @@ from lcsc3d.core.app_logging import (log_event, new_context, log_context, contex
 from lcsc3d.ui.commerce_actions import CommerceActions
 from lcsc3d.ui.commerce import QuantityInput, PriceTierBox
 from lcsc3d.services.commerce import purchase_rules_known
+from lcsc3d.ui.table_utils import FlexibleTable
+from lcsc3d.ui.catalog_actions import CatalogActions
 
 
 THUMBNAIL_COLUMN = 9
 
 
-class ProductTable(QTableWidget):
+class ProductTable(FlexibleTable):
     """Keep model names readable; scroll horizontally when columns cannot fit."""
+    thumbnails_requested = Signal()
+
     def __init__(self, *args):
         super().__init__(*args)
         self.thumbnail_column = self.columnCount() - 1
-        self.column_timer = QTimer(self)
-        self.column_timer.setSingleShot(True)
-        self.column_timer.timeout.connect(self.fit_model_column)
-        self.horizontalHeader().sectionResized.connect(
-            lambda column, *_: self.column_timer.start(0) if column != 2 else None)
+        self.part_indexes = {}
+        self.thumbnail_visible_only = True
+        self.thumbnail_timer = QTimer(self); self.thumbnail_timer.setSingleShot(True)
+        self.thumbnail_timer.timeout.connect(self.thumbnails_requested)
+        self.model().rowsRemoved.connect(self.prune_indexes)
+        self.verticalScrollBar().valueChanged.connect(lambda: self.thumbnail_timer.start(0))
+
+    def prune_indexes(self, *_):
+        self.part_indexes = {part: index for part, index in self.part_indexes.items() if index.isValid()}
 
     def viewportEvent(self, event):
-        if event.type() == QEvent.Resize and hasattr(self, 'column_timer'):
-            self.column_timer.start(0)
+        if event.type() in (QEvent.Resize, QEvent.Show) and hasattr(self, 'thumbnail_timer'):
+            self.thumbnail_timer.start(0)
         return super().viewportEvent(event)
-
-    def fit_model_column(self):
-        scale = theme_manager().tokens.get('font_size', 13) / 13
-        other = sum(self.columnWidth(column) for column in range(self.columnCount()) if column != 2)
-        self.setColumnWidth(2, max(round(150 * scale), self.viewport().width() - other))
 
 
 class RequestWorker(QThread):
@@ -617,7 +620,7 @@ class LoginDialog(QDialog):
         event.accept()
 
 
-class FavoritesDialog(CommerceActions, QDialog):
+class FavoritesDialog(CommerceActions, CatalogActions, QDialog):
     """Persistent in-app page for public search and account favorites."""
     import_requested = Signal(object)
     preview_requested = Signal(str)
@@ -651,6 +654,7 @@ class FavoritesDialog(CommerceActions, QDialog):
         self.search_keyword = ''
         self.search_selected = {}
         self.thumbnail_cache = OrderedDict()
+        self.thumbnail_sources = OrderedDict()
         self.purchase_quantities = getattr(parent, 'purchase_quantities', {})
         self.purchase_rules = getattr(parent, 'purchase_rules', {})
         self.purchase_rule_sources = getattr(parent, 'purchase_rule_sources', {})
@@ -690,6 +694,7 @@ class FavoritesDialog(CommerceActions, QDialog):
         self.tabs.currentChanged.connect(self.tab_changed)
         search_panel = QWidget()
         search_layout = QVBoxLayout(search_panel)
+        search_layout.setContentsMargins(0, 8, 0, 0)
         search_tools = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setMaxLength(160)
@@ -711,8 +716,12 @@ class FavoritesDialog(CommerceActions, QDialog):
         search_layout.addWidget(self.category_combo)
         self.search_hint = plain_label(ui_text('搜索商品无需登录，选中元件查看详情。'), 'muted')
         search_layout.addWidget(self.search_hint)
+        self.search_content = QStackedWidget()
+        self.search_results = QWidget()
+        results_layout = QVBoxLayout(self.search_results); results_layout.setContentsMargins(0, 0, 0, 0)
+        self.search_content.addWidget(self.search_results); search_layout.addWidget(self.search_content, 1)
         self.search_table = self.make_table(commercial=True)
-        search_layout.addWidget(self.search_table, 1)
+        results_layout.addWidget(self.search_table, 1)
         pagination = QHBoxLayout()
         self.previous_page_button = QPushButton(ui_text('上一页'))
         self.previous_page_button.clicked.connect(lambda: self.load_search_page(self.search_page - 1))
@@ -723,10 +732,11 @@ class FavoritesDialog(CommerceActions, QDialog):
         self.next_page_button = QPushButton(ui_text('下一页'))
         self.next_page_button.clicked.connect(lambda: self.load_search_page(self.search_page + 1))
         pagination.addWidget(self.next_page_button)
-        search_layout.addLayout(pagination)
+        results_layout.addLayout(pagination)
         self.tabs.addTab(search_panel, ui_text('搜索商品'))
         favorite_panel = QWidget()
         favorite_layout = QVBoxLayout(favorite_panel)
+        favorite_layout.setContentsMargins(0, 8, 0, 0)
         favorite_tools = QHBoxLayout()
         self.read_button = QPushButton(ui_text('获取收藏'))
         self.read_button.setObjectName('primary')
@@ -814,6 +824,10 @@ class FavoritesDialog(CommerceActions, QDialog):
         actions.addWidget(self.select_button)
         self.count = plain_label(ui_text('已勾选 0 / 0'), 'muted')
         actions.addWidget(self.count, 1)
+        self.category_button = IconButton(ui_text('分类'), 'list-view')
+        self.filter_button = IconButton(ui_text('筛选'), 'filter')
+        actions.addWidget(self.category_button); actions.addWidget(self.filter_button)
+        actions.addSpacing(18)
         self.preview_button = QPushButton(ui_text('预览选中元件'))
         self.preview_button.clicked.connect(self.preview_selected)
         actions.addWidget(self.preview_button)
@@ -826,6 +840,7 @@ class FavoritesDialog(CommerceActions, QDialog):
         layout.addWidget(self.product_actions)
         self.status = plain_label(ui_text('输入关键词搜索，或登录后获取账号收藏。'), 'muted')
         layout.addWidget(self.status)
+        self.setup_catalog()
         self.clear_detail()
         self.update_count()
         theme_manager().changed.connect(self.refresh_appearance)
@@ -889,20 +904,17 @@ class FavoritesDialog(CommerceActions, QDialog):
         table.setColumnWidth(1, 95)
         table.setColumnWidth(3, 100)
         table.setColumnWidth(4, 115)
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
         table.setObjectName('searchProducts' if commercial else 'favoriteProducts')
         table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
-        table.horizontalHeader().setSectionResizeMode(table.thumbnail_column, QHeaderView.Fixed)
-        table.horizontalHeader().setSectionResizeMode(table.quantity_column, QHeaderView.Fixed)
         table.setColumnWidth(table.quantity_column, 130)
-        table.horizontalHeader().setSectionResizeMode(table.step_column, QHeaderView.Fixed)
         table.setColumnWidth(table.step_column, 85)
         # Stable data/price columns; visually place photos after checkboxes.
         table.horizontalHeader().moveSection(table.thumbnail_column, 1)
         table.horizontalHeader().moveSection(table.horizontalHeader().visualIndex(table.quantity_column), 4)
         table.horizontalHeader().moveSection(table.horizontalHeader().visualIndex(table.step_column), 5)
         table.cellDoubleClicked.connect(lambda row, column: self.open_gallery() if column == table.thumbnail_column else None)
+        table.thumbnails_requested.connect(lambda: self.start_thumbnails(table))
         if commercial:
             table.setColumnWidth(5, 210)
             table.setColumnWidth(6, 85)
@@ -924,6 +936,10 @@ class FavoritesDialog(CommerceActions, QDialog):
         if not hasattr(self, 'product_actions'):
             return
         self.commerce_tab_changed()
+        self.category_button.setVisible(self.tabs.currentIndex() == 0 and not self.international)
+        self.filter_button.setVisible(self.tabs.currentIndex() == 0 and not self.international)
+        if hasattr(self, 'filter_timer') and self.tabs.currentIndex() != 0:
+            self.filter_timer.stop(); self.jobs.cancel('filter-options')
         self.update_count()
         self.selection_changed()
         if self.tabs.currentIndex() == 1 and self.isVisible() and self.client.account and not self.items and not self.busy:
@@ -939,6 +955,9 @@ class FavoritesDialog(CommerceActions, QDialog):
         if not keyword:
             self.search_hint.setText(ui_text('请输入 C 编号、型号或关键词。'))
             return
+        self.close_catalog_panel()
+        self.catalog_filters = {}; self.search_facets = []; self.filter_cache.clear()
+        self.refresh_filter_buttons()
         self.jobs.cancel('search')
         self.jobs.cancel('thumbnails')
         self.searching = False
@@ -967,17 +986,19 @@ class FavoritesDialog(CommerceActions, QDialog):
         self.load_search_page(1)
 
     def load_search_page(self, page):
-        if not self.search_keyword or page < 1 or self.searching:
+        if not (self.search_keyword or self.catalog_filters.get('catalogIdFilter')) or page < 1 or self.searching:
             return
         if self.search_pages and page > self.search_pages:
             return
         self.searching = True
         self.search_stop_button.setEnabled(True)
-        self.search_hint.setText(ui_message('正在搜索 {0} · 第 {1} 页…', self.search_keyword, page))
+        self.search_hint.setText(ui_message('正在搜索 {0} · 第 {1} 页…', self.search_keyword or self.category_button.toolTip(), page))
         self.update_count()
         self.update_pagination()
         client, keyword = self.catalog, self.search_keyword
         extra = {'catalog_id': self.category_combo.currentData()} if self.international else {}
+        if not self.international and self.catalog_filters:
+            extra['filters'] = self.catalog_filters
         self.jobs.start('search', lambda stop, progress: client.search_results_page(keyword, page, stop, **extra),
                         self.search_loaded, self.search_failed)
 
@@ -987,6 +1008,7 @@ class FavoritesDialog(CommerceActions, QDialog):
         self.search_stop_button.setEnabled(False)
         self.search_page, self.search_total, self.search_pages = result['page'], result['total'], result['pages']
         self.search_items = result['items']
+        self.search_facets = result.get('facets', [])
         if self.international:
             self.category_combo.blockSignals(True)
             self.category_combo.clear()
@@ -1045,6 +1067,7 @@ class FavoritesDialog(CommerceActions, QDialog):
             cell.setToolTip(product.get(key, ''))
             table.setItem(row, column, cell)
         table.item(row, 1).setData(Qt.UserRole, product)
+        table.part_indexes[product['part']] = QPersistentModelIndex(table.model().index(row, 1))
         if table is self.search_table:
             self.append_commerce(row, product)
         minimum, step = self.set_purchase_rules(product)
@@ -1083,7 +1106,9 @@ class FavoritesDialog(CommerceActions, QDialog):
             log_event('DEBUG', 'store.purchase_quantity', part=safe_part(part), quantity=amount, increment=step)
         self.purchase_quantities[part] = amount
         for table in (self.search_table, self.favorite_table):
-            for row in range(table.rowCount()):
+            index = table.part_indexes.get(part)
+            if index is not None and index.isValid():
+                row = index.row()
                 if table.item(row, 1).text() == part:
                     spin = table.cellWidget(row, table.quantity_column)
                     if spin:
@@ -1098,13 +1123,6 @@ class FavoritesDialog(CommerceActions, QDialog):
                         price = table.cellWidget(row, 5)
                         if price:
                             price.set_quantity(amount)
-        parent = self.app_window
-        if parent is not None and hasattr(parent, 'ids') and part in parent.ids:
-            spin = parent.table.cellWidget(parent.ids.index(part), 4)
-            if spin is not None:
-                blocked = spin.blockSignals(True)
-                spin.set_rules(minimum, step); spin.setValue(amount)
-                spin.blockSignals(blocked)
 
     def set_thumbnail(self, table, row, product):
         urls = product.get('thumbnails') or product.get('images') or [product.get('image', '')]
@@ -1128,14 +1146,23 @@ class FavoritesDialog(CommerceActions, QDialog):
             return
         requests = {}
         first, end = 0, table.rowCount()
-        if getattr(table, 'thumbnail_visible_only', False):
+        visible_only = getattr(table, 'thumbnail_visible_only', False)
+        if visible_only:
             if not table.isVisible():
                 return
-            first = max(0, table.rowAt(0) - 2)
-            last = table.rowAt(table.viewport().height() - 1)
-            end = min(end, first + 20, last + 3 if last >= 0 else end)
+            first = max(0, table.rowAt(0))
+        visible_count = 0
         for row in range(first, end):
+            if table.isRowHidden(row):
+                continue
+            if visible_only:
+                top = table.rowViewportPosition(row)
+                if top > table.viewport().height() + table.rowHeight(row) * 2 or visible_count >= 20:
+                    break
+                visible_count += 1
             cell = table.item(row, table.thumbnail_column)
+            if cell is None:
+                continue
             url = cell.data(Qt.UserRole)
             if not url or not cell.icon().isNull():
                 continue
@@ -1156,7 +1183,12 @@ class FavoritesDialog(CommerceActions, QDialog):
                                     if self.jobs.revisions.get(channel) == worker.revision else None)
 
     def thumbnail_loaded(self, table, row, result):
-        url, image = result
+        url, image = result[:2]
+        if len(result) > 2 and result[2] and url.startswith('lcsc-part:'):
+            self.thumbnail_sources[url] = result[2]
+            self.thumbnail_sources.move_to_end(url)
+            while len(self.thumbnail_sources) > 128:
+                self.thumbnail_sources.popitem(last=False)
         if row >= table.rowCount():
             return
         cell = table.item(row, table.thumbnail_column)
@@ -1394,6 +1426,7 @@ class FavoritesDialog(CommerceActions, QDialog):
         if self.tabs.currentIndex() == 1 and self.favorite_table.isRowHidden(self.favorite_table.currentRow()):
             self.clear_detail()
         self.update_count()
+        self.start_thumbnails(self.favorite_table)
 
     def selected_items(self):
         if self.tabs.currentIndex() >= 2:
@@ -1414,10 +1447,13 @@ class FavoritesDialog(CommerceActions, QDialog):
         else:
             self.count.setText(ui_message('已勾选 {0} / {1}', count, visible))
         loading = self.busy if self.tabs.currentIndex() == 1 else self.searching
+        browsing = self.tabs.currentIndex() == 0 and self.search_content.currentWidget() is not self.search_results
+        loading = loading or browsing
+        self.select_button.setEnabled(not browsing)
         self.import_button.setEnabled(self.import_enabled and bool(count) and not loading)
         self.cart_button.setEnabled(bool(count) and not loading and not self.cart_busy)
         self.import_button.setToolTip(ui_text('请等待当前下载完成。') if not self.import_enabled else ui_text('按 C 编号去重加入下载列表'))
-        self.preview_button.setEnabled(bool(self.selected_product()))
+        self.preview_button.setEnabled(not browsing and bool(self.selected_product()))
         self.update_pagination()
 
     def set_import_enabled(self, enabled):
@@ -1722,6 +1758,7 @@ class FavoritesDialog(CommerceActions, QDialog):
                     or any(g.jobs.workers for g in self.galleries))
 
     def shutdown(self):
+        self.filter_timer.stop()
         if self.closing:
             return
         self.closing = True
@@ -1736,6 +1773,7 @@ class FavoritesDialog(CommerceActions, QDialog):
 
     def closeEvent(self, event):
         self.stop_read()
+        self.filter_timer.stop()
         if self.searching:
             self.stop_search()
         self.jobs.cancel_all(except_channels=('save',))

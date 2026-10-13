@@ -57,7 +57,8 @@ QTableView::item:selected:focus, QTreeView::item:selected:focus, QListView::item
   color:%(on_accent)s; selection-color:%(on_accent)s;
 }
 QHeaderView { background:%(field)s; border:0; }
-QHeaderView::section { background:%(field)s; color:%(muted)s; border:0; border-bottom:1px solid %(border)s; padding:10px 6px; font-weight:600; }
+QHeaderView::section { background:%(field)s; color:%(muted)s; border:0; border-right:1px solid %(border)s; border-bottom:1px solid %(border)s; padding:10px 6px; font-weight:600; }
+QHeaderView::section:hover { background:%(hover)s; }
 QTableWidget#downloadTable QHeaderView::section, QTableWidget#searchProducts QHeaderView::section, QTableWidget#favoriteProducts QHeaderView::section { height:%(control_height)spx; padding:6px; }
 QTableWidget#searchProducts QHeaderView::section, QTableWidget#favoriteProducts QHeaderView::section { text-transform:none; }
 QTableCornerButton::section { background:%(field)s; border:0; }
@@ -74,6 +75,13 @@ QTableWidget#downloadTable QScrollBar:vertical, QTableWidget#searchProducts QScr
 QTableWidget#downloadTable QScrollBar::handle:vertical, QTableWidget#searchProducts QScrollBar::handle:vertical, QTableWidget#favoriteProducts QScrollBar::handle:vertical { background:%(control_border)s; border-radius:6px; min-height:36px; }
 QTableWidget#downloadTable QScrollBar::handle:vertical:hover, QTableWidget#searchProducts QScrollBar::handle:vertical:hover, QTableWidget#favoriteProducts QScrollBar::handle:vertical:hover { background:%(accent_ink)s; }
 QSplitter::handle { background:transparent; }
+QSplitter#productColumns::handle { image:none; margin:0; padding:0; border:0; }
+QListWidget#catalogGroups, QListWidget#filterOptions, QTreeWidget#catalogTree { background:%(surface)s; border:0; padding:4px; outline:0; }
+QListWidget#catalogGroups::item, QTreeWidget#catalogTree::item { padding:9px 10px; border-radius:5px; }
+QListWidget#filterOptions::item { padding:8px 10px; border-bottom:1px solid %(border)s; }
+QListWidget#catalogGroups::item:hover, QListWidget#filterOptions::item:hover, QTreeWidget#catalogTree::item:hover { background:%(hover)s; }
+QListWidget#catalogGroups, QTreeWidget#catalogTree { color:%(text)s; selection-color:%(accent_ink)s; selection-background-color:%(hover)s; }
+QListWidget#catalogGroups::item:selected, QTreeWidget#catalogTree::item:selected { background:%(hover)s; color:%(accent_ink)s; selection-color:%(accent_ink)s; }
 QToolTip { background:%(surface)s; color:%(text)s; border:1px solid %(border)s; padding:6px; }
 QFrame#previewEmpty, QGraphicsView#photoCanvas { background:%(field)s; border:1px solid %(border)s; border-radius:8px; }
 QLabel#previewCube { font-size:64px; color:%(accent_ink)s; }

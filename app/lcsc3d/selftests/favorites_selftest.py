@@ -283,11 +283,21 @@ class OfflineStore:
                         owner.removed_ids.add(identity)
                         owner.extra_favorites.pop(identity, None)
                     value = {'code':owner.cancel_code,'result':None}
-                elif parsed.path == '/query/product':
+                elif parsed.path == '/common/data/resource-catalog-list-new.json':
+                    from lcsc3d.selftests.catalog_fixture import categories
+                    value = categories()
+                elif parsed.path == '/query/param/agg':
+                    from lcsc3d.selftests.catalog_fixture import parameters
+                    value = {'code': 200, 'result': parameters()}
+                elif parsed.path in ('/query/product', '/category/product'):
+                    from lcsc3d.selftests.catalog_fixture import add_facets, parameters
                     query = json.loads(body)
                     keyword, page = query['keyword'], query['currentPage']
                     title = {'C20197': '4D03WGJ0102T5E', 'C163691': 'SMDRS1275-152N'}.get(keyword, 'RP2040')
                     value = owner.search_pages.get((keyword, page)) or fixture_search([(keyword if keyword.startswith('C') else 'C2040', title)], page)
+                    add_facets(value)
+                    if parsed.path == '/category/product':
+                        value['result']['aggregateResultVO'] = parameters(category=True)
                     for row in value['result']['searchResult']['productRecordList']:
                         record = row['productVO']
                         owner.details[str(record['productId'])] = record

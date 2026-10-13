@@ -308,7 +308,9 @@ def search_page_products(payload, expected_page):
         if product and product['part'] not in seen:
             seen.add(product['part'])
             products.append(product)
-    return {'items': products, 'positions': positions, 'total': total, 'page': current, 'pages': pages, 'size': size}
+    from lcsc3d.services.catalog_filters import search_facets
+    return {'items': products, 'positions': positions, 'total': total, 'page': current, 'pages': pages, 'size': size,
+            'facets': search_facets(payload)}
 
 
 class _PageData(HTMLParser):
@@ -440,6 +442,12 @@ def request_operation(url):
         return '读取订单列表'
     if parsed.hostname == 'order-api.szlcsc.com' and parsed.path == '/member/order/details':
         return '读取订单商品'
+    if parsed.hostname == 'so.szlcsc.com':
+        return {'/query/product': '搜索商城商品', '/query/param/agg': '读取参数筛选'}.get(parsed.path, '商城搜索请求')
+    if parsed.hostname == 'list.szlcsc.com' and parsed.path == '/category/product':
+        return '读取分类商品'
+    if parsed.hostname == 'staticdata.szlcsc.com' and parsed.path == '/common/data/resource-catalog-list-new.json':
+        return '读取商城分类'
     return '商城请求'
 
 
@@ -813,31 +821,30 @@ class StoreClient:
             self.session.request(STOREFRONT + '/cas/login?' + urlencode({'code': code}), cancelled=cancelled)
             return self.account_info(cancelled)
 
-    def search_page(self, keyword, page=1, cancelled=None):
+    def search_page(self, keyword, page=1, cancelled=None, *, filters=None):
+        from lcsc3d.services.catalog_filters import search_payload, CATEGORY_PRODUCTS_URL
         keyword = keyword.strip()[:160]
-        if not keyword or not isinstance(page, int) or page < 1:
+        payload = search_payload(keyword, page, filters)
+        if not (keyword or payload['catalogIdFilter']) or not isinstance(page, int) or page < 1:
             raise StoreError('请输入关键词和有效页码。')
         # The storefront accepts its native page size (30); size 100 returns null.
-        payload = {'keyword': keyword, 'currentPage': page, 'pageSize': 30,
-                   'catalogIdFilter': '', 'brandIdFilter': '', 'standardFilter': '', 'arrangeFilter': '',
-                   'labelFilter': '', 'authenticationFilter': '', 'sortNumber': 0, 'satisfyStockType': '',
-                   'startPrice': '', 'endPrice': '', 'demandNumber': '', 'spotFilter': 1, 'discountFilter': 1,
-                   'hasDataFile': False, 'brandPlaceFilter': '', 'secondKeyword': '',
-                   'queryParameterValue': '', 'lastParamName': ''}
-        result = self._json(STORE_SEARCH_URL, payload=payload, cancelled=cancelled,
-                            headers={'Origin': 'https://so.szlcsc.com', 'Referer': 'https://so.szlcsc.com/global.html'})
+        url = STORE_SEARCH_URL if keyword else CATEGORY_PRODUCTS_URL
+        origin = 'https://so.szlcsc.com' if keyword else 'https://list.szlcsc.com'
+        result = self._json(url, payload=payload, cancelled=cancelled,
+                            headers={'Origin': origin, 'Referer': origin + '/'})
         return search_page_products(result, page)
 
-    @traced('catalog.search_page', lambda self, keyword, page=1, **kw: {'page': page, 'query_length': len(keyword)}, level='INFO')
-    def search_results_page(self, keyword, page=1, cancelled=None):
+    @traced('catalog.search_page', lambda self, keyword, page=1, cancelled=None, **kw: {'page': page, 'query_length': len(keyword)}, level='INFO')
+    def search_results_page(self, keyword, page=1, cancelled=None, *, filters=None):
         """Read the native 30-result pages covering one software page."""
         keyword = keyword.strip()[:160]
-        if not keyword or not isinstance(page, int) or page < 1:
+        if not (keyword or filters and filters.get('catalogIdFilter')) or not isinstance(page, int) or page < 1:
             raise StoreError('请输入关键词和有效页码。')
         start = (page - 1) * SEARCH_PAGE_SIZE
         native_size = 30
         native_page = start // native_size + 1
-        first = self.search_page(keyword, native_page, cancelled)
+        extra = {'filters': filters} if filters is not None else {}
+        first = self.search_page(keyword, native_page, cancelled, **extra)
         total = first['total']
         pages = (total + SEARCH_PAGE_SIZE - 1) // SEARCH_PAGE_SIZE
         if page > max(1, pages):
@@ -861,17 +868,19 @@ class StoreClient:
                 raise StoreError('商城搜索页面不完整，请重试当前页。')
             native_page += 1
             offset = 0
-            current = self.search_page(keyword, native_page, cancelled)
+            current = self.search_page(keyword, native_page, cancelled, **extra)
         products, seen = [], set()
         for item in slots:
             if item and item['part'] not in seen:
                 seen.add(item['part'])
                 products.append(item)
         exact = keyword.upper()
-        products.sort(key=lambda p: (p['part'] != exact, p['title'].upper() != exact))
+        if exact and not (filters or {}).get('sortNumber'):
+            products.sort(key=lambda p: (p['part'] != exact, p['title'].upper() != exact))
         check_cancelled(cancelled)
         log_event('INFO', 'catalog.search_result', page=page, total=total, count=len(products), pages=pages)
-        return {'items': products, 'total': total, 'page': page, 'pages': pages, 'size': SEARCH_PAGE_SIZE}
+        return {'items': products, 'total': total, 'page': page, 'pages': pages, 'size': SEARCH_PAGE_SIZE,
+                'facets': first.get('facets', [])}
 
     def search(self, keyword, cancelled=None):
         keyword = keyword.strip()[:160]

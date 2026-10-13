@@ -641,6 +641,7 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.assertEqual([p['part'] for p in self.dialog.selected_items()], ['C163691'])
 
     def test_streamed_favorite_photos_continue_without_restarting_or_blocking_search(self):
+        self.dialog.tabs.setCurrentIndex(1)
         started, release = threading.Event(), threading.Event()
         requests = []
         def read(url, stop):
@@ -658,6 +659,7 @@ class NativeStoreWindowTests(unittest.TestCase):
                 self.wait_until(started.is_set)
                 self.dialog.page_loaded(2, [dict(part='C2', thumbnails=['later']),
                                            dict(part='C3', thumbnails=['bad']), dict(part='C4')] + extra)
+                self.dialog.tabs.setCurrentIndex(0)
                 self.dialog.search_loaded(dict(page=1, pages=1, total=1,
                                                items=[dict(part='C5', thumbnails=['search'])]))
                 self.wait_until(lambda: not self.dialog.search_table.item(0, THUMBNAIL_COLUMN).icon().isNull())
@@ -665,6 +667,14 @@ class NativeStoreWindowTests(unittest.TestCase):
             finally:
                 release.set()
             self.wait_until(lambda: not self.dialog.has_jobs())
+            self.dialog.tabs.setCurrentIndex(1)
+            table = self.dialog.favorite_table
+            # Photos outside the viewport are intentionally deferred. Scroll
+            # through the favorites to verify subsequent batches and caching.
+            for row in range(table.rowCount()):
+                table.scrollToItem(table.item(row, 1))
+                self.dialog.start_thumbnails(table)
+                self.wait_until(lambda: not self.dialog.has_jobs())
         table = self.dialog.favorite_table
         self.assertFalse(table.item(0, table.thumbnail_column).icon().isNull())
         self.assertFalse(table.item(1, table.thumbnail_column).icon().isNull())
@@ -675,6 +685,7 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.assertCountEqual(requests, ['slow', 'later', 'bad', 'search'] + [f'photo-{index}' for index in range(10, 35)])
 
     def test_removing_favorite_during_photo_load_cannot_shift_photos_to_another_product(self):
+        self.dialog.tabs.setCurrentIndex(1)
         started, release = threading.Event(), threading.Event()
         def read(url, stop):
             if url == 'removed':
@@ -718,6 +729,7 @@ class NativeStoreWindowTests(unittest.TestCase):
         client = SimpleNamespace(image=read)
         with patch.object(self.dialog, 'factory', return_value=client):
             try:
+                self.dialog.tabs.setCurrentIndex(1)
                 self.dialog.page_loaded(3, [dict(part='C9', thumbnails=['old-account'])])
                 self.wait_until(started.is_set)
                 self.dialog.start_read()

@@ -10,7 +10,7 @@ from lcsc3d.ui.localized_widgets import (QDialog, QLabel, QPushButton)
 
 from lcsc3d.core.errors import Cancelled
 from lcsc3d.ui.ui_components import title_block
-from lcsc3d.services.store import StoreError, check_cancelled
+from lcsc3d.services.store import StoreError, check_cancelled, PART
 from lcsc3d.core.app_logging import traced, log_event, record_error, safe_part, submit_logged
 
 
@@ -20,8 +20,21 @@ def load_search_thumbnails(requests, client_factory, cancelled, progress):
     def fetch(url, rows):
         check_cancelled(cancelled)
         image = QImage()
+        resolved = url
         try:
-            payload = client_factory().image(url, cancelled)
+            client = client_factory()
+            if url.startswith('lcsc-part:'):
+                part = url.removeprefix('lcsc-part:')
+                if not PART.fullmatch(part):
+                    raise StoreError('图片器件编号无效。')
+                products = client.search_page(part, 1, cancelled)['items']
+                product = next((item for item in products if item['part'] == part), {})
+                photos = product.get('thumbnails') or product.get('images') or [product.get('image', '')]
+                resolved = next((value for value in photos if value), '')
+                log_event('DEBUG', 'image.part_photo_resolved', part=safe_part(part), found=bool(resolved))
+            if not resolved:
+                return url, rows, image, ''
+            payload = client.image(resolved, cancelled)
             check_cancelled(cancelled)
             if not image.loadFromData(payload):
                 log_event('WARNING', 'image.thumbnail_decode_failed')
@@ -37,16 +50,16 @@ def load_search_thumbnails(requests, client_factory, cancelled, progress):
             painter.drawImage(QPoint((128 - image.width()) // 2, (128 - image.height()) // 2), image)
             painter.end()
             image = square
-        return url, rows, image
+        return url, rows, image, resolved
 
     with ThreadPoolExecutor(max_workers=3, thread_name_prefix='store-thumbnail') as pool:
         futures = [submit_logged(pool, fetch, url, rows) for url, rows in requests.items()]
         try:
             for future in as_completed(futures):
                 check_cancelled(cancelled)
-                url, rows, image = future.result()
+                url, rows, image, resolved = future.result()
                 for row in rows:
-                    progress(row, (url, image))
+                    progress(row, (url, image, resolved))
         finally:
             for future in futures:
                 future.cancel()

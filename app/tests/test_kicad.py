@@ -56,6 +56,17 @@ def child(node, kind):
 
 
 class KiCadTests(unittest.TestCase):
+    def test_reference_and_value_are_visible_for_single_and_multi_unit_symbols(self):
+        for part in ('C2040', 'C23922'):
+            component = parse_component(fixture(part), part)
+            node = sexpr(symbol_definition(component, 'VisibleFields'))
+            props = {prop[1]: prop for prop in children(node, 'property')}
+            for name in ('Reference', 'Value'):
+                with self.subTest(part=part, field=name):
+                    self.assertNotIn('hide', child(props[name], 'effects'))
+                    self.assertTrue(props[name][2])
+            self.assertNotEqual(child(props['Reference'], 'at'), child(props['Value'], 'at'))
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
