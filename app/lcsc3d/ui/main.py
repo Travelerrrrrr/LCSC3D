@@ -49,7 +49,7 @@ from lcsc3d.core.assets import SOURCE_APP_DIR, RESOURCE_ROOT
 from lcsc3d.ui.progress_ui import SmoothProgressBar
 from lcsc3d.ui.messages_ui import MessagesPage
 
-VERSION = '2.4.2'
+VERSION = '2.4.3'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = RESOURCE_ROOT
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else SOURCE_APP_DIR
@@ -651,8 +651,7 @@ class MainWindow(FramelessMainWindow):
         self.summary = label(ui_text('0 个器件'), 'badge')
         list_head.addWidget(self.summary)
         list_layout.addLayout(list_head)
-        from lcsc3d.ui.table_utils import FlexibleTable
-        self.table = FlexibleTable(0, 4)
+        self.table = QTableWidget(0, 4)
         self.table.setObjectName('downloadTable')
         self.table.setHorizontalHeaderLabels([ui_text('下载'), ui_text('器件编号'), ui_text('型号 / 模型'), ui_text('结果')])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -665,9 +664,15 @@ class MainWindow(FramelessMainWindow):
         self.table.setMinimumHeight(180)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.table.horizontalHeader().setMinimumSectionSize(44)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setToolTip(ui_text('拖动列头分隔线调整宽度；双击分隔线适应内容'))
+        self.table.horizontalHeader().sectionHandleDoubleClicked.connect(self.table.resizeColumnToContents)
         self.table.horizontalHeader().setSectionResizeMode(DOWNLOAD_COLUMN, QHeaderView.Fixed)
         self.table.setColumnWidth(DOWNLOAD_COLUMN, 56)
         self.table.setColumnWidth(PART_COLUMN, 104)
+        self.table.setColumnWidth(MODEL_COLUMN, 190)
         self.table.setColumnWidth(RESULT_COLUMN, 100)
         self.table.currentCellChanged.connect(self.selection_changed)
         self.table.itemChanged.connect(self.download_selection_changed)

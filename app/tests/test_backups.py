@@ -360,6 +360,23 @@ class BackupUiTests(unittest.TestCase):
         self.window.set_running(False)
         self.assertTrue(self.panel.restore_button.isEnabled())
 
+    def test_size_column_drag_moves_its_own_right_edge_without_shrinking_the_path(self):
+        from PySide6.QtCore import Qt, QPoint
+        from PySide6.QtTest import QTest
+        table = self.panel.table
+        header = table.horizontalHeader()
+        path_width, size_width = table.columnWidth(2), table.columnWidth(3)
+        edge = header.sectionViewportPosition(3) + size_width - 1
+        for start, delta in ((edge, -24), (edge - 24, 16)):
+            point = QPoint(start, header.height() // 2)
+            QTest.mousePress(header.viewport(), Qt.LeftButton, pos=point)
+            QTest.mouseMove(header.viewport(), point + QPoint(delta, 0), delay=30)
+            QTest.mouseRelease(header.viewport(), Qt.LeftButton, pos=point + QPoint(delta, 0))
+            QTest.qWait(40)
+            size_width += delta
+            self.assertEqual(table.columnWidth(3), size_width)
+            self.assertEqual(table.columnWidth(2), path_width)
+
 
 if __name__ == '__main__':
     unittest.main()

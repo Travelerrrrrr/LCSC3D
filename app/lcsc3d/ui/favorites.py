@@ -28,6 +28,8 @@ from lcsc3d.ui.commerce import QuantityInput, PriceTierBox
 from lcsc3d.services.commerce import purchase_rules_known
 from lcsc3d.ui.table_utils import FlexibleTable
 from lcsc3d.ui.catalog_actions import CatalogActions
+from lcsc3d.ui.pagination import PaginationBar
+from lcsc3d.ui.product_summary import ProductSummaryDelegate, set_product_summary
 
 
 THUMBNAIL_COLUMN = 9
@@ -737,15 +739,14 @@ class FavoritesDialog(CommerceActions, CatalogActions, QDialog):
         self.search_table = self.make_table(commercial=True)
         results_layout.addWidget(self.search_table, 1)
         pagination = QHBoxLayout()
-        self.previous_page_button = QPushButton(ui_text('上一页'))
-        self.previous_page_button.clicked.connect(lambda: self.load_search_page(self.search_page - 1))
-        pagination.addWidget(self.previous_page_button)
-        self.page_label = plain_label(ui_message('尚未搜索 · 每页 {0} 个', SEARCH_PAGE_SIZE), 'muted')
-        self.page_label.setAlignment(Qt.AlignCenter)
-        pagination.addWidget(self.page_label, 1)
-        self.next_page_button = QPushButton(ui_text('下一页'))
-        self.next_page_button.clicked.connect(lambda: self.load_search_page(self.search_page + 1))
-        pagination.addWidget(self.next_page_button)
+        self.pagination = PaginationBar()
+        self.pagination.page_requested.connect(self.load_search_page)
+        self.previous_page_button = self.pagination.previous
+        self.page_label = plain_label(ui_message('每页 {0} 个', SEARCH_PAGE_SIZE), 'muted')
+        self.page_label.setWordWrap(False)
+        pagination.addWidget(self.page_label)
+        pagination.addWidget(self.pagination, 1)
+        self.next_page_button = self.pagination.next
         results_layout.addLayout(pagination)
         self.tabs.addTab(search_panel, ui_text('搜索商品'))
         favorite_panel = QWidget()
@@ -885,7 +886,7 @@ class FavoritesDialog(CommerceActions, CatalogActions, QDialog):
         scale = theme_manager().tokens.get('font_size', 13) / 13
         for table in (self.search_table, self.favorite_table):
             table.ensurePolished()
-            row_height = max(round(36 * scale), table.fontMetrics().height() + 14)
+            row_height = table.summary_delegate.row_height()
             edge = max(44, min(64, round(48 * scale)))
             table.setIconSize(QSize(edge, edge))
             table.setColumnWidth(table.thumbnail_column, max(edge + 16, table.fontMetrics().horizontalAdvance(ui_text('图片')) + 16))
@@ -901,7 +902,7 @@ class FavoritesDialog(CommerceActions, CatalogActions, QDialog):
             table.setColumnWidth(table.quantity_column, max(130, round(125 * scale)))
 
     def make_table(self, commercial=False):
-        labels = [ui_text('选择'), ui_text('C 编号'), ui_text('型号'), ui_text('厂商'), ui_text('封装')]
+        labels = [ui_text('选择'), ui_text('C 编号'), ui_text('商品 / 简介'), ui_text('厂商'), ui_text('封装')]
         if commercial:
             labels += [ui_text('单价 / 梯度'), ui_text('库存')]
         labels += [ui_text('数量'), ui_text('递增量'), ui_text('图片')]
@@ -909,6 +910,11 @@ class FavoritesDialog(CommerceActions, CatalogActions, QDialog):
         table.quantity_column = table.columnCount() - 3
         table.step_column = table.columnCount() - 2
         table.setHorizontalHeaderLabels(labels)
+        table.summary_delegate = ProductSummaryDelegate(table)
+        # Brand and package now appear together below the model, leaving room
+        # for its introduction without duplicating wide metadata columns.
+        table.hideColumn(3)
+        table.hideColumn(4)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
         table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -916,7 +922,6 @@ class FavoritesDialog(CommerceActions, CatalogActions, QDialog):
         table.setShowGrid(False)
         table.setAlternatingRowColors(True)
         table.verticalHeader().hide()
-        table.verticalHeader().setDefaultSectionSize(36)
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
         table.setColumnWidth(0, 46)
         table.setColumnWidth(1, 95)
@@ -1052,10 +1057,7 @@ class FavoritesDialog(CommerceActions, CatalogActions, QDialog):
                 self.search_table.selectRow(0)
 
     def update_pagination(self):
-        self.previous_page_button.setEnabled(not self.searching and self.search_page > 1)
-        self.next_page_button.setEnabled(not self.searching and 0 < self.search_page < self.search_pages)
-        self.page_label.setText(ui_message('第 {0} / {1} 页 · 每页 {2} 个', self.search_page, max(1, self.search_pages), SEARCH_PAGE_SIZE)
-                                if self.search_page else ui_message('尚未搜索 · 每页 {0} 个', SEARCH_PAGE_SIZE))
+        self.pagination.set_state(self.search_page, self.search_pages, self.searching)
 
     def search_failed(self, error):
         self.searching = False
@@ -1104,7 +1106,9 @@ class FavoritesDialog(CommerceActions, CatalogActions, QDialog):
         stopped = product.get('purchase_status') == 'unavailable'
         title = product.get('title', '')
         table.item(row, 2).setText((ui_text('已停售 · ') if stopped else '') + title)
-        table.item(row, 2).setToolTip(title + (ui_text('\n商品已停售，无法加购；仍可下载资料或收藏。') if stopped else ''))
+        set_product_summary(table.item(row, 2), product)
+        if stopped:
+            table.item(row, 2).setToolTip(table.item(row, 2).toolTip() + str(ui_text('\n商品已停售，无法加购；仍可下载资料或收藏。')))
 
     def set_purchase_rules(self, product):
         part = product['part']

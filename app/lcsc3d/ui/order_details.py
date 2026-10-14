@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 from lcsc3d.core.i18n import text as tr, message as msg
 from lcsc3d.ui.localized_widgets import QLabel, QPushButton, QTableWidgetItem
 from lcsc3d.ui.ui_components import surface
+from lcsc3d.ui.product_summary import ProductSummaryDelegate, set_product_summary
 
 
 class OrderDetailPanel(QWidget):
@@ -41,7 +42,9 @@ class OrderDetailPanel(QWidget):
         self.hint.setTextFormat(Qt.PlainText); self.hint.setWordWrap(True)
         layout.addWidget(self.hint)
         card, body = surface(); body.setContentsMargins(0, 0, 0, 0)
-        self.table = native_table(['选择', '商品编号', '商品 / 型号', '封装', '购买数量', '单价', '金额', '类别', '图片'], 2)
+        self.table = native_table(['选择', '商品编号', '商品 / 简介', '封装', '购买数量', '单价', '金额', '类别', '图片'], 2)
+        self.table.summary_delegate = ProductSummaryDelegate(self.table)
+        self.table.hideColumn(3)
         self.table.thumbnail_column = 8
         self.table.thumbnail_channel = 'order-thumbnails'
         self.table.thumbnail_visible_only = True
@@ -91,12 +94,12 @@ class OrderDetailPanel(QWidget):
             for col, value in ((1, row['code']), (2, title), (3, row['package']),
                                (4, (row['quantity'] + ' ' + row['unit']).strip()), (7, row['kind'])):
                 table_cell(self.table, index, col, value or '—', col == 4)
+            set_product_summary(self.table.item(index, 2), row)
             for col, key in ((5, 'price'), (6, 'total')):
                 value = row[key]
                 if value:
                     value = (format(Decimal(value), '.2f') if key == 'total' else value) + ('/' + row['unit'] if key == 'price' and row['unit'] else '')
                 table_cell(self.table, index, col, result['currency'] + value if value else '—', True)
-            self.table.setRowHeight(index, max(60, self.table.fontMetrics().height() * 2 + 18))
             photo = QTableWidgetItem('…' if row.get('image') or row.get('part') else '—')
             photo.setTextAlignment(Qt.AlignCenter)
             photo.setData(Qt.UserRole, row.get('image') or ('lcsc-part:' + row['part'] if row.get('part') else ''))

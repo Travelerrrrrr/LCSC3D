@@ -143,6 +143,8 @@ def start(window, folder):
                 if any(panel.table.item(row, panel.table.thumbnail_column).icon().isNull() for row in range(panel.table.rowCount())):
                     return
                 assert panel.table.rowCount() == 2
+                assert panel.table.cellWidget(0, 5).height() < panel.table.rowHeight(0) // 2
+                report['cart_row_controls_centered'] = True
                 report['cart_product_photos'] = True
                 assert panel.table.item(0, 8).text() == '5'
                 assert panel.table.cellWidget(0, 5).singleStep() == 5

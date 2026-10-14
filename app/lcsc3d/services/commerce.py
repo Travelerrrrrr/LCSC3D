@@ -9,7 +9,7 @@ from urllib.parse import unquote, urlencode
 from lcsc3d.core.app_logging import log_event, traced, safe_part, record_error
 from lcsc3d.core.errors import Cancelled
 from lcsc3d.services.store import (PART, StoreError, SessionExpired, check_cancelled, quantity, decimal_number,
-                                  text, public_url, MAX_PARTS)
+                                  text, public_url, MAX_PARTS, product_introduction)
 
 CART_URL = 'https://cart.szlcsc.com/cart/display.html'
 ORDERS_URL = 'https://member.szlcsc.com/member/order/list.html'
@@ -151,6 +151,9 @@ def cart_items(payload):
                         price = format(decimal_number(raw.get('lineMoney')) / amount, 'f')
                     output.append(dict(key=key, part=text(raw.get('productCode'), 48),
                         title=text(raw.get('productModel') or raw.get('productName')),
+                        description=product_introduction(raw, text(raw.get('productModel') or raw.get('productName'))),
+                        manufacturer=text(raw.get('productGradePlateName') or raw.get('brandName')),
+                        category=text(raw.get('productType')),
                         product_id=str(raw.get('productId') or ''), package=text(raw.get('encapsulationModel') or raw.get('encapStandard')),
                         quantity=amount, ratio=str(ratio), price=price, total=money(raw.get('lineMoney')),
                         currency=currency, region=region, checked=bool(raw.get('checked') or raw.get('isChecked')),

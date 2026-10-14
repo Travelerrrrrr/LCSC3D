@@ -255,6 +255,11 @@ def purchase_availability(raw):
     return {}
 
 
+def product_introduction(raw, title=''):
+    values = [text(raw.get(key), 16384) for key in ('productName', 'productIntro', 'remark')]
+    return '\n'.join(dict.fromkeys(value for value in values if value and value != title))
+
+
 def storefront_product(raw, parameters=()):
     if not isinstance(raw, dict):
         return None
@@ -265,11 +270,10 @@ def storefront_product(raw, parameters=()):
     thumbnails = image_urls(raw.get('luceneBreviaryImageUrls')) or image_urls(raw.get('breviaryImageUrl'))
     images = list(dict.fromkeys(original_image(url) for url in thumbnails))
     title = text(raw.get('productModel') or raw.get('productName'))
-    description = [text(raw.get('productName'), 16384), text(raw.get('remark'), 16384)]
     return {'part': part, 'title': title, 'product_id': identity,
             'manufacturer': text(raw.get('productGradePlateName') or raw.get('brandName')),
             'package': text(raw.get('encapsulationModel')), 'category': text(raw.get('productType')),
-            'description': '\n'.join(dict.fromkeys(v for v in description if v and v != title)),
+            'description': product_introduction(raw, title),
             'image': images[0] if images else '', 'images': images, 'thumbnails': thumbnails,
             'store_url': f'https://item.szlcsc.com/{identity}.html' if identity else '',
             'parameters': list(parameters), 'details_complete': False, 'detail_source': '立创商城',
@@ -411,8 +415,10 @@ def favorite_products(payload, expected_page):
         identity = product_id(raw.get('selfProductId') or raw.get('productId'))
         thumbnails = image_urls(raw.get('luceneBreviaryImageUrls')) or image_urls(raw.get('breviaryImageUrl'))
         images = [original_image(url) for url in thumbnails]
+        title = text(raw.get('productModel') or raw.get('productModelWithoutHighlight') or raw.get('productName'))
         products.append({'part': part,
-                         'title': text(raw.get('productModel') or raw.get('productModelWithoutHighlight') or raw.get('productName')),
+                         'title': title, 'description': product_introduction(raw, title),
+                         'category': text(raw.get('productType')),
                          'manufacturer': text(raw.get('brandName') or raw.get('productGradePlateName')),
                          'package': text(raw.get('selfStandard') or raw.get('encapsulationModel') or raw.get('standard')),
                          'image': images[0] if images else '', 'images': images, 'thumbnails': thumbnails,

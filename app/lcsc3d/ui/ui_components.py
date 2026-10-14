@@ -45,6 +45,8 @@ class ColumnSplitter(QSplitter):
 
 
 ICON_PATHS = {
+    'chevron-left': '<path d="m15 5-7 7 7 7"/>',
+    'chevron-right': '<path d="m9 5 7 7-7 7"/>',
     'filter': '<path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"/>',
     'workspace': '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
     'store': '<path d="M3 9h18l-2-6H5L3 9Zm1 0v12h16V9M9 21v-7h6v7M3 9c0 4 6 4 6 0 0 4 6 4 6 0 0 4 6 4 6 0"/>',

@@ -26,6 +26,11 @@ QPushButton#primary, QPushButton#previewMode:checked { background:%(accent)s; co
 QPushButton#primary:hover, QPushButton#previewMode:checked:hover { background:%(accent_hover)s; color:%(on_accent_hover)s; }
 QPushButton#primary:disabled { background:%(hover)s; color:%(disabled)s; border-color:%(border)s; }
 QPushButton[variant="text"] { border:1px solid transparent; }
+QPushButton#pageButton { color:%(text)s; background:transparent; border:1px solid transparent; border-radius:7px; padding:0; height:0; min-width:0; font-weight:500; }
+QPushButton#pageButton:hover { color:%(accent_ink)s; background:%(hover)s; }
+QPushButton#pageButton:checked { color:%(accent_ink)s; background:%(surface)s; border:1px solid %(accent)s; }
+QPushButton#pageButton:focus { border:1px solid %(accent_ink)s; }
+QPushButton#pageButton:disabled { color:%(disabled)s; background:transparent; }
 QPushButton[variant="danger"] { color:%(error)s; border:1px solid transparent; }
 QPushButton[variant="danger"]:disabled { color:%(disabled)s; }
 QPushButton#navButton { color:%(muted)s; border:1px solid transparent; text-align:left; padding:10px 12px; height:%(control_height)spx; }

@@ -121,6 +121,27 @@ class MaterialUiTests(unittest.TestCase):
         d.cancel_button.click()
         self.assertEqual(w.preferences, Preferences())
 
+    def test_result_column_follows_the_table_right_edge_after_window_and_splitter_resize(self):
+        w = self.window
+        for width, sizes in ((1380, [620, 420]), (1600, [820, 420]), (1200, [580, 350])):
+            w.resize(width, 900)
+            w.workspace_splitter.setSizes(sizes)
+            QTest.qWait(60)
+            header = w.table.horizontalHeader()
+            edge = header.sectionViewportPosition(main.RESULT_COLUMN) + header.sectionSize(main.RESULT_COLUMN)
+            self.assertEqual(edge, w.table.viewport().width())
+        with patch.object(w, 'request_component_info'), patch.object(w, 'show_preview'):
+            w.input.setPlainText('\n'.join('C' + str(n) for n in range(1, 41)))
+            w.load_queue()
+        QTest.qWait(60)
+        self.assertTrue(w.table.verticalScrollBar().isVisible())
+        header = w.table.horizontalHeader()
+        self.assertEqual(header.length(), w.table.viewport().width())
+        w.table.setColumnWidth(main.MODEL_COLUMN, 240)
+        w.apply_preferences(Preferences(theme_mode='dark'))
+        QTest.qWait(50)
+        self.assertEqual(w.table.columnWidth(main.MODEL_COLUMN), 240)
+
     def test_wrapped_result_details_and_export_controls_never_overlap(self):
         w = self.window
         with patch.object(w, 'request_component_info'), patch.object(w, 'show_preview'):

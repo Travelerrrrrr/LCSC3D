@@ -4,7 +4,7 @@ import re
 
 from lcsc3d.core.app_logging import log_event, traced
 from lcsc3d.services.commerce import safe_display, money
-from lcsc3d.services.store import PART, StoreError, decimal_number, MAX_PARTS, image_urls
+from lcsc3d.services.store import PART, StoreError, decimal_number, MAX_PARTS, image_urls, product_introduction
 
 DETAIL_API = 'https://order-api.szlcsc.com/member/order/details'
 GROUPS = tuple((prefix + suffix, label, kind)
@@ -50,6 +50,9 @@ def parse_order_details(payload, expected):
             display_code = code + (' (' + part + ')' if part and part != code else '')
             photos = image_urls(raw.get('breviaryImageUrl')) or image_urls(raw.get('luceneBreviaryImageUrls'))
             rows.append(dict(code=display_code, part=part, title=safe_display(raw.get('productModel') or raw.get('productName')),
+                description=product_introduction(raw, safe_display(raw.get('productModel') or raw.get('productName'))),
+                manufacturer=safe_display(raw.get('productGradePlateName') or raw.get('brandName')),
+                category=safe_display(raw.get('productType')),
                 image=photos[0] if photos else '',
                 name=safe_display(raw.get('productName')), package=safe_display(raw.get('encapStandard')),
                 quantity=money(raw.get('purchaseNumber')), unit=safe_display(raw.get('stockUnitName') or raw.get('stockUnit'), 24),

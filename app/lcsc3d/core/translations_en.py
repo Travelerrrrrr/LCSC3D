@@ -887,4 +887,7 @@ ENGLISH.update({
     '最高单价': 'Max. unit price', '需求数量': 'Required quantity', '在结果中搜索': 'Search within results',
     '价格按需求数量所在梯度筛选；未填写数量时使用第一阶梯。': 'Price uses the required quantity tier, or the first tier when quantity is empty.',
     '请输入有效数值范围，最小值不能大于最大值。': 'Enter a valid range with minimum no greater than maximum.',
+    '商品 / 简介': 'Product / Description', '暂无商品简介': 'No description available',
+    '第 {0} 页': 'Page {0}', '跳转到第 {0} 页': 'Go to page {0}',
+    '每页 {0} 个': '{0} per page',
 })

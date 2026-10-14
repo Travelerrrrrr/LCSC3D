@@ -9,6 +9,8 @@ from lcsc3d.services.commerce import MAX_CART_QUANTITY
 from lcsc3d.ui.localized_widgets import QLabel, QPushButton, QTableWidget, QTableWidgetItem, QLineEdit, QComboBox
 from lcsc3d.ui.ui_components import surface
 from lcsc3d.ui.table_utils import FlexibleTable
+from lcsc3d.ui.pagination import PaginationBar
+from lcsc3d.ui.product_summary import ProductSummaryDelegate, set_product_summary
 
 
 class QuantityInput(QSpinBox):
@@ -140,7 +142,9 @@ class CartPanel(QWidget):
         layout.addLayout(toolbar)
         card, body = surface()
         body.setContentsMargins(0, 0, 0, 0)
-        self.table = native_table(['选择', 'C 编号', '型号', '封装', '单价', '数量', '小计', '状态', '递增量', '图片'], 2)
+        self.table = native_table(['选择', 'C 编号', '商品 / 简介', '封装', '单价', '数量', '小计', '状态', '递增量', '图片'], 2)
+        self.table.summary_delegate = ProductSummaryDelegate(self.table)
+        self.table.hideColumn(3)
         self.table.thumbnail_column = 9
         self.table.thumbnail_channel = 'cart-thumbnails'
         self.table.thumbnail_visible_only = True
@@ -198,6 +202,7 @@ class CartPanel(QWidget):
             photo.setToolTip(str(tr('正在加载图片…') if row['image'] else tr('暂无商品图片')))
             for column, key in ((1, 'part'), (2, 'title'), (3, 'package'), (7, 'status')):
                 table_cell(self.table, index, column, row[key])
+            set_product_summary(self.table.item(index, 2), row)
             for column, key in ((4, 'price'), (6, 'total')):
                 amount = format(Decimal(row[key]), '.2f' if key == 'total' else '.6f') if row[key] else ''
                 if key == 'price' and amount:
@@ -207,7 +212,6 @@ class CartPanel(QWidget):
             table_cell(self.table, index, 8, step, True)
             spin = QuantityInput(row['quantity'], row['minimum'], step=step, preserve_initial=True)
             spin.ensurePolished()
-            self.table.setRowHeight(index, max(68, spin.sizeHint().height() + 12))
             spin.valueChanged.connect(lambda amount, data=row: self.quantity_changed.emit(data, amount))
             self.table.setCellWidget(index, 5, spin)
         self.table.blockSignals(False)
@@ -303,14 +307,13 @@ class OrdersPanel(QWidget):
         body.addWidget(self.table)
         list_layout.addWidget(card, 1)
         footer = QHBoxLayout()
-        self.previous = QPushButton(tr('上一页'))
-        self.previous.clicked.connect(lambda: self.read_requested.emit(self.page - 1))
-        footer.addWidget(self.previous)
+        self.pagination = PaginationBar(view='orders')
+        self.pagination.page_requested.connect(self.read_requested)
+        self.previous = self.pagination.previous
         self.page_label = QLabel(tr('尚未查询')); self.page_label.setObjectName('muted')
-        footer.addWidget(self.page_label, 1, Qt.AlignCenter)
-        self.next = QPushButton(tr('下一页'))
-        self.next.clicked.connect(lambda: self.read_requested.emit(self.page + 1))
-        footer.addWidget(self.next)
+        footer.addWidget(self.page_label)
+        footer.addWidget(self.pagination, 1)
+        self.next = self.pagination.next
         list_layout.addLayout(footer)
         self.set_busy(False)
 
@@ -343,8 +346,7 @@ class OrdersPanel(QWidget):
     def set_busy(self, value):
         for widget in (self.refresh, self.keyword, self.filter, self.table):
             widget.setEnabled(not value)
-        self.previous.setEnabled(not value and self.page > 1)
-        self.next.setEnabled(not value and self.page < self.pages)
+        self.pagination.set_state(self.page, self.pages, value)
 
     def clear(self):
         self.loaded = False; self.page = self.pages = 0

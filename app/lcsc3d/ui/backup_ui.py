@@ -4,13 +4,14 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QUrl, QTimer
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QHeaderView, QAbstractItemView
-from lcsc3d.ui.localized_widgets import QCheckBox, QDialog, QGroupBox, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QAbstractItemView
+from lcsc3d.ui.localized_widgets import QCheckBox, QDialog, QGroupBox, QLabel, QLineEdit, QPushButton, QTableWidgetItem
 from lcsc3d.core.i18n import text as ui_text, message as ui_message, render
 from lcsc3d.core.app_logging import contextual, new_context, record_error
 from lcsc3d.services.backups import backup_directory, list_backups, prepare_restore, restore_backup, clear_backups
 from lcsc3d.ui.shell_ui import choose_path, notify, page_host
 from lcsc3d.ui.ui_components import title_block
+from lcsc3d.ui.table_utils import FlexibleTable
 
 
 def format_size(size):
@@ -57,15 +58,15 @@ class BackupPanel(QGroupBox):
         self.usage.setObjectName('section')
         self.usage.setWordWrap(True)
         layout.addWidget(self.usage)
-        self.table = QTableWidget(0, 4)
+        # Native stretch resizes the preceding path in the opposite direction
+        # while the user drags the size column. Keep each dragged edge free.
+        self.table = FlexibleTable(0, 4, resize_neighbors=False)
         self.table.setHorizontalHeaderLabels([ui_text('备份时间'), ui_text('文件'), ui_text('原位置'), ui_text('大小')])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().hide()
         self.table.setMinimumHeight(220)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.setColumnWidth(0, 165)
         self.table.setColumnWidth(1, 150)
         self.table.setColumnWidth(3, 80)

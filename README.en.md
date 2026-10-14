@@ -50,6 +50,8 @@ Search and favorites support inline purchase quantities with each part's minimum
 
 Add checked parts from search, favorites, cart or orders to the download list. C-numbers are deduplicated before preview and AD / KiCad or model export. Drag column borders to resize and double-click product photos to view originals.
 
+Product rows show the model, brand, package, category, description and available key parameters together; hover to read the full introduction. Category submenus start collapsed. Search and orders use numbered pages, ellipses and previous/next arrows, with an outlined current page.
+
 Public search requires no login; favorites, cart and orders use a mainland LCSC account. These account purchasing pages are available in Chinese mode. English mode uses LCSC International search, with international account management on LCSC.com.
 
 User-provided storefront screenshots. Click an image to view the original.

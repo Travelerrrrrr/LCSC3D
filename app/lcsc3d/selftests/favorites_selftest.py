@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QApplication
 from lcsc3d.ui.favorites import FavoritesDialog, THUMBNAIL_COLUMN
 from lcsc3d.services.store import MemorySession, StoreClient, FAVORITES_URL
 from lcsc3d.services.store_session import SessionVault
+from lcsc3d.ui.product_summary import SUMMARY_ROLE
 
 
 def fixture_png(width=64, height=64):
@@ -596,6 +597,11 @@ def start(window, destination):
             elif state['phase'] == 'search-first' and not dialog.searching and not dialog.has_jobs():
                 assert len(dialog.search_items) == 20 and dialog.search_table.rowCount() == 20
                 assert dialog.search_total == 75 and dialog.search_pages == 4
+                assert dialog.search_table.item(0, 2).data(SUMMARY_ROLE)['description']
+                assert dialog.search_table.rowHeight(0) >= dialog.search_table.fontMetrics().lineSpacing() * 5 + 28
+                assert set(dialog.pagination.number_buttons) == {1, 2, 3, 4}
+                assert all(button.width() >= 34 for button in dialog.pagination.number_buttons.values())
+                report['product_row_introductions'] = True
                 assert not dialog.selected_items()
                 report['first_search_page'] = 20
                 # Images load as rows become visible. Exercise scrolling rather
@@ -624,7 +630,8 @@ def start(window, destination):
                 report['stock_column'] = True
                 report['unknown_price_and_stock'] = True
                 dialog.search_table.item(0, 0).setCheckState(Qt.Checked)
-                dialog.next_page_button.click()
+                dialog.pagination.number_buttons[2].click()
+                report['numbered_page_navigation'] = True
                 state['phase'] = 'search-second'
             elif state['phase'] == 'search-second' and not dialog.searching and not dialog.has_jobs():
                 assert dialog.search_page == 2 and dialog.search_table.rowCount() == 20

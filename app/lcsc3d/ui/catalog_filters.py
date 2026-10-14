@@ -73,7 +73,7 @@ class CategoryPanel(QWidget):
                 (parent.addChild(item) if parent else self.tree.addTopLevelItem(item))
             for child in row['children']:
                 add(child, None if query else item, full)
-            item.setExpanded(True)
+            item.setExpanded(False)
         if query:
             for group in self.categories:
                 for row in group['children']:

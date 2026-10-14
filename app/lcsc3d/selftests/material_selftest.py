@@ -64,6 +64,8 @@ def start(window, folder):
             settle()
             assert window.content_scroll.verticalScrollBar().maximum() == 0, 'Default workspace must fit without scrolling'
             report['default_workspace_fits'] = True
+            assert window.table.horizontalHeader().length() == window.table.viewport().width()
+            report['result_column_fills_right_edge'] = True
             capture(window, 'workspace-symbol-light')
             window.apply_preferences(Preferences(accent_text_color='#ffffff'))
             # Match the five-row layout regression's reference window size;
