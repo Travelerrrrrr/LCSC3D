@@ -21,7 +21,7 @@ def start(window, folder):
     dialog.request_detail = lambda *_: None
     report = dict(version=main.VERSION, frozen=bool(getattr(sys, 'frozen', False)),
                   anonymous=True, saved_session_accessed=False)
-    state = dict(phase='category', deadline=time.monotonic() + 90, done=False)
+    state = dict(phase='category', deadline=time.monotonic() + 120, done=False)
     timer = QTimer(window); timer.setInterval(50)
 
     def finish(error=''):
@@ -43,6 +43,16 @@ def start(window, folder):
                 raise AssertionError('Anonymous catalog acceptance timed out: ' + state['phase'])
             phase = state['phase']
             if phase == 'category' and not dialog.searching and dialog.search_items:
+                state['first_parts'] = [row['part'] for row in dialog.search_items]
+                dialog.next_page_button.click(); state['phase'] = 'category-next'
+            elif phase == 'category-next' and not dialog.searching:
+                assert dialog.search_page == 2 and dialog.search_items
+                assert [row['part'] for row in dialog.search_items] != state['first_parts']
+                report['category_next_page'] = True
+                dialog.previous_page_button.click(); state['phase'] = 'category-previous'
+            elif phase == 'category-previous' and not dialog.searching:
+                assert dialog.search_page == 1 and dialog.search_items
+                report['category_previous_page'] = True
                 dialog.open_filters(); state['phase'] = 'facets'
             elif phase == 'facets' and dialog.filter_cache:
                 panel = dialog.filter_panel
@@ -60,6 +70,52 @@ def start(window, folder):
             elif phase == 'filtered' and not dialog.searching and dialog.search_items:
                 assert dialog.catalog_filters['parameters'] == {'param_31013_n#range': ['32KB~64KB']}
                 report.update(range_applied=True, products=len(dialog.search_items), total=dialog.search_total)
+                state['first_parts'] = [row['part'] for row in dialog.search_items]
+                dialog.next_page_button.click(); state['phase'] = 'range-next'
+            elif phase == 'range-next' and not dialog.searching:
+                assert dialog.search_page == 2 and dialog.search_items
+                assert [row['part'] for row in dialog.search_items] != state['first_parts']
+                assert dialog.catalog_filters['parameters'] == {'param_31013_n#range': ['32KB~64KB']}
+                report['range_next_page'] = True
+                dialog.previous_page_button.click(); state['phase'] = 'range-previous'
+            elif phase == 'range-previous' and not dialog.searching:
+                assert dialog.search_page == 1 and dialog.search_items
+                report['range_previous_page'] = True
+                dialog.open_filters(); state['phase'] = 'matching-facets'
+            elif phase == 'matching-facets' and not dialog.has_jobs() and not dialog.filter_timer.isActive():
+                panel = dialog.filter_panel
+                panel.groups.setCurrentRow(next(i for i, group in enumerate(panel.facets) if group['key'] == 'param_31013_n'))
+                assert (panel.low.text(), panel.high.text(), panel.unit.currentText()) == ('32', '64', 'KB')
+                panel.option_search.setText('64KB')
+                state['matching'] = [panel.options.item(i).data(Qt.UserRole) for i in range(panel.options.count())
+                                     if not panel.options.item(i).isHidden() and panel.options.item(i).flags() & Qt.ItemIsEnabled]
+                assert state['matching']
+                panel.select_visible.click()
+                state.update(phase='matching-refresh', ready_after=time.monotonic() + 1)
+            elif phase == 'matching-refresh' and time.monotonic() >= state['ready_after'] and not dialog.has_jobs() and not dialog.filter_timer.isActive():
+                panel = dialog.filter_panel
+                assert (panel.low.text(), panel.high.text(), panel.unit.currentText()) == ('32', '64', 'KB')
+                assert panel.option_search.text() == '64KB'
+                visible = [panel.options.item(i).data(Qt.UserRole) for i in range(panel.options.count())
+                           if not panel.options.item(i).isHidden()]
+                assert visible == state['matching'], visible
+                assert panel.draft['parameters'] == {'param_31013_n': state['matching']}
+                report.update(matching_keeps_range_and_query=True, matching_survives_refresh=True)
+                panel.apply.click(); state['phase'] = 'matching-filtered'
+            elif phase == 'matching-filtered' and not dialog.searching and dialog.search_items:
+                assert dialog.catalog_filters['parameters'] == {'param_31013_n': state['matching']}
+                report.update(matching_discrete_applied=True, matching_total=dialog.search_total)
+                state['first_parts'] = [row['part'] for row in dialog.search_items]
+                dialog.next_page_button.click(); state['phase'] = 'matching-next'
+            elif phase == 'matching-next' and not dialog.searching:
+                assert dialog.search_page == 2 and dialog.search_items
+                assert [row['part'] for row in dialog.search_items] != state['first_parts']
+                assert dialog.catalog_filters['parameters'] == {'param_31013_n': state['matching']}
+                report['matching_next_page'] = True
+                dialog.previous_page_button.click(); state['phase'] = 'matching-previous'
+            elif phase == 'matching-previous' and not dialog.searching:
+                assert dialog.search_page == 1 and dialog.search_items
+                report['matching_previous_page'] = True
                 dialog.search_input.setText('C20197'); dialog.start_search(); state['phase'] = 'exact-search'
             elif phase == 'exact-search' and not dialog.searching and dialog.search_items:
                 assert dialog.search_items[0]['part'] == 'C20197'

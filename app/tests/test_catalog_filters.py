@@ -79,7 +79,9 @@ class FilterDataTests(unittest.TestCase):
         def reply(url, **kwargs):
             request = kwargs['payload']; calls.append((url, request))
             page = request['currentPage']; start = (page - 1) * 30
-            return add_facets(fixture_search([(f'C{1000+i}', str(i)) for i in range(start, start+30)], page, 90))
+            # The category endpoint returns the requested records but reports
+            # currePage=1 even when currentPage is greater than one.
+            return add_facets(fixture_search([(f'C{1000+i}', str(i)) for i in range(start, start+30)], 1, 90))
         client = StoreClient()
         with patch.object(client, '_json', side_effect=reply):
             result = client.search_results_page('', 2, filters={'catalogIdFilter': '11329', 'sortNumber': 2})
@@ -88,6 +90,31 @@ class FilterDataTests(unittest.TestCase):
         for url, request in calls:
             self.assertEqual(url, 'https://list.szlcsc.com/category/product')
             self.assertEqual(request['catalogIdFilter'], '11329'); self.assertEqual(request['sortNumber'], 2)
+
+    def test_category_page_compatibility_keeps_keyword_and_metadata_validation(self):
+        client = StoreClient()
+        payload = fixture_search([(f'C{1000+i}', str(i)) for i in range(30, 60)], 1, 90)
+        with patch.object(client, '_json', return_value=payload):
+            with self.assertRaises(StoreError):
+                client.search_page('STM32', 2, filters={'catalogIdFilter': '11329'})
+            for key, value in (('currePage', 3), ('currePage', 0), ('pageSize', 0),
+                               ('totalCount', -1), ('countPage', 0)):
+                broken = copy.deepcopy(payload)
+                broken['result']['searchResult'][key] = value
+                with self.subTest(key=key, value=value), patch.object(client, '_json', return_value=broken):
+                    with self.assertRaises(StoreError):
+                        client.search_page('', 2, filters={'catalogIdFilter': '11329'})
+
+    def test_category_pages_still_reject_repeated_records_and_changed_totals(self):
+        client = StoreClient()
+        first = fixture_search([(f'C{1000+i}', str(i)) for i in range(30)], 1, 90)
+        repeated = copy.deepcopy(first)
+        changed = fixture_search([(f'C{1000+i}', str(i)) for i in range(30, 60)], 1, 91)
+        for next_page in (repeated, changed):
+            with self.subTest(total=next_page['result']['searchResult']['totalCount']), \
+                    patch.object(client, '_json', side_effect=[first, next_page]):
+                with self.assertRaises(StoreError):
+                    client.search_results_page('', 2, filters={'catalogIdFilter': '11329'})
 
 
 class FilterUiTests(unittest.TestCase):
@@ -161,6 +188,85 @@ class FilterUiTests(unittest.TestCase):
 
     def visible_options(self, panel):
         return [panel.options.item(i).data(Qt.UserRole) for i in range(panel.options.count()) if not panel.options.item(i).isHidden()]
+
+    def test_select_matching_keeps_range_query_refresh_and_discrete_submission(self):
+        panel = self.dialog.filter_panel; facets = self.mcu_facets()
+        panel.begin({'catalogIdFilter': '11329'}, facets); panel.groups.setCurrentRow(2)
+        panel.low.setText('32'); panel.high.setText('64'); panel.unit.setCurrentText('KB'); panel.range_apply.click()
+        panel.option_search.setText('64')
+        panel.select_visible.click()
+        self.assertEqual(panel.draft['parameters'], {'param_31013_n': ['64KB']})
+        for refresh in (lambda: None, lambda: panel.show_facets(facets),
+                        lambda: (panel.groups.setCurrentRow(0), panel.groups.setCurrentRow(2))):
+            refresh()
+            self.assertEqual((panel.low.text(), panel.high.text(), panel.unit.currentText()), ('32', '64', 'KB'))
+            self.assertIn('32KB~64KB', panel.range_choice.text())
+            panel.option_search.setText('64')
+            self.assertEqual(self.visible_options(panel), ['64KB'])
+        panel.select_visible.click()
+        emitted = []; panel.applied.connect(emitted.append)
+        panel.apply.click()
+        self.assertEqual(emitted[-1]['parameters'], {'param_31013_n': ['64KB']})
+        panel.options.item(3).setCheckState(Qt.Unchecked)
+        self.assertEqual(self.visible_options(panel), ['64KB'])
+        self.assertEqual((panel.low.text(), panel.high.text()), ('32', '64'))
+        panel.low.setText('0'); panel.high.setText('32'); panel.apply.click()
+        self.assertEqual(emitted[-1]['parameters'], {'param_31013_n#range': ['0KB~32KB']})
+        panel.clear_group()
+        self.assertFalse(panel.low.text() or panel.high.text() or panel.range_choice.text())
+        self.assertEqual(len(self.visible_options(panel)), 5)
+        entries = [json.loads(line) for line in (logs.get_log_directory() / 'LCSC3D.log').read_text('utf-8').splitlines()]
+        event = next(row for row in entries if row['event'] == 'catalog.matching_selected')
+        self.assertEqual(event['matching_count'], 1)
+        self.assertTrue(event['lower_bound'] and event['upper_bound'])
+        self.assertNotIn('64KB', json.dumps(event))
+
+    def test_select_matching_keeps_unsubmitted_inputs_and_skips_disabled_options(self):
+        panel = self.dialog.filter_panel; facets = self.mcu_facets()
+        facets[2]['options'][2]['enabled'] = False
+        panel.begin({'catalogIdFilter': '11329'}, facets); panel.groups.setCurrentRow(2)
+        panel.low.setText('32'); panel.high.setText('64'); panel.unit.setCurrentText('KB')
+        panel.option_search.setText('KB'); panel.select_visible.click()
+        self.assertEqual(panel.draft['parameters'], {'param_31013_n': ['32KB', '64KB', '128KB']})
+        self.assertEqual((panel.low.text(), panel.high.text(), panel.unit.currentText()), ('32', '64', 'KB'))
+        self.assertEqual(panel.option_search.text(), 'KB')
+        emitted = []; panel.applied.connect(emitted.append); panel.apply.click()
+        self.assertEqual(emitted[-1]['parameters'], panel.draft['parameters'])
+        self.assertNotIn('param_31013_n#range', emitted[-1]['parameters'])
+        panel.reset(); self.assertFalse(panel.low.text() or panel.high.text())
+
+    def test_select_matching_with_no_matches_keeps_active_range(self):
+        panel = self.dialog.filter_panel
+        panel.begin({'catalogIdFilter': '11329'}, self.mcu_facets()); panel.groups.setCurrentRow(2)
+        panel.low.setText('32'); panel.high.setText('64'); panel.unit.setCurrentText('KB'); panel.range_apply.click()
+        panel.option_search.setText('no matches'); panel.select_visible.click()
+        self.assertEqual(panel.draft['parameters'], {'param_31013_n#range': ['32KB~64KB']})
+        self.assertEqual((panel.low.text(), panel.high.text()), ('32', '64'))
+        self.assertFalse(self.visible_options(panel))
+
+    def test_filtered_category_next_previous_and_last_pages_keep_selection_and_diagnostics(self):
+        d = self.dialog; rows = [(f'C{1000+i}', str(i)) for i in range(75)]
+        for page in range(1, 4):
+            self.service.search_pages[('', page)] = fixture_search(rows[(page-1)*30:page*30], 1, 75)
+        filters = {'catalogIdFilter': '11329', 'spotFilter': 0,
+                   'parameters': {'param_31013_n#range': ['32KB~64KB']}}
+        d.apply_catalog_filters(filters); self.wait(lambda: not d.searching)
+        self.assertEqual(d.search_page, 1); d.search_table.item(0, 0).setCheckState(Qt.Checked)
+        for page in (2, 3, 4, 3):
+            (d.next_page_button if page > d.search_page else d.previous_page_button).click()
+            self.wait(lambda: not d.searching)
+            self.assertEqual(d.search_page, page)
+            self.assertEqual([row['part'] for row in d.search_items], [row[0] for row in rows[(page-1)*20:page*20]])
+            self.assertIn('C1000', d.search_selected)
+        requests = [json.loads(row[3]) for row in self.service.requests if row[1] == '/category/product']
+        self.assertTrue(any(request['currentPage'] == 3 for request in requests))
+        for request in requests:
+            self.assertEqual(request['catalogIdFilter'], '11329'); self.assertEqual(request['spotFilter'], 0)
+            self.assertEqual(unquote(request['queryParameterValue']), '32KB~64KB@param_31013_n#range')
+        entries = [json.loads(line) for line in (logs.get_log_directory() / 'LCSC3D.log').read_text('utf-8').splitlines()]
+        event = next(row for row in entries if row['event'] == 'catalog.category_page_normalized')
+        self.assertEqual(event['page'], 2); self.assertEqual(event['returned_page'], 1)
+        self.assertFalse(any(row['event'] == 'catalog.search_page.failed' for row in entries))
 
     def test_mcu_32_64kb_survives_async_refresh_group_switch_and_reopen(self):
         d = self.dialog; facets = self.mcu_facets()

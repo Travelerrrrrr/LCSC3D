@@ -275,7 +275,7 @@ def storefront_product(raw, parameters=()):
             **commercial_data(raw), **purchase_availability(raw)}
 
 
-def search_page_products(payload, expected_page):
+def search_page_products(payload, expected_page, *, category=False):
     if not isinstance(payload, dict) or payload.get('code') != 200:
         raise StoreError('商城商品搜索失败，请稍后重试。')
     result = payload.get('result')
@@ -284,12 +284,19 @@ def search_page_products(payload, expected_page):
         raise StoreError('商城返回了无法识别的搜索结果，请重试。')
     try:
         total, size, current, pages = (int(page[k]) for k in ('totalCount', 'pageSize', 'currePage', 'countPage'))
+        if category and current == 1 and expected_page > 1:
+            # The category endpoint pages its records correctly but reports
+            # currePage=1. Keyword search must still match the returned page.
+            current = expected_page
         if total < 0 or not 1 <= size <= 1000 or current != expected_page or pages < 0:
             raise ValueError()
         if pages < (total + size - 1) // size:
             raise ValueError()
     except (KeyError, ValueError, TypeError, OverflowError):
         raise StoreError('商城搜索分页信息异常，已停止读取。') from None
+    if category and current != int(page['currePage']):
+        log_event('INFO', 'catalog.category_page_normalized', page=current,
+                  returned_page=1, total=total, pages=pages, page_size=size)
     rows = page['productRecordList']
     if not rows and total > (expected_page - 1) * size:
         raise StoreError('商城搜索分页为空，已停止读取，避免遗漏商品。')
@@ -835,7 +842,7 @@ class StoreClient:
         origin = 'https://so.szlcsc.com' if keyword else 'https://list.szlcsc.com'
         result = self._json(url, payload=payload, cancelled=cancelled,
                             headers={'Origin': origin, 'Referer': origin + '/'})
-        return search_page_products(result, page)
+        return search_page_products(result, page, category=not keyword)
 
     @traced('catalog.search_page', lambda self, keyword, page=1, cancelled=None, **kw: {'page': page, 'query_length': len(keyword)}, level='INFO')
     def search_results_page(self, keyword, page=1, cancelled=None, *, filters=None):

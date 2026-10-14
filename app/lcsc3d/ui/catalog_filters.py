@@ -103,7 +103,7 @@ class FilterPanel(QWidget):
     def __init__(self):
         super().__init__()
         self.draft = normalize_filters(); self.facets = []; self.filling = False
-        self.range_inputs = {}; self.displayed_key = None
+        self.range_inputs = {}; self.matching_views = {}; self.displayed_key = None
         layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0)
         tools = QHBoxLayout()
         back = IconButton(tr('返回商品'), 'back'); back.clicked.connect(self.back_requested); tools.addWidget(back)
@@ -178,7 +178,7 @@ class FilterPanel(QWidget):
 
     def begin(self, filters, facets):
         self.filling = True; self.draft = normalize_filters(deepcopy(filters))
-        self.range_inputs.clear(); self.displayed_key = None
+        self.range_inputs.clear(); self.matching_views.clear(); self.displayed_key = None
         for key, box in self.flags.items():
             box.setChecked(self.draft[key] if key == 'hasDataFile' else self.draft[key] == 0)
         self.origin.setCurrentIndex(max(0, self.origin.findData(self.draft['brandOriginFilter'])))
@@ -194,6 +194,9 @@ class FilterPanel(QWidget):
 
     def selected_values(self, key):
         return self.draft['parameters'].get(key, []) if key.startswith('param_') else self.draft.get(key, '').split('$')
+
+    def view_ranges(self, key):
+        return self.draft['parameters'].get(key + '#range', []) or self.matching_views.get(key, {}).get('ranges', [])
 
     def show_facets(self, facets):
         current = (self.current_group() or {}).get('key')
@@ -222,7 +225,7 @@ class FilterPanel(QWidget):
         self.filling = True; self.options.clear(); self.option_search.clear(); self.low.clear(); self.high.clear(); self.unit.clear()
         group = self.current_group()
         self.displayed_key = (group or {}).get('key')
-        ranges = self.draft['parameters'].get((group or {}).get('key', '') + '#range', [])
+        ranges = self.view_ranges((group or {}).get('key', ''))
         self.range_choice.setText(tr('已选范围：') + ' / '.join(ranges) if ranges else '')
         self.range_choice.setVisible(bool(ranges))
         self.range_widget.setVisible(bool(group and group.get('numeric') and group.get('units')))
@@ -256,33 +259,39 @@ class FilterPanel(QWidget):
             return
         query = self.option_search.text().casefold()
         group = self.current_group() or {}
-        ranges = self.draft['parameters'].get(group.get('key', '') + '#range', [])
+        ranges = self.view_ranges(group.get('key', ''))
         bounds = range_bounds(ranges[0], group.get('units', {})) if ranges else None
         for index in range(self.options.count()):
             item = self.options.item(index)
             item.setHidden(query not in item.text().casefold() or bounds is not None and
                            not option_in_range(item.data(Qt.UserRole + 1) or {}, bounds))
 
-    def set_values(self, key, values):
+    def set_values(self, key, values, *, preserve_view=False):
         if key.startswith('param_'):
+            if preserve_view:
+                self.remember_range()
+                # A batch selection submits discrete values, while its local
+                # range remains available for narrowing and editing the list.
+                self.matching_views[key] = dict(inputs=self.range_inputs.get(key), ranges=self.view_ranges(key))
             self.draft['parameters'].pop(key + '#range', None)
             self.draft['parameters'][key] = values
-            self.range_inputs.pop(key, None)
-            if self.displayed_key == key:
-                self.low.clear(); self.high.clear(); self.range_choice.clear(); self.range_choice.hide()
-                self.filter_options()
+            if key not in self.matching_views:
+                self.range_inputs.pop(key, None)
+                if self.displayed_key == key:
+                    self.low.clear(); self.high.clear(); self.range_choice.clear(); self.range_choice.hide()
+                    self.filter_options()
         else:
             self.draft[key] = '$'.join(values)
             if key == 'catalogIdFilter':
                 self.draft['parameters'] = {}
-                self.range_inputs.clear()
+                self.range_inputs.clear(); self.matching_views.clear()
         self.draft['lastParamName'] = key
 
-    def option_changed(self, *_):
+    def option_changed(self, *_, preserve_view=False):
         if self.filling or not self.current_group():
             return
         self.set_values(self.current_group()['key'], [self.options.item(i).data(Qt.UserRole) for i in range(self.options.count())
-                                                    if self.options.item(i).checkState() == Qt.Checked])
+                                                    if self.options.item(i).checkState() == Qt.Checked], preserve_view=preserve_view)
         self.emit_change()
 
     def common_changed(self, *_):
@@ -314,16 +323,21 @@ class FilterPanel(QWidget):
         self.summary.setText(msg('已设置 {0} 项', count) + (' · ' + ' / '.join(selected) if selected else ''))
 
     def select_matching(self):
-        self.filling = True
+        self.filling = True; count = 0
         for index in range(self.options.count()):
             item = self.options.item(index)
             if not item.isHidden() and item.flags() & Qt.ItemIsEnabled:
-                item.setCheckState(Qt.Checked)
-        self.filling = False; self.option_changed()
+                item.setCheckState(Qt.Checked); count += 1
+        self.filling = False
+        if count:
+            self.option_changed(preserve_view=True)
+        log_event('INFO', 'catalog.matching_selected', matching_count=count,
+                  lower_bound=bool(self.low.text()), upper_bound=bool(self.high.text()))
 
     def clear_group(self):
         group = self.current_group()
         if group:
+            self.matching_views.pop(group['key'], None)
             self.set_values(group['key'], []); self.show_options(); self.emit_change()
 
     def use_range(self):
@@ -339,6 +353,7 @@ class FilterPanel(QWidget):
             log_event('WARNING', 'catalog.range_rejected', reason='invalid_bounds')
             return False
         self.draft['parameters'].pop(group['key'], None)
+        self.matching_views.pop(group['key'], None)
         self.draft['parameters'][group['key'] + '#range'] = [(low + unit if low else '') + '~' + (high + unit if high else '')]
         self.draft['lastParamName'] = group['key']; self.show_options(); self.emit_change()
         log_event('INFO', 'catalog.range_selected', lower_bound=bool(low), upper_bound=bool(high),
@@ -351,7 +366,12 @@ class FilterPanel(QWidget):
         self.begin({'catalogIdFilter': self.draft['catalogIdFilter']}, self.facets); self.emit_change()
 
     def apply_filters(self):
-        if not self.use_range():
+        group = self.current_group() or {}
+        view = self.matching_views.get(group.get('key'))
+        fields = self.low.text(), self.high.text(), self.unit.currentText()
+        # Unchanged range fields describe the view used for batch selection;
+        # do not replace the selected discrete values when Apply is clicked.
+        if (not view or fields != view['inputs']) and not self.use_range():
             return
         self.common_changed()
         try:
