@@ -84,14 +84,18 @@ def list_backups():
                     value = json.loads(metadata.read_text('utf-8'))
                     target = value['original_path']
                     created = value['created']
-                    datetime.fromisoformat(created)
+                    stamp = datetime.fromisoformat(created)
+                    if stamp.tzinfo is None:
+                        raise ValueError('Backup timestamp has no timezone')
+                    stamp.astimezone()  # Ensure the UI can display it in local time.
+                    created = stamp.astimezone(timezone.utc).isoformat()
                     if (value['version'] != 1 or not isinstance(target, str) or not Path(target).is_absolute()
                             or Path(target).suffix.lower() != payload.suffix.lower()
                             or type(value['size']) is not int or value['size'] != stat.st_size
                             or not isinstance(value['sha256'], str) or not re.fullmatch(r'[0-9a-f]{64}', value['sha256'])):
                         raise ValueError('Invalid backup metadata')
                     row = Backup(path.name, payload, Path(target).name, created, stat.st_size, size, target, value['sha256'])
-                except (OSError, ValueError, KeyError, TypeError):
+                except (OSError, ValueError, KeyError, TypeError, OverflowError, RecursionError):
                     pass
                 result.append(row)
         except FileNotFoundError:
@@ -215,14 +219,19 @@ def clear_backups(keys):
                     allowed = {row.path.name, 'metadata.json'}
                     if any(file.name not in allowed or linked(file) for file in folder.iterdir()):
                         raise OSError('Unexpected backup directory contents')
-                if not row.legacy:
-                    (row.path.parent / 'metadata.json').unlink(missing_ok=True)
                 row.path.unlink()
-                if not row.legacy:
-                    row.path.parent.rmdir()
                 cleared.append(key)
             except OSError as exc:
                 record_error(exc, 'backup.clear_failed', level='WARNING')
                 failed.append(key)
+                continue
+            if not row.legacy:
+                # The entry is cleared once its payload is removed. Keep its
+                # metadata intact when the payload is locked or inaccessible.
+                try:
+                    (row.path.parent / 'metadata.json').unlink(missing_ok=True)
+                    row.path.parent.rmdir()
+                except OSError as exc:
+                    record_error(exc, 'backup.clear_cleanup_failed', level='WARNING')
         log_event('INFO', 'backup.cleared', count=len(cleared), failures=len(failed))
     return dict(cleared=cleared, failed=failed)

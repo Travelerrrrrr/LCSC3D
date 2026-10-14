@@ -17,7 +17,7 @@ from lcsc3d.ui import main
 from lcsc3d.services import backend
 from lcsc3d.services import updater
 from lcsc3d.core import app_logging
-from lcsc3d.core.app_settings import Preferences, get_preferences, set_preferences, proxy_for_url, write_settings, read_settings
+from lcsc3d.core.app_settings import Preferences, get_preferences, set_preferences, proxy_for_url, write_settings, read_settings, initial_log_level
 from lcsc3d.core.app_paths import data_directory, temporary_directory, replace_file
 from lcsc3d.services.store_session import SessionVault
 from lcsc3d.services.store import MemorySession
@@ -200,6 +200,17 @@ class LogOutputTests(PreferencesTestCase):
 
 
 class SettingsPersistenceTests(PreferencesTestCase):
+    def test_deeply_corrupt_configuration_uses_defaults_and_preserves_original(self):
+        path = self.folder / 'corrupt-settings.json'
+        raw = '[' * 20000 + '0' + ']' * 20000
+        path.write_text(raw, encoding='utf-8')
+        self.assertEqual(initial_log_level(path), 'DEBUG')
+        self.assertEqual(read_settings(path), {})
+        self.assertEqual(path.read_text('utf-8'), raw)
+        target = self.folder / 'new-settings.json'
+        self.assertEqual(read_settings(target, path), {})
+        self.assertFalse(target.exists())
+
     def test_existing_and_invalid_preferences_get_compatible_defaults(self):
         self.assertEqual(Preferences.from_mapping({'destination': 'existing'}), Preferences())
         invalid = {'store_proxy': {'invalid': 1}, 'update_proxy': [], 'log_level': False}

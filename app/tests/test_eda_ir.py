@@ -27,6 +27,14 @@ def fixture(part='C2765186'):
 
 
 class IRTests(unittest.TestCase):
+    def test_extreme_coordinate_exponents_raise_a_domain_error(self):
+        from lcsc3d.eda.eda_ir import decimal
+        for value in ('1e999999999', '-1e999999999', '1e-999999999'):
+            with self.subTest(value=value), self.assertRaises(DownloadError):
+                decimal(value)
+        self.assertEqual(decimal('1e-12'), D('1e-12'))
+        self.assertEqual(decimal('1e-120'), D('1e-120'))
+
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)

@@ -257,6 +257,7 @@ class CommerceActions:
         products = [dict(p) for p in products]
         def collect(stop, progress):
             added, errors = [], []
+            session_expired = False
             for product in products:
                 check_cancelled(stop)
                 try:
@@ -267,19 +268,24 @@ class CommerceActions:
                     errors.append((product['part'], str(exc)))
                     record_error(exc, 'favorites.batch_item_failed', part=safe_part(product['part']))
                     if isinstance(exc, SessionExpired):
+                        session_expired = True
                         break
-            return added, errors
+            return added, errors, session_expired
         self.jobs.start('collect', collect, self.products_collected, self.favorite_add_failed)
 
     def products_collected(self, result):
-        added, errors = result
+        added, errors, session_expired = result
         self.collecting = False
-        for item in added:
-            product = item['product']
-            if product['part'] not in self.items:
-                self.items[product['part']] = product
-                self.append_row(self.favorite_table, product)
-        self.start_thumbnails(self.favorite_table); self.filter_favorites(); self.update_collect_button(); self.save_session()
+        if session_expired:
+            self.clear_session()
+        else:
+            for item in added:
+                product = item['product']
+                if product['part'] not in self.items:
+                    self.items[product['part']] = product
+                    self.append_row(self.favorite_table, product)
+            self.start_thumbnails(self.favorite_table); self.filter_favorites(); self.save_session()
+        self.update_collect_button()
         self.status.setText(msg('收藏完成 {0} 项，失败 {1} 项。', len(added), len(errors)) + (' ' + errors[0][1] if errors else ''))
         notify(self, tr('我的收藏'), self.status.text(), severity='warning' if errors else 'success')
 

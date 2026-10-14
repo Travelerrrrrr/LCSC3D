@@ -1,6 +1,7 @@
 """English UI catalog. Keys remain the Simplified Chinese source messages."""
 
 ENGLISH = {
+    '批次处理失败（{0}）；已保存的完整文件保留，错误详情已记录到日志。': 'Batch failed ({0}); completed files were kept. Error details were recorded in the log.',
     '数量': 'Quantity',
     '立创商城 · 选型与采购': 'LCSC · Parts and purchasing',
     '选型 · 资料 · 采购': 'Find parts · View details · Purchase',

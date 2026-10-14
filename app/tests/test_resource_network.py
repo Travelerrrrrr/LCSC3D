@@ -3,6 +3,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import gzip
 import json
 import os
 from pathlib import Path
@@ -87,6 +88,46 @@ class ResourceNetworkTests(unittest.TestCase):
         self.patch(patch('lcsc3d.services.backend.COMPONENT_ENDPOINTS', (base + '/components/{part}',)))
         self.patch(patch('lcsc3d.services.backend.ENDPOINT_3D_MODEL_STEP', base + '/step/{uuid}'))
         self.patch(patch('lcsc3d.services.backend.ENDPOINT_3D_MODEL', base + '/obj/{uuid}'))
+
+    def test_oversized_plain_and_gzip_resources_stop_and_release_the_pool(self):
+        self.patch(patch('lcsc3d.services.backend.MAX_RESOURCE_BYTES', 1024, create=True))
+        bodies = {'/plain': b'x' * 4096, '/gzip': gzip.compress(b'x' * 4096), '/small': b'valid'}
+        base, requests = self.serve(lambda path, count: (200, {}, bodies[path]))
+        api = backend.NetworkApi()
+        for path in ('/plain', '/gzip'):
+            with self.subTest(path=path), self.assertRaisesRegex(backend.DownloadError, '数据过大'):
+                api.fetch(base + path)
+            self.assertEqual(api.fetch(base + '/small'), b'valid')
+        self.assertEqual(len(requests), 4)
+
+    def test_truncated_headerless_gzip_is_a_recoverable_download_error(self):
+        base, requests = self.serve(lambda path, count: (200, {}, gzip.compress(b'component data')[:-5]))
+        with self.assertRaises(backend.DownloadError):
+            backend.NetworkApi().fetch(base + '/gzip')
+        self.assertLessEqual(len(requests), 2)
+
+    def test_limit_accepts_exact_size_and_concatenated_gzip_without_caching_failure(self):
+        self.patch(patch('lcsc3d.services.backend.MAX_RESOURCE_BYTES', 1024))
+        body = b'x' * 1024
+        compressed = gzip.compress(body[:512]) + gzip.compress(body[512:])
+        base, requests = self.serve(lambda path, count: (200, {'Content-Encoding': 'gzip'} if path == '/encoded' else {},
+                                                      compressed if path != '/plain' else body))
+        api = backend.NetworkApi()
+        for path in ('/plain', '/gzip', '/encoded'):
+            self.assertEqual(api.fetch(base + path), body)
+        self.assertEqual(len(requests), 3)
+
+    def test_cancellation_at_response_eof_prevents_a_successful_resource_result(self):
+        stop = threading.Event()
+        response = Mock(status=200, headers={})
+        def read(*args, **kwargs):
+            stop.set()
+            return b''
+        response.read.side_effect = read
+        self.patch(patch('lcsc3d.services.backend.connection_pool', return_value=SimpleNamespace(request=lambda *a, **kw: response)))
+        with self.assertRaises(backend.Cancelled):
+            backend.NetworkApi(stop).fetch('http://127.0.0.1/empty')
+        response.release_conn.assert_called()
 
     def test_batches_cross_29_items_and_recover_each_rate_limit_window(self):
         fixture = json.loads((Path(__file__).parent / 'fixtures/C2040.json').read_text(encoding='utf-8'))

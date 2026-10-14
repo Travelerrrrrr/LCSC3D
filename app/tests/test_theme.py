@@ -384,6 +384,11 @@ class InternationalCatalogTests(unittest.TestCase):
         with self.assertRaises(StoreError):
             client.search_results_page('STM32', page=2)
 
+    def test_missing_international_page_is_reported_instead_of_showing_no_results(self):
+        client, _ = self.client([self.discovery(), self.page([], page=2)])
+        with self.assertRaisesRegex(StoreError, 'incomplete page'):
+            client.search_results_page('STM32', page=2)
+
     def test_foreign_prices_do_not_fall_back_to_mainland_cny_amounts(self):
         raw = dict(FIXTURE['product'], productPriceList=[{'ladder': 1, 'productPrice': '7.20'}])
         self.assertEqual(international_product(raw)['price_tiers'], [])

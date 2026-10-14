@@ -86,11 +86,32 @@ class BatchWorker(QThread):
     @contextual
     def run(self):
         log_event('INFO', 'download.batch_started', count=len(self.ids))
-        results = download_batch(self.ids, self.options, self.cancelled,
-                                 lambda index, status, title: self.phase.emit(self.rows[index], status, title),
-                                 lambda index, result: self.result.emit(self.rows[index], result),
-                                 api=NetworkApi(self.cancelled, use_cache=False),
-                                 on_progress=self.progress_changed.emit)
+        published = {}
+        def publish(index, result):
+            published[index] = result
+            self.result.emit(self.rows[index], result)
+        try:
+            results = download_batch(self.ids, self.options, self.cancelled,
+                                     lambda index, status, title: self.phase.emit(self.rows[index], status, title),
+                                     publish, api=NetworkApi(self.cancelled, use_cache=False),
+                                     on_progress=self.progress_changed.emit)
+        except Exception as exc:
+            cancelled = isinstance(exc, Cancelled)
+            if cancelled:
+                log_event('INFO', 'download.batch_cancelled')
+                message = ui_text('任务已取消；已保存的完整文件保留')
+            else:
+                record_error(exc, 'download.batch_failed', stage='batch')
+                message = ui_message('批次处理失败（{0}）；已保存的完整文件保留，错误详情已记录到日志。', type(exc).__name__)
+            results = []
+            for index, part in enumerate(self.ids):
+                result = published.get(index) or Result(part, '')
+                result.status = '部分完成' if result.files else '已取消' if cancelled else '失败'
+                result.message = '；'.join(filter(None, (result.message, message)))
+                result.pending_formats.clear()
+                result.export_errors.append(str(message))
+                results.append(result)
+                publish(index, result)
         log_event('INFO', 'download.batch_completed', count=len(results), cancelled=self.cancelled.is_set())
         self.completed.emit(results)
 

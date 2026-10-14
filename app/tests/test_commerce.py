@@ -309,6 +309,30 @@ class CommerceUiTests(unittest.TestCase):
             self.dialog.append_row(self.dialog.search_table, product)
         return rows
 
+    def test_removed_product_quotes_clear_the_previous_price_widget(self):
+        table = self.dialog.search_table
+        product = dict(part='C1', title='One', min_quantity=1, quantity_step=1, details_complete=True,
+                       price_tiers=[{'quantity': 1, 'end': None, 'price': '0.125'}])
+        self.dialog.append_row(table, product)
+        table.selectRow(0)
+        self.assertIsNotNone(table.cellWidget(0, 5))
+        self.dialog.detail_loaded(dict(product, price_tiers=[]))
+        self.assertIsNone(table.cellWidget(0, 5))
+        self.assertEqual(table.item(0, 5).text(), '—')
+
+    def test_batch_favorite_expiration_clears_session_and_stops_remaining_writes(self):
+        products = [dict(part=f'C{i}', title=str(i), product_id=str(i)) for i in range(1, 4)]
+        self.client.account = {'name': 'OFFLINE'}
+        with patch.object(self.client, 'add_favorite', side_effect=[
+                {'product': products[0], 'added': True}, SessionExpired('商城登录已失效，请重新登录。')]) as add:
+            self.dialog.collect_products(products)
+            self.wait(lambda: not self.dialog.collecting and not self.dialog.has_jobs())
+            self.assertEqual(add.call_count, 2)
+        self.assertIsNone(self.dialog.client.account)
+        self.assertFalse(self.dialog.items)
+        self.assertIn('收藏完成 1 项', self.dialog.status.source_text())
+        self.assertIn('重新登录', self.dialog.status.source_text())
+
     def test_search_increment_typed_quantity_and_price_tiers_stay_in_sync(self):
         rows = [dict(part='C1', title='One', min_quantity=5, quantity_step=5, details_complete=True,
                      price_tiers=[{'quantity': 5, 'end': 45, 'price': '1.2345'},

@@ -62,6 +62,41 @@ class DiagnosticTests(unittest.TestCase):
     def assert_private_absent(self, secret):
         self.assertNotIn(secret, '\n'.join(path.read_text(encoding='utf-8') for path in self.folder.glob('*.log')))
 
+    def test_malformed_run_markers_do_not_block_crash_capture_or_later_logs(self):
+        for index, value in enumerate(([], None, 'private marker', {'pid': -1})):
+            (self.folder / f'run-{90000 + index}.json').write_text(json.dumps(value), encoding='utf-8')
+        (self.folder / 'run-90004.json').write_text('[' * 20000 + '0' + ']' * 20000, encoding='utf-8')
+        self.addCleanup(logs.stop_crash_capture)
+        logs.start_crash_capture()
+        self.assertTrue(logs.diagnostic_status()['crash_capture_active'])
+        self.assertTrue(logs.log_event('ERROR', 'test.after_invalid_marker'))
+        self.assertTrue(self.entries('test.after_invalid_marker'))
+        self.assertEqual(len(self.entries('application.marker_read_failed')), 5)
+
+    def test_unavailable_historic_files_do_not_disable_current_crash_capture(self):
+        for index in range(4):
+            (self.folder / f'LCSC3D-crash-{90000 + index}.log').write_text('old crash', encoding='utf-8')
+        marker = self.folder / 'run-90005.json'
+        marker.write_text('{}', encoding='utf-8')
+        unlink, stat = Path.unlink, Path.stat
+        def locked(path, *args, **kwargs):
+            if path.name.startswith('LCSC3D-crash-9000'):
+                raise PermissionError('PRIVATE-locked-file')
+            return unlink(path, *args, **kwargs)
+        def disappeared(path, *args, **kwargs):
+            if path == marker:
+                raise FileNotFoundError('PRIVATE-removed-marker')
+            return stat(path, *args, **kwargs)
+        self.addCleanup(logs.stop_crash_capture)
+        with patch.object(Path, 'unlink', locked), patch.object(Path, 'stat', disappeared):
+            logs.start_crash_capture()
+        self.assertTrue(logs.diagnostic_status()['crash_capture_active'])
+        self.assertTrue(logs.log_event('ERROR', 'test.after_historic_cleanup_failure'))
+        rows = [json.loads(line) for line in (self.folder / 'LCSC3D.log').read_text('utf-8').splitlines()]
+        self.assertTrue(any(row['event'] == 'application.crash_cleanup_failed' for row in rows))
+        self.assert_private_absent('PRIVATE-locked-file')
+        self.assert_private_absent('PRIVATE-removed-marker')
+
     def test_nested_thread_operations_keep_root_and_isolate_parts(self):
         barrier = threading.Barrier(2)
         @logs.traced('test.part', lambda part: {'part': part})

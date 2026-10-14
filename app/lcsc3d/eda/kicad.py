@@ -72,7 +72,8 @@ def identifier(value, fallback):
     value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', str(value)).strip(' .')
     if not value:
         value = fallback
-    if re.fullmatch(r'(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³])', value.split('.')[0], re.I):
+    if re.fullmatch(r'(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[0-9¹²³]|LPT[0-9¹²³])',
+                    value.split('.')[0].rstrip(' '), re.I):
         value = '_' + value
     if len(value) > 100:
         value = value[:80] + '_' + hashlib.sha256(value.encode()).hexdigest()[:12]

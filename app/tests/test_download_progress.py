@@ -37,6 +37,29 @@ class ProgressTests(unittest.TestCase):
         self.addCleanup(env.stop)
         self.addCleanup(close_logging)
 
+    def test_unexpected_batch_failure_finishes_and_keeps_committed_file_results(self):
+        options = backend.Options(self.folder, ('STEP',), bind_3d_models=False)
+        path = self.folder / 'C2040.step'; path.write_bytes(STEP)
+        saved = backend.Result('C2040', '成功', files=[str(path)], folder=str(self.folder))
+        def fail(parts, options, stop, progress, on_result, **kwargs):
+            on_result(0, saved)
+            raise PermissionError('PRIVATE-stage-path')
+        worker = main.BatchWorker(['C2040', 'C20197'], options)
+        completed, emitted = [], []
+        worker.completed.connect(completed.append)
+        worker.result.connect(lambda row, result: emitted.append((row, result)))
+        with patch('lcsc3d.ui.main.download_batch', side_effect=fail):
+            worker.run()
+        self.assertEqual(len(completed), 1)
+        first, second = completed[0]
+        self.assertEqual((first.status, second.status), ('部分完成', '失败'))
+        self.assertEqual(first.files, [str(path)])
+        self.assertEqual(path.read_bytes(), STEP)
+        self.assertEqual([(row, r.status) for row, r in emitted[-2:]], [(0, '部分完成'), (1, '失败')])
+        events = [json.loads(line) for line in (self.folder / 'LCSC3D/logs/LCSC3D.log').read_text('utf-8').splitlines()]
+        self.assertTrue(any(row['event'] == 'download.batch_failed' and row['error'] == 'PermissionError' for row in events))
+        self.assertNotIn('PRIVATE-stage-path', json.dumps(events))
+
     def test_single_download_reports_stages_and_reaches_full_only_after_file_commit(self):
         samples = []
         def update(value):

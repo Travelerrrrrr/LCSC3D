@@ -45,10 +45,10 @@ class NotificationHistory(QObject):
                         or any(len(item[key]) > MAX_TEXT for key in ('title', 'message', 'details'))
                         or len(item['id']) != 32 or any(c not in '0123456789abcdef' for c in item['id'])):
                     raise ValueError('Invalid message record')
-                datetime.fromisoformat(item['time'])
+                datetime.fromisoformat(item['time']).astimezone()
             self.entries = entries[:MAX_MESSAGES]
             log_event('DEBUG', 'notification.history_loaded', count=len(self.entries))
-        except (OSError, ValueError, TypeError, AttributeError) as exc:
+        except (OSError, ValueError, TypeError, AttributeError, OverflowError, RecursionError) as exc:
             self.save_failed = True
             record_error(exc, 'notification.history_load_failed', level='WARNING')
 

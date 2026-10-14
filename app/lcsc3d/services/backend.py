@@ -1,7 +1,6 @@
 """Download official models and export native AD symbol/footprint libraries."""
 from __future__ import annotations
 
-import gzip
 import io
 import json
 import os
@@ -36,8 +35,10 @@ from lcsc3d.eda.easyeda_import import parse_component
 from lcsc3d.eda.kicad import FORMATS as KICAD_FORMATS, library_name as kicad_library_name
 from lcsc3d.eda.kicad_export import export_batch as export_kicad_batch
 import certifi
+import zlib
 import urllib3
 from urllib3.util import Retry, Timeout
+from lcsc3d.services.response_data import decompress_gzip, ResponseTooLarge
 
 SVG_ENDPOINTS = (
     'https://lceda.cn/api/products/{part}/svgs',
@@ -52,6 +53,7 @@ MODEL_LIBRARY_ENDPOINTS = ('https://lceda.cn/api/components/{uuid}',
 RESOURCE_REQUEST_ATTEMPTS = 5
 RESOURCE_RETRY_BACKOFF = 5.0
 RESOURCE_MAX_AUTOMATIC_WAIT = 120.0
+MAX_RESOURCE_BYTES = 64 * 1024 * 1024
 
 
 class ResourceCooldowns:
@@ -170,11 +172,12 @@ def parse_part_numbers(text: str) -> tuple[list[str], list[str], int]:
 
 
 def safe_filename(name: str) -> str:
-    clean = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name).strip(' .')[:115]
+    clean = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name).strip(' .')[:115].rstrip(' .')
     if not clean:
         return 'model'
-    if re.fullmatch(r'(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])', clean, re.I):
-        return '_' + clean
+    if re.fullmatch(r'(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[0-9¹²³]|LPT[0-9¹²³])',
+                    clean.split('.')[0].rstrip(' '), re.I):
+        return '_' + clean[:114].rstrip(' .')
     return clean
 
 
@@ -253,15 +256,20 @@ class NetworkApi:
                         block = response.read(64 * 1024, decode_content=True)
                         if not block:
                             break
+                        if chunks.tell() + len(block) > MAX_RESOURCE_BYTES:
+                            raise DownloadError('元件资源数据过大，已停止读取（最多 64 MiB）')
                         chunks.write(block)
                     raw = chunks.getvalue()
                     status = response.status
                     response.release_conn()
                     response = None
-                    body = gzip.decompress(raw) if raw.startswith(b'\x1f\x8b') else raw
+                    body = decompress_gzip(raw, MAX_RESOURCE_BYTES, self.check_cancelled) if raw.startswith(b'\x1f\x8b') else raw
+                    self.check_cancelled()
                     log_event('DEBUG', 'resources.request_completed', bytes=len(body), status=status)
                     return body
-            except (urllib3.exceptions.HTTPError, TimeoutError, OSError) as exc:
+            except ResponseTooLarge as exc:
+                raise DownloadError('元件资源数据过大，已停止读取（最多 64 MiB）') from exc
+            except (urllib3.exceptions.HTTPError, TimeoutError, OSError, EOFError, zlib.error) as exc:
                 self.check_cancelled()
                 record_error(exc, 'resources.attempt_failed', level='WARNING', attempt=attempt + 1)
                 transient_failures += 1
@@ -633,7 +641,8 @@ def library_filename(name, format):
         name = name[:-len(suffix)]
     if (not name or name.endswith((' ', '.')) or len(name.encode('utf-16le')) > 230
             or re.search(r'[<>:"/\\|?*\x00-\x1f]', name)
-            or re.fullmatch(r'(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³])', name.split('.')[0], re.I)):
+            or re.fullmatch(r'(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[0-9¹²³]|LPT[0-9¹²³])',
+                            name.split('.')[0].rstrip(' '), re.I)):
         raise DownloadError(f'请填写有效的合并 {suffix} 文件名（不含路径或 Windows 禁用字符）')
     return name + suffix
 

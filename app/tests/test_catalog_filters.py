@@ -16,7 +16,8 @@ from PySide6.QtCore import Qt, QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication, QHeaderView
 from lcsc3d.core import app_logging as logs
 from lcsc3d.services.catalog_filters import (parse_categories, search_facets, parameter_facets, normalize_filters,
-                                            search_payload, read_categories, read_parameters, range_bounds, option_in_range)
+                                            search_payload, read_categories, read_parameters, range_bounds, option_in_range,
+                                            finite_number)
 from lcsc3d.services.store import StoreClient, StoreError, search_page_products
 from lcsc3d.selftests.catalog_fixture import categories, parameters, add_facets
 from lcsc3d.selftests.favorites_selftest import OfflineStore, fixture_search
@@ -24,6 +25,20 @@ from lcsc3d.ui.favorites import FavoritesDialog
 
 
 class FilterDataTests(unittest.TestCase):
+    def test_extreme_exponents_and_invalid_intervals_do_not_break_numeric_filters(self):
+        from decimal import Decimal
+        for value in ('1e999999999', '-1e999999999', '1e-999999999', 'NaN', 'Infinity', 'bad'):
+            with self.subTest(value=value):
+                self.assertIsNone(finite_number(value))
+        bounds = (Decimal('1'), None)
+        for option in ({'number': 3, 'end_number': 'NaN', 'interval': True},
+                       {'number': 3, 'end_number': 2, 'interval': True}):
+            self.assertFalse(option_in_range(option, bounds))
+
+    def test_empty_or_inverted_numeric_ranges_do_not_match_all_options(self):
+        self.assertIsNone(range_bounds('~', {'V': 1}))
+        self.assertIsNone(range_bounds('10V~1V', {'V': 1}))
+
     def test_numeric_range_uses_base_units_inclusive_bounds_zero_and_intervals(self):
         units = {'MB': 1048576, 'Byte': 1, 'KB': 1024}
         for value in ('32KB~64KB', '32768Byte~65536Byte', '.03125MB~.0625MB'):
@@ -177,6 +192,17 @@ class FilterUiTests(unittest.TestCase):
         self.assertFalse(emitted)
         panel.inputs['endPrice'].setText('4'); panel.apply.click(); self.assertEqual(len(emitted), 1)
         panel.clear_group(); self.assertNotIn('param_31013_n#range', panel.draft['parameters'])
+
+    def test_extreme_typed_range_is_rejected_without_losing_the_previous_choice(self):
+        panel = self.dialog.filter_panel
+        panel.begin({'catalogIdFilter': '11329'}, parameter_facets(parameters()))
+        panel.low.setText('64'); panel.high.setText('128'); panel.unit.setCurrentText('KB')
+        self.assertTrue(panel.use_range())
+        previous = copy.deepcopy(panel.draft)
+        panel.low.setText('1e999999999')
+        self.assertFalse(panel.use_range())
+        self.assertEqual(panel.draft, previous)
+        self.assertIn('有效数值范围', panel.hint.source_text())
 
     def mcu_facets(self):
         rows = parameter_facets(parameters(category=True))

@@ -195,6 +195,49 @@ class BackupTests(unittest.TestCase):
             prepare_restore(row.id, self.target)
         self.assertEqual(clear_backups([row.id])['cleared'], [row.id])
 
+    def test_locked_backup_cleanup_preserves_metadata_and_remains_restorable(self):
+        row = self.make_backup()
+        metadata = row.path.with_name('metadata.json')
+        before = metadata.read_bytes()
+        unlink = Path.unlink
+        def locked(path, *args, **kwargs):
+            if path == row.path:
+                raise PermissionError('backup is in use')
+            return unlink(path, *args, **kwargs)
+        with patch.object(Path, 'unlink', locked):
+            self.assertEqual(clear_backups([row.id]), {'cleared': [], 'failed': [row.id]})
+        self.assertEqual(metadata.read_bytes(), before)
+        self.assertFalse(list_backups()[0].error)
+        restore_backup(prepare_restore(row.id, self.target))
+        self.assertEqual(self.target.read_bytes(), self.original)
+
+    def test_invalid_backup_timestamp_is_marked_corrupt_without_breaking_the_list(self):
+        row = self.make_backup()
+        metadata = row.path.with_name('metadata.json')
+        data = json.loads(metadata.read_text('utf-8'))
+        for created in ('0001-01-01T00:00:00+14:00', '9999-12-31T23:59:59-14:00', '2026-10-14'):
+            with self.subTest(created=created):
+                data['created'] = created
+                metadata.write_text(json.dumps(data), encoding='utf-8')
+                rows = list_backups()
+                self.assertEqual(len(rows), 1)
+                self.assertTrue(rows[0].error)
+                with self.assertRaises(DownloadError):
+                    prepare_restore(row.id, self.target)
+
+    def test_completed_backup_cleanup_reports_removed_entry_when_only_metadata_is_locked(self):
+        row = self.make_backup()
+        metadata = row.path.with_name('metadata.json')
+        unlink = Path.unlink
+        def locked(path, *args, **kwargs):
+            if path == metadata:
+                raise PermissionError('metadata is in use')
+            return unlink(path, *args, **kwargs)
+        with patch.object(Path, 'unlink', locked):
+            self.assertEqual(clear_backups([row.id]), {'cleared': [row.id], 'failed': []})
+        self.assertEqual(list_backups(), [])
+        self.assertEqual(self.target.read_bytes(), self.changed)
+
 
 class BackupUiTests(unittest.TestCase):
     def test_slow_backup_scan_leaves_ui_responsive_and_preserves_close_wait(self):

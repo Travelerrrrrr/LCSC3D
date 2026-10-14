@@ -34,9 +34,11 @@ def decimal(value):
         result = D(str(value))
     except (InvalidOperation, ValueError, TypeError) as exc:
         raise DownloadError('EDA 坐标或尺寸无效') from exc
-    if not result.is_finite() or abs(result) > 10_000_000:
+    # Preserve near-zero rotation terms, but bound fixed-point expansion of
+    # corrupted exponents before converters format the value as text.
+    if not result.is_finite() or result.copy_abs() > 10_000_000 or result and result.adjusted() < -1000:
         raise DownloadError('EDA 坐标或尺寸超出支持范围')
-    return result
+    return result if result else ZERO
 
 
 @dataclass(frozen=True)

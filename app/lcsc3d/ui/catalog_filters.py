@@ -9,7 +9,7 @@ from lcsc3d.ui.ui_components import surface, IconButton
 from lcsc3d.core.i18n import text as tr, message as msg
 from lcsc3d.core.app_logging import log_event
 from lcsc3d.services.catalog_filters import (DEFAULTS, SORTS, normalize_filters, filter_count,
-                                           range_input, range_bounds, option_in_range)
+                                           range_input, range_bounds, option_in_range, finite_number)
 from lcsc3d.services.store import StoreError
 
 
@@ -345,8 +345,8 @@ class FilterPanel(QWidget):
         if not group or not group['key'].startswith('param_') or not unit or not (low or high):
             return True
         try:
-            values = [Decimal(value) for value in (low, high) if value]
-            if any(not v.is_finite() or abs(v) > Decimal('1e18') for v in values) or low and high and Decimal(low) > Decimal(high):
+            values = [finite_number(value) for value in (low, high) if value]
+            if any(v is None or v.copy_abs() > Decimal('1e18') for v in values) or low and high and Decimal(low) > Decimal(high):
                 raise ValueError()
         except (InvalidOperation, ValueError):
             self.hint.setText(tr('请输入有效数值范围，最小值不能大于最大值。'))

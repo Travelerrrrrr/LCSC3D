@@ -32,7 +32,9 @@ SORTS = [('综合排序', 0), ('价格从低到高', 1), ('价格从高到低', 
 def finite_number(value):
     try:
         number = Decimal(str(value))
-        return number if number.is_finite() and abs(number) <= Decimal('1e30') else None
+        if not number.is_finite() or number.copy_abs() > Decimal('1e30') or number and number.adjusted() < -30:
+            return None
+        return number if number else Decimal(0)
     except InvalidOperation:
         return None
 
@@ -42,6 +44,8 @@ def range_input(value, units):
     if value.count('~') != 1:
         return None
     low, high = value.split('~')
+    if not (low or high):
+        return None
     for unit in sorted(units, key=len, reverse=True):
         if unit and all(not part or part.endswith(unit) and finite_number(part[:-len(unit)]) is not None
                         for part in (low, high)):
@@ -57,7 +61,8 @@ def range_bounds(value, units):
     scale = finite_number(units[unit])
     if scale is None or scale <= 0:
         return None
-    return (finite_number(low) * scale if low else None, finite_number(high) * scale if high else None)
+    bounds = (finite_number(low) * scale if low else None, finite_number(high) * scale if high else None)
+    return None if bounds[0] is not None and bounds[1] is not None and bounds[0] > bounds[1] else bounds
 
 
 def option_in_range(option, bounds):
@@ -65,7 +70,8 @@ def option_in_range(option, bounds):
     low, high = bounds
     start = finite_number(option.get('number'))
     end = finite_number(option.get('end_number')) if option.get('interval') else start
-    return ((low is None or start is not None and start >= low)
+    return (start is not None and end is not None and end >= start
+            and (low is None or start >= low)
             and (high is None or end is not None and end <= high))
 
 

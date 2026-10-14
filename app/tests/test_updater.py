@@ -66,6 +66,25 @@ class UpdateTests(unittest.TestCase):
         with patch.object(self.client, '_open', side_effect=self.open):
             return self.client.download(self.release, self.target)
 
+    def test_cleanup_skips_invalid_results_and_continues_to_completed_stages(self):
+        malformed = self.update_directory / (updater.STAGE_PREFIX + 'invalid')
+        complete = self.update_directory / (updater.STAGE_PREFIX + 'complete')
+        malformed.mkdir(parents=True); complete.mkdir()
+        (malformed / 'result.json').write_text('[]', encoding='utf-8')
+        (malformed / 'previous.exe').write_bytes(OLD)
+        (complete / 'result.json').write_text('{"status":"success"}', encoding='utf-8')
+        updater.cleanup_updates(self.update_directory)
+        self.assertEqual((malformed / 'previous.exe').read_bytes(), OLD)
+        self.assertFalse(complete.exists())
+
+    def test_invalid_startup_ack_is_ignored_without_aborting_the_helper(self):
+        manifest = self.stage()
+        process = SimpleNamespace(poll=lambda: 0)
+        for raw in ('[]', '[' * 20000 + '0' + ']' * 20000):
+            with self.subTest(raw=raw[:32]):
+                (manifest.parent / 'ack.json').write_text(raw, encoding='utf-8')
+                self.assertFalse(updater._wait_for_ack(manifest.parent, 'a' * 48, process, seconds=.1))
+
     def test_numeric_version_comparison_and_older_release(self):
         self.assertGreater(updater.version_tuple('v2.10.0'), updater.version_tuple('2.9.9'))
         self.assertIsNone(updater.parse_release(release_data(), '2.1.0'))

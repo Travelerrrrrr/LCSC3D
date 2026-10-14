@@ -382,9 +382,9 @@ def _wait_for_ack(stage, nonce, process, seconds=60):
     while time.monotonic() < deadline:
         try:
             ack = json.loads((stage / 'ack.json').read_text(encoding='utf-8'))
-            if ack.get('nonce') == nonce:
+            if isinstance(ack, dict) and ack.get('nonce') == nonce:
                 return True
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             pass
         if process.poll() is not None:
             return False
@@ -501,9 +501,11 @@ def cleanup_updates(directory):
             continue
         try:
             result = json.loads((stage / 'result.json').read_text(encoding='utf-8'))
+            if not isinstance(result, dict):
+                raise ValueError('Invalid update result structure')
             if result.get('status') == 'success':
                 shutil.rmtree(stage)
                 log_event('DEBUG', 'update.stage_cleaned', update_id=stage.name)
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, RecursionError) as exc:
             # Running helpers are locked on Windows; a subsequent startup retries.
             record_error(exc, 'update.cleanup_deferred', level='DEBUG')

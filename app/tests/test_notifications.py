@@ -46,6 +46,35 @@ class NotificationTests(unittest.TestCase):
     def entries(self):
         return [json.loads(line) for line in (self.folder/'LCSC3D/logs/LCSC3D.log').read_text('utf-8').splitlines()]
 
+    def test_deeply_corrupt_history_recovers_and_accepts_new_messages(self):
+        path = self.window.notifications.history.path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('[' * 20000 + '0' + ']' * 20000, encoding='utf-8')
+        history = NotificationHistory()
+        self.assertTrue(history.save_failed)
+        self.assertEqual(history.entries, [])
+        history.add('Recovered', 'new message', 'info')
+        self.assertFalse(history.save_failed)
+        self.assertEqual(NotificationHistory().entries, history.entries)
+
+    def test_unrenderable_history_timestamps_do_not_break_messages_page(self):
+        history = self.window.notifications.history
+        history.add('Old', 'saved message', 'info')
+        data = json.loads(history.path.read_text('utf-8'))
+        for stamp in ('0001-01-01T00:00:00+14:00', '9999-12-31T23:59:59-14:00'):
+            with self.subTest(stamp=stamp):
+                data['entries'][0]['time'] = stamp
+                history.path.write_text(json.dumps(data), encoding='utf-8')
+                recovered = NotificationHistory()
+                self.assertTrue(recovered.save_failed)
+                self.assertEqual(recovered.entries, [])
+                recovered.add('Recovered', 'new message', 'success')
+                from lcsc3d.ui.messages_ui import MessagesPage
+                page = MessagesPage(recovered, self.window)
+                self.assertEqual(page.table.rowCount(), 1)
+                self.assertEqual(page.table.item(0, 2).text(), 'Recovered')
+                page.deleteLater()
+
     def test_newest_notice_stays_top_right_and_older_notices_slide_down(self):
         first=notify(self.window,'First','one',persistent=True)
         QTest.qWait(280)

@@ -138,6 +138,8 @@ class InternationalStoreClient:
             raise StoreError('Please enter a part number or a more specific product keyword.')
         if not isinstance(rows, list) or total is None or len(rows) > SEARCH_PAGE_SIZE:
             raise StoreError('The international catalog returned an incomplete page. Please retry.')
+        if not rows and total > (page - 1) * SEARCH_PAGE_SIZE:
+            raise StoreError('The international catalog returned an incomplete page. Please retry.')
         pages = (total + SEARCH_PAGE_SIZE - 1) // SEARCH_PAGE_SIZE
         if page > max(1, pages):
             raise StoreError('This search page no longer exists. Please search again.')

@@ -132,7 +132,7 @@ def read_settings(path, legacy_path=None):
                 return {}
             log_event('DEBUG', 'settings.loaded', origin='app_data')
             return value
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, RecursionError) as exc:
             record_error(exc, 'settings.read_failed', level='WARNING')
             return {}
     if legacy_path is None:
@@ -146,7 +146,7 @@ def read_settings(path, legacy_path=None):
     except FileNotFoundError:
         log_event('DEBUG', 'settings.defaults_used')
         return {}
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         record_error(exc, 'settings.legacy_read_failed', level='WARNING')
         return {}
     try:
@@ -165,5 +165,5 @@ def initial_log_level(path):
     """Read only the threshold before startup diagnostics are configured."""
     try:
         return Preferences.from_mapping(json.loads(Path(path).read_text(encoding='utf-8'))).log_level
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return 'DEBUG'

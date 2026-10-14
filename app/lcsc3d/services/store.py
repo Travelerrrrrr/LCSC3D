@@ -23,6 +23,7 @@ import zlib
 
 from lcsc3d.services.backend import shared_ssl_context
 from lcsc3d.services.pooled_http import PooledHandler
+from lcsc3d.services.response_data import decompress_gzip, ResponseTooLarge
 from lcsc3d.core.errors import Cancelled
 from lcsc3d.services.store_crypto import encrypt_login_value, decode_login_values
 from lcsc3d.services.store_diagnostics import record_request_error
@@ -512,9 +513,7 @@ class MemorySession:
                         chunks.write(chunk)
                     body = chunks.getvalue()
                     if response.headers.get('Content-Encoding') == 'gzip' or body.startswith(b'\x1f\x8b'):
-                        body = gzip.decompress(body)
-                        if len(body) > limit:
-                            raise StoreError('商城返回的数据过大，已停止读取。')
+                        body = decompress_gzip(body, limit, lambda: check_cancelled(cancelled))
                     check_cancelled(cancelled)
                     log_event('DEBUG', 'store.request_completed', operation=operation, bytes=len(body),
                               elapsed_ms=round((time.monotonic() - started) * 1000))
@@ -528,6 +527,8 @@ class MemorySession:
                 failed(exc, '请求地址或代理配置无效，请检查代理设置。')
             except http.client.HTTPException as exc:
                 failed(exc, '网络响应异常或不完整，请检查网络或代理后重试。')
+            except ResponseTooLarge:
+                raise StoreError('商城返回的数据过大，已停止读取。') from None
             except (gzip.BadGzipFile, EOFError, zlib.error) as exc:
                 failed(exc, '压缩响应损坏或不完整，请检查网络或代理后重试。')
             except urllib.error.URLError as exc:

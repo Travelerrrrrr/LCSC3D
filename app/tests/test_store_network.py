@@ -10,6 +10,7 @@ import ssl
 import sys
 import tempfile
 import threading
+import tracemalloc
 import unittest
 import urllib.error
 from unittest.mock import MagicMock, patch
@@ -36,6 +37,23 @@ class IsolatedDiagnostics(unittest.TestCase):
 
 
 class StoreNetworkTests(IsolatedDiagnostics):
+    def test_gzip_size_limit_applies_during_decompression(self):
+        session = MemorySession()
+        payload = gzip.compress(b'x' * (2 * 1024 * 1024))
+        response = MagicMock()
+        response.headers = {'Content-Encoding': 'gzip'}
+        response.read.side_effect = [payload, b'']
+        response.__enter__.return_value = response
+        with patch.object(session.opener, 'open', return_value=response):
+            tracemalloc.start()
+            try:
+                with self.assertRaisesRegex(StoreError, '数据过大'):
+                    session.request(PASSPORT, limit=4096)
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+        self.assertLess(peak, 1024 * 1024, 'An oversized response must not be fully expanded in memory')
+
     def start_broken_server(self, mode):
         requests = []
 

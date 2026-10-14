@@ -239,6 +239,27 @@ class Tests(unittest.TestCase):
         self.assertNotIn('/', safe_filename('../../CON:<bad>'))
         self.assertEqual(safe_filename('CON'), '_CON')
 
+    def test_filenames_with_device_stems_and_truncated_dots_are_writable(self):
+        for name in ('CON.txt', 'nul.part', 'COM1.lib', 'LPT9.model', 'COM¹.txt',
+                     'LPT².pcb', 'x' * 114 + '.suffix', 'x' * 114 + ' suffix'):
+            with self.subTest(name=name):
+                clean = safe_filename(name)
+                self.assertFalse(Path(clean).is_reserved(), clean)
+                self.assertEqual(clean, clean.rstrip(' .'))
+                path = self.folder / (clean + '.SchLib')
+                atomic_write(path, b'complete library')
+                self.assertEqual(path.read_bytes(), b'complete library')
+
+    def test_custom_library_names_reject_device_stems_before_export(self):
+        from lcsc3d.services.backend import library_filename
+        from lcsc3d.eda.kicad import library_name
+        for name in ('CON .extra', 'CONIN$', 'CONOUT$', 'LPT1 .extra'):
+            with self.subTest(name=name):
+                with self.assertRaises(DownloadError):
+                    library_filename(name, 'SCHLIB')
+                with self.assertRaises(DownloadError):
+                    library_name(name)
+
     def test_unsupported_formats_are_rejected_before_network_access(self):
         for formats in (('WRL',), ('SYMBOL',), ('FOOTPRINT',),
                         ('JSON',), ('SVG',), ('STEP', 'SYMBOL'), ()):

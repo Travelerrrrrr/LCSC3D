@@ -1256,6 +1256,7 @@ class FavoritesDialog(CommerceActions, CatalogActions, QDialog):
         self.search_table.setItem(row, 6, cell)
         tiers = product.get('price_tiers') or []
         if not tiers:
+            self.search_table.removeCellWidget(row, 5)
             cell = QTableWidgetItem('—')
             cell.setToolTip(ui_text('商城暂未提供可显示的价格。'))
             self.search_table.setItem(row, 5, cell)

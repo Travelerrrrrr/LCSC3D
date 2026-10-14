@@ -365,18 +365,33 @@ def start_crash_capture():
     global _crash_stream, _run_marker
     import faulthandler
     folder = get_log_directory()
+    def historic_files(pattern):
+        rows = []
+        for path in folder.glob(pattern):
+            try:
+                if path.is_symlink() or path.is_junction() or not path.is_file():
+                    continue
+                rows.append((path.stat().st_mtime, path))
+            except OSError as exc:
+                record_error(exc, 'application.crash_cleanup_failed', level='WARNING')
+        return [path for _, path in sorted(rows)]
     try:
-        completed = [path for path in folder.glob('LCSC3D-crash-*.log')
+        completed = [path for path in historic_files('LCSC3D-crash-*.log')
                      if not (folder / ('run-' + path.stem.removeprefix('LCSC3D-crash-') + '.json')).exists()]
-        for path in sorted(completed, key=lambda value: value.stat().st_mtime, reverse=True)[3:]:
-            path.unlink(missing_ok=True)
-        markers = sorted(folder.glob('run-*.json'), key=lambda path: path.stat().st_mtime)
+        for path in completed[:-3]:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                record_error(exc, 'application.crash_cleanup_failed', level='WARNING')
+        markers = historic_files('run-*.json')
         for path in markers:
             try:
                 previous = json.loads(path.read_text(encoding='utf-8'))
+                if not isinstance(previous, dict):
+                    raise ValueError('Invalid run marker structure')
                 pid = previous.get('pid')
-                if type(pid) is not int:
-                    continue
+                if type(pid) is not int or not 0 < pid <= 0xffffffff:
+                    raise ValueError('Invalid run marker process')
                 # Do not label a second concurrently-running copy as a crash.
                 if sys.platform == 'win32':
                     import ctypes
@@ -399,7 +414,8 @@ def start_crash_capture():
                 log_event('WARNING', 'application.previous_unclean_exit', previous_pid=pid,
                           previous_session=identity if isinstance(identity, str) and re.fullmatch('[a-f0-9]{32}', identity) else None)
                 path.unlink()
-            except (OSError, ValueError):
+            except (OSError, ValueError, RecursionError) as exc:
+                record_error(exc, 'application.marker_read_failed', level='WARNING')
                 continue
         _run_marker = folder / ('run-' + str(os.getpid()) + '.json')
         _run_marker.write_text(json.dumps({'pid': os.getpid(), 'session_id': _session_id}), encoding='utf-8')
