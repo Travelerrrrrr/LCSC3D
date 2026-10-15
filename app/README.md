@@ -129,7 +129,7 @@ Windows 10/11 x64 便携软件，用嘉立创商城 C 编号下载官方 STEP/OB
 - **明暗模式 / Appearance**：默认浅色，可选择跟随系统或深色。选择跟随系统后，软件运行期间也会响应系统主题变化。已保存的个人选择继续沿用。
 - **APP 配色 / Accent color**：默认品牌蓝 `#087AF5`，与新的蓝色 L Logo 一致；可选青绿、蓝色、紫色、玫红、橙色，或点击 **选择颜色… / Choose color…** 自定义颜色。配色预览在设置中显示；保存后应用于按钮、选中状态、进度条等区域。
 - **按钮文字颜色 / Button text color**：自动、白色、黑色、自定义。点击 **选择文字颜色… / Choose text color…** 可选任意文字颜色；作用于彩色按钮和选中项，包括“开始下载”与选中的“3D 模型”。手动颜色在切换明暗模式和 APP 配色后保留；选择“自动”恢复按背景对比度选黑字或白字。想使用青绿配白字时，选择“青绿”及“白色”后保存。
-- **界面字体 / Interface font**：下拉列表与选择框同宽，最多显示 8 项，其余字体可滚动查看，也支持方向键选择和 Esc 收起。选中后在下方显示配色与字体预览。保存后应用于主窗口、各页面、菜单、表格及 3D 预览操作提示。**恢复默认 / Reset to default** 选回默认字体，点击保存生效；换电脑后找不到原字体时使用默认可用字体。此设置修改界面字体，不更改导出库或官方符号/封装中的文字。
+- **界面字体 / Interface font**：默认选择“跟随系统字体（默认）”，按当前电脑的系统界面字体显示。也可选择已安装的字体；下拉列表与选择框同宽，最多显示 8 项，其余字体可滚动查看，也支持方向键选择和 Esc 收起。选中后在下方显示配色与字体预览。保存后应用于主窗口、各页面、菜单、表格及 3D 预览操作提示。**恢复默认 / Reset to default** 选回跟随系统字体，点击保存生效；换电脑后找不到原字体时也跟随系统。此设置修改界面字体，不更改导出库或官方符号/封装中的文字。
 
 - **界面字号 / Font size**：支持 10–24px，默认 13px。可以输入数值，也可以点击旁边的减号、加号逐级调整；下方预览立即更新，保存后应用并记住。此行的“恢复默认”仅重置字号，保留已选字体。标题、提示文字、列表行高与 3D 预览操作提示同步调整；大字号超出主窗口时可滚动访问全部内容。
 
@@ -141,7 +141,7 @@ Windows 10/11 x64 便携软件，用嘉立创商城 C 编号下载官方 STEP/OB
 
 **English quick start:** Open **Settings → Appearance**, select **English**, choose **Follow system / Light / Dark** and an accent color, then click **Save**. Open **LCSC International** to search by C-number, MPN or keyword. Broad searches include a category selector. Check products and click **Add to download list**. Prices use USD. International sign-in and account favorites are managed on LCSC.com.
 
-For white text on teal buttons, set **Button text color → White**. **Choose text color…** opens a custom color picker. Select an installed font under **Interface font**, or click **Reset to default**. Preview changes in Settings, then click **Save** to apply and remember them.
+For white text on teal buttons, set **Button text color → White**. **Choose text color…** opens a custom color picker. **Interface font** follows the system font by default. Select an installed font if preferred, or click **Reset to default** to follow the system again. Preview changes in Settings, then click **Save** to apply and remember them.
 
 程序内部文件统一存放在 `%LOCALAPPDATA%/LCSC3D/`：配置和加密会话位于根目录，日志位于 `logs/`，诊断 ZIP 位于 `diagnostics/`，缓存位于 `cache/`，临时文件位于 `temp/`，单文件 EXE 的运行时解压位于 `runtime/`，更新下载、计划和备份位于 `updates/`。正常启动和关闭不在 EXE 目录生成配置或日志。模型和元件库默认保存到 `downloads/`，也可主动选择其他导出目录。
 

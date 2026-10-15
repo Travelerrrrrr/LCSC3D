@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal, QEvent
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QHeaderView, QProgressBar, QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QVBoxLayout, QWidget, QAbstractItemView)
 from lcsc3d.ui.localized_widgets import (QCheckBox, QComboBox, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem)
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
@@ -31,7 +31,7 @@ from lcsc3d.ui.update_ui import UpdateDialog, StartupUpdateCheck
 from lcsc3d.services.updater import acknowledge_update, cleanup_updates, launch_update
 from lcsc3d.ui.favorites import FavoritesDialog, normalize_items
 from lcsc3d.core.app_settings import Preferences, set_preferences, write_settings, read_settings, initial_log_level
-from lcsc3d.ui.app_theme import theme_manager, colors, stylesheet
+from lcsc3d.ui.app_theme import theme_manager, colors, stylesheet, ui_font
 from lcsc3d.core.i18n import set_language, render
 from lcsc3d.core.app_logging import (configure_logging, log_event, set_log_level, record_error, traced,
                          new_context, current_context, log_context, contextual, submit_logged,
@@ -2368,7 +2368,7 @@ def main():
     app.setApplicationName('LCSC3D')
     app.setApplicationVersion(VERSION)
     app.setStyle('Fusion')
-    app.setFont(QFont('Microsoft YaHei UI', 9))
+    app.setFont(ui_font())
     app.setStyleSheet(STYLES)
     logging.getLogger().setLevel(logging.ERROR)
     test_destination = next((value for value in (args.self_test, args.self_test_ad, args.self_test_favorites,

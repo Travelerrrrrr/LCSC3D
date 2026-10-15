@@ -1,6 +1,6 @@
 """Paint readable product introductions without creating a widget per row."""
 from PySide6.QtCore import Qt, QRectF, QPointF, QSize, QEvent
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QTextLayout, QTextOption
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QTextLayout, QTextOption
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle, QStyleOptionViewItem
 
 from lcsc3d.core.i18n import text as tr, render
@@ -102,6 +102,7 @@ class ProductSummaryDelegate(QStyledItemDelegate):
         muted = QColor(tokens['on_accent'] if selected else tokens['muted'] if enabled else tokens['disabled'])
         title, metadata, description, parameters = summary_lines(product)
         painter.save()
+        painter.setRenderHint(QPainter.TextAntialiasing)
         painter.setClipRect(prepared.rect)
         rect = QRectF(prepared.rect).adjusted(10, 10, -10, -8)
         font = QFont(prepared.font)

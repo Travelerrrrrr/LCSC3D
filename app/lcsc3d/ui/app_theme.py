@@ -5,12 +5,13 @@ import tempfile
 from pathlib import Path
 from xml.sax.saxutils import escape
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QColor, QPalette, QFont, QFontDatabase
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QColor, QPalette, QFont, QFontDatabase, QFontInfo
+from PySide6.QtWidgets import QApplication, QAbstractItemView
 
 from lcsc3d.core.app_settings import Preferences, DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_ACCENT
 from lcsc3d.core.app_paths import data_directory
 from lcsc3d.core.assets import RESOURCE_ROOT
+from lcsc3d.core.app_logging import log_event
 
 
 def material_stylesheet(c):
@@ -90,9 +91,28 @@ def colors(dark=False, accent=DEFAULT_ACCENT, accent_text='auto'):
 
 
 def effective_font_family(requested):
-    """Portable preferences may name a font not installed on this computer."""
+    """Resolve the portable system choice, or fall back for a missing font."""
+    system_family = QFontDatabase.systemFont(QFontDatabase.GeneralFont).family()
+    if requested == DEFAULT_FONT_FAMILY:
+        return system_family
     families = {family.casefold(): family for family in QFontDatabase.families()}
-    return families.get(requested.casefold()) or families.get(DEFAULT_FONT_FAMILY.casefold()) or QFontDatabase.systemFont(QFontDatabase.GeneralFont).family()
+    return families.get(requested.casefold()) or system_family
+
+
+def ui_font(family=DEFAULT_FONT_FAMILY, size=DEFAULT_FONT_SIZE):
+    """Use smooth outline glyphs at every display scale, including 100%.
+
+    DirectWrite's default small-font hinting uses GDI-compatible rendering at
+    100%. Request symmetric antialiasing without grid fitting instead, so CJK
+    curves and diagonals do not snap to hard pixel steps. Keep subpixel AA
+    available for opaque widget surfaces; Qt handles transparent targets.
+    """
+    font = (QFont(QFontDatabase.systemFont(QFontDatabase.GeneralFont))
+            if family == DEFAULT_FONT_FAMILY else QFont(family))
+    font.setPixelSize(size)
+    font.setStyleStrategy(QFont.PreferAntialias | QFont.ForceOutline)
+    font.setHintingPreference(QFont.PreferNoHinting)
+    return font
 
 
 def typography(size=DEFAULT_FONT_SIZE):
@@ -166,6 +186,12 @@ class ThemeManager(QObject):
         self.tokens = colors()
         self.applied = False
         app.styleHints().colorSchemeChanged.connect(self.system_changed)
+        app.fontChanged.connect(self.system_font_changed)
+
+    def system_font_changed(self, _font):
+        if (self.applied and self.preferences.font_family == DEFAULT_FONT_FAMILY
+                and effective_font_family(DEFAULT_FONT_FAMILY) != self.tokens['font_family']):
+            self.apply(self.preferences)
 
     def system_changed(self, scheme):
         if self.preferences.theme_mode == 'system':
@@ -183,9 +209,19 @@ class ThemeManager(QObject):
             return
         self.tokens = c
         self.applied = True
-        font = QFont(c['font_family'])
-        font.setPixelSize(preferences.font_size)
+        font = ui_font(c['font_family'], preferences.font_size)
         self.app.setFont(font)
+        # Item views copy QApplication's class font during construction. A
+        # later global font change does not replace that explicit font. Set
+        # the default for future views and repair the rendering properties of
+        # existing ones, preserving their sizes, weights and stylesheet roles.
+        self.app.setFont(font, 'QAbstractItemView')
+        for widget in self.app.allWidgets():
+            if isinstance(widget, QAbstractItemView):
+                view_font = widget.font()
+                view_font.setStyleStrategy(font.styleStrategy())
+                view_font.setHintingPreference(font.hintingPreference())
+                widget.setFont(view_font)
         palette = QPalette()
         roles = {'Window': 'bg', 'WindowText': 'text', 'Base': 'field', 'AlternateBase': 'surface',
                  'ToolTipBase': 'surface', 'ToolTipText': 'text', 'Text': 'text', 'Button': 'surface',
@@ -198,6 +234,14 @@ class ThemeManager(QObject):
         self._stylesheet = material_stylesheet(c) + '\n' + stylesheet(c)
         self.app.setPalette(palette)
         self.app.setStyleSheet(self._stylesheet)
+        log_event('INFO', 'appearance.font_applied', font_family=c['font_family'],
+                  font_source='system' if preferences.font_family == DEFAULT_FONT_FAMILY else 'custom',
+                  resolved_family=QFontInfo(self.app.font()).family(), font_pixel_size=font.pixelSize(),
+                  style_strategy=font.styleStrategy().value, hinting=font.hintingPreference().name,
+                  platform=self.app.platformName(), screens=[
+                      dict(device_pixel_ratio=screen.devicePixelRatio(),
+                           logical_dpi=round(screen.logicalDotsPerInch(), 2))
+                      for screen in self.app.screens()])
         self.changed.emit()
 
 

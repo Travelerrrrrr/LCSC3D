@@ -194,7 +194,7 @@ Parts without 3D models may still have exportable symbols and footprints. One fo
 
 ## Settings, diagnostics and updates
 
-**Settings** provides Simplified Chinese / English, system / light / dark themes, colors, button text colors, fonts and 10–24px text sizes. English uses LCSC International with English descriptions and USD prices. International sign-in and favorites are managed on LCSC.com; mainland and international account sessions are separate.
+**Settings** provides Simplified Chinese / English, system / light / dark themes, colors, button text colors and 10–24px text sizes. The interface follows the system font by default, with an option to choose an installed font. English uses LCSC International with English descriptions and USD prices. International sign-in and favorites are managed on LCSC.com; mainland and international account sessions are separate.
 
 Storefront and update requests can independently use the system proxy or direct connections. **Diagnostics** lets you choose log levels, open, package or clear logs. Logs cover downloads, AD / KiCad conversion, file replacement and recovery. Diagnostic packages exclude credentials, and logging and crash capture continue after clearing. AD append and project changes support automatic backups, available under **Settings → Backups**.
 

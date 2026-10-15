@@ -5,16 +5,16 @@ import sys
 from lcsc3d.core.assets import SOURCE_APP_DIR
 
 from PySide6.QtCore import Qt, QUrl, QThread
-from PySide6.QtGui import QColor, QDesktopServices, QPixmap, QIcon, QFont, QFontDatabase
+from PySide6.QtGui import QColor, QDesktopServices, QPixmap, QIcon, QFontDatabase
 from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QScrollArea, QWidget, QSpinBox, QAbstractSpinBox, QStackedWidget, QButtonGroup, QFrame)
 from lcsc3d.ui.localized_widgets import (QComboBox, QDialog, QFormLayout, QGroupBox, QLabel, QPushButton)
 
 from lcsc3d.core.app_settings import (LOG_LEVELS, PROXY_OPTIONS, Preferences, LANGUAGES,
                           THEME_MODES, ACCENT_COLORS, DEFAULT_ACCENT, DEFAULT_FONT_FAMILY,
                           DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE)
-from lcsc3d.ui.app_theme import effective_font_family, foreground
+from lcsc3d.ui.app_theme import effective_font_family, foreground, ui_font
 from lcsc3d.ui.ui_components import IconButton, title_block, scroll_page
-from lcsc3d.ui.shell_ui import AnchoredComboBox as NativeComboBox, choose_color, notify
+from lcsc3d.ui.shell_ui import choose_color, notify
 from shiboken6 import isValid
 from lcsc3d.core.app_logging import (get_log_directory, log_event, record_error, logging_health,
                          contextual, new_context)
@@ -201,19 +201,21 @@ class SettingsDialog(QDialog):
         font_row = QHBoxLayout()
         # Keep the full font list compact; the native font picker widens its
         # preview popup and Fusion's menu mode ignores maxVisibleItems.
-        self.font_combo = NativeComboBox()
-        self.font_combo.addItems(QFontDatabase.families())
-        self.font_combo.setSizeAdjustPolicy(NativeComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.font_combo = QComboBox()
+        self.font_combo.addItem(ui_text('跟随系统字体（默认）'), DEFAULT_FONT_FAMILY)
+        for family in QFontDatabase.families():
+            self.font_combo.addItem(family, family)
+        self.font_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.font_combo.setMinimumContentsLength(18)
         self.font_combo.setMaxVisibleItems(8)
         self.font_combo.setStyleSheet('QComboBox { combobox-popup: 0; } '
                                      'QComboBox QAbstractItemView { padding:0; } '
                                      'QComboBox QAbstractItemView::item { min-height:24px; padding:0 4px; margin:0; }')
         self.font_combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.font_combo.setCurrentText(effective_font_family(preferences.font_family))
+        self.font_combo.setCurrentIndex(max(0, self.font_combo.findData(preferences.font_family)))
         self.reset_font_button = QPushButton(ui_text('恢复默认'))
         self.reset_font_button.setAutoDefault(False)
-        self.reset_font_button.clicked.connect(lambda: self.font_combo.setCurrentText(effective_font_family(DEFAULT_FONT_FAMILY)))
+        self.reset_font_button.clicked.connect(lambda: self.font_combo.setCurrentIndex(0))
         font_row.addWidget(self.font_combo, 1)
         font_row.addWidget(self.reset_font_button)
         theme_form.addRow(ui_text('界面字体'), font_row)
@@ -376,11 +378,11 @@ class SettingsDialog(QDialog):
         text_color = self.text_color_combo.currentData()
         if text_color == 'auto':
             text_color = foreground(value)
-        font = QFont(self.font_combo.currentText())
-        font.setPixelSize(self.font_size_spin.value())
+        selected_family = self.font_combo.currentData() or DEFAULT_FONT_FAMILY
+        font = ui_font(effective_font_family(selected_family), self.font_size_spin.value())
         self.color_preview.setFont(font)
         self.color_preview.setText(ui_text('配色与字体预览 · ') + 'LCSC3D Aa 123 · ' + value.upper())
-        family = self.font_combo.currentText().replace('\\', '\\\\').replace('"', '\\"')
+        family = font.family().replace('\\', '\\\\').replace('"', '\\"')
         self.color_preview.setStyleSheet(ui_message('background:{0};color:{1};font-size:{2}px;padding:7px;border-radius:6px;font-family:"{3}";',
                                                     value, text_color, self.font_size_spin.value(), family))
 
@@ -416,7 +418,8 @@ class SettingsDialog(QDialog):
                                   theme_mode=self.theme_mode_combo.currentData(),
                                   accent_color=self.accent_combo.currentData(),
                                   accent_text_color=self.text_color_combo.currentData(),
-                                  font_family=self.font_combo.currentText(), font_size=self.font_size_spin.value(),
+                                  font_family=self.font_combo.currentData() or DEFAULT_FONT_FAMILY,
+                                  font_size=self.font_size_spin.value(),
                                   auto_backup=self.backup_panel.auto_box.isChecked())
         if self.save(preferences):
             self.accept()

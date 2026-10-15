@@ -430,6 +430,7 @@ class SettingsWindowTests(PreferencesTestCase):
         from lcsc3d.core.app_settings import DEFAULT_FONT_FAMILY
         self.window.open_settings()
         dialog = self.window.settings_dialog
+        self.assertEqual(dialog.font_combo.currentData(), DEFAULT_FONT_FAMILY)
         dialog.text_color_button.click()
         dialog.color_page.setCurrentColor(QColor('#fff1d6'))
         dialog.color_page.accept()
@@ -442,6 +443,9 @@ class SettingsWindowTests(PreferencesTestCase):
         self.assertIn('color:#fff1d6;', dialog.color_preview.styleSheet())
         self.assertEqual(dialog.color_preview.font().family(), family)
         self.assertEqual(dialog.color_preview.font().pixelSize(), 18)
+        from PySide6.QtGui import QFont
+        self.assertTrue(dialog.color_preview.font().styleStrategy() & QFont.PreferAntialias)
+        self.assertEqual(dialog.color_preview.font().hintingPreference(), QFont.PreferNoHinting)
         self.assertEqual(self.window.settings_button.font().pixelSize(), 13)
         self.assertEqual(get_preferences(), Preferences())
         dialog.save_button.click()
@@ -463,7 +467,8 @@ class SettingsWindowTests(PreferencesTestCase):
         dialog.reset_size_button.click()
         dialog.save_button.click()
         self.assertEqual(get_preferences().accent_text_color, 'auto')
-        self.assertEqual(get_preferences().font_family, effective_font_family(DEFAULT_FONT_FAMILY))
+        self.assertEqual(get_preferences().font_family, DEFAULT_FONT_FAMILY)
+        self.assertEqual(self.window.settings_button.font().family(), effective_font_family(DEFAULT_FONT_FAMILY))
         self.assertEqual(get_preferences().font_size, 13)
 
     def test_cancelled_text_picker_and_settings_do_not_change_live_font_or_color(self):

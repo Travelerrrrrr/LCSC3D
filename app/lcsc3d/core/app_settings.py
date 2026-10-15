@@ -20,7 +20,7 @@ THEME_MODES = (('跟随系统', 'system'), ('浅色', 'light'), ('深色', 'dark
 ACCENT_COLORS = (('品牌蓝', '#087af5'), ('青绿', '#168878'), ('蓝色', '#2563eb'), ('紫色', '#7c3aed'),
                  ('玫红', '#be185d'), ('橙色', '#c2410c'))
 DEFAULT_ACCENT = '#087af5'
-DEFAULT_FONT_FAMILY = 'Microsoft YaHei UI'
+DEFAULT_FONT_FAMILY = 'system'
 DEFAULT_FONT_SIZE = 13
 MIN_FONT_SIZE, MAX_FONT_SIZE = 10, 24
 

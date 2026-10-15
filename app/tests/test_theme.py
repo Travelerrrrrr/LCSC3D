@@ -17,7 +17,7 @@ from lcsc3d.services.international_store import (InternationalStoreClient, inter
                                  storefront_url, HOME, API)
 from lcsc3d.services.store import StoreClient, StoreError
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontDatabase, QPalette
+from PySide6.QtGui import QFont, QFontDatabase, QPalette
 from PySide6.QtWidgets import QApplication
 
 FIXTURE = json.loads((Path(__file__).parent / 'fixtures/international_catalog.json').read_text('utf-8'))
@@ -171,6 +171,85 @@ class AppearanceTests(unittest.TestCase):
         self.assertEqual(label.font().pixelSize(), 13)
         for widget in (button, label):
             widget.deleteLater()
+
+    def test_default_font_follows_system_changes_without_persisting_a_machine_font_name(self):
+        preferences = Preferences.from_mapping({})
+        self.assertEqual(preferences.font_family, 'system')
+        self.assertEqual(Preferences.from_mapping(preferences.to_mapping()).font_family, 'system')
+        manager = theme_manager()
+        label = QLabel('系统字体 System font')
+        try:
+            for index, family in enumerate(('Segoe UI', 'Tahoma')):
+                with patch('lcsc3d.ui.app_theme.QFontDatabase.systemFont', return_value=QFont(family)):
+                    if index == 0:
+                        manager.apply(preferences)
+                    else:
+                        self.app.fontChanged.emit(QFont(family))
+                    self.app.processEvents()
+                    self.assertEqual(label.font().family(), family)
+                    self.assertEqual(label.font().hintingPreference(), QFont.PreferNoHinting)
+                    self.assertEqual(manager.preferences.font_family, 'system')
+            # An explicit choice remains explicit when the system changes.
+            manager.apply(Preferences(font_family='Segoe UI'))
+            with patch('lcsc3d.ui.app_theme.QFontDatabase.systemFont', return_value=QFont('Tahoma')):
+                self.app.fontChanged.emit(QFont('Tahoma'))
+                self.assertEqual(manager.tokens['font_family'], 'Segoe UI')
+        finally:
+            label.deleteLater()
+
+    def test_smooth_outline_font_survives_theme_size_family_and_stylesheet_changes(self):
+        from PySide6.QtWidgets import QCheckBox, QComboBox
+        combo = QComboBox()
+        combo.addItem('字体预览 Font preview')
+        label = QLabel('标题 Heading')
+        label.setObjectName('section')
+        table = QTableWidget(1, 1)
+        widgets = (label, QPushButton('下载 Download'), QLineEdit(), QCheckBox(),
+                   combo, combo.view(), table, table.horizontalHeader())
+        manager = theme_manager()
+        try:
+            for mode, family, size in (('light', DEFAULT_FONT_FAMILY, 13),
+                                       ('dark', 'Segoe UI', 18),
+                                       ('light', DEFAULT_FONT_FAMILY, 13)):
+                manager.apply(Preferences(theme_mode=mode, font_family=family, font_size=size))
+                self.app.processEvents()  # Deliver ApplicationFontChange to existing widgets.
+                for widget in widgets:
+                    widget.ensurePolished()
+                    font = widget.font()
+                    with self.subTest(mode=mode, family=family, widget=type(widget).__name__):
+                        self.assertTrue(font.styleStrategy() & QFont.PreferAntialias)
+                        self.assertTrue(font.styleStrategy() & QFont.ForceOutline)
+                        self.assertFalse(font.styleStrategy() & (QFont.NoAntialias | QFont.NoSubpixelAntialias))
+                        self.assertEqual(font.hintingPreference(), QFont.PreferNoHinting)
+        finally:
+            for widget in (label, *widgets[1:5], table):
+                widget.deleteLater()
+
+    def test_widget_text_has_antialiased_edge_pixels_on_opaque_surfaces(self):
+        manager = theme_manager()
+        label = QLabel('字体抗锯齿测试 嘉立创商城 Aa Ss 0123456789')
+        label.resize(440, 50)
+        try:
+            for mode in ('light', 'dark'):
+                manager.apply(Preferences(theme_mode=mode))
+                # An opaque neutral surface makes text edge coverage measurable
+                # without counting rounded corners, borders or alpha compositing.
+                label.setStyleSheet('background:#ffffff;color:#000000;border:0;padding:0;')
+                image = label.grab().toImage()
+                smooth = sum(0 < max(image.pixelColor(x, y).getRgb()[:3]) < 255
+                             for y in range(image.height()) for x in range(image.width()))
+                self.assertGreater(smooth, 100, mode)
+                font = label.font()
+                font.setStyleStrategy(QFont.NoAntialias | QFont.ForceOutline)
+                label.setFont(font)
+                aliased = label.grab().toImage()
+                hard = sum(0 < max(aliased.pixelColor(x, y).getRgb()[:3]) < 255
+                           for y in range(aliased.height()) for x in range(aliased.width()))
+                self.assertLess(hard, smooth / 4, mode)
+                # Restore inheritance before testing the next theme.
+                label.setFont(QFont())
+        finally:
+            label.deleteLater()
 
     def test_selected_table_text_uses_accent_text_color_with_and_without_focus(self):
         from PySide6.QtWidgets import QAbstractItemView
