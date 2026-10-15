@@ -1,7 +1,7 @@
 """Single-window pages, anchored choices and in-app notifications."""
 from PySide6 import QtWidgets as W
-from PySide6.QtCore import Qt, QEvent, QPoint, QSize, QTimer, QObject, Signal, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QAction, QColor
+from PySide6.QtCore import Qt, QEvent, QPoint, QSize, QRect, QRectF, QTimer, QObject, Signal, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QAction, QColor, QPainter, QPainterPath, QIcon
 from shiboken6 import isValid
 from lcsc3d.core.i18n import render, text as ui_text, register
 
@@ -175,6 +175,13 @@ class AnchoredPanel(W.QFrame):
         W.QApplication.instance().installEventFilter(self)
         self.hide()
 
+    def paintEvent(self, event):
+        from lcsc3d.ui.app_theme import theme_manager
+        from lcsc3d.ui.control_painting import rounded_surface
+        c = theme_manager().tokens
+        painter = QPainter(self)
+        rounded_surface(painter, self.rect(), c['surface'], c['border'])
+
     def place(self, height):
         self.preferred_height = height
         root = self.parentWidget()
@@ -237,6 +244,47 @@ class AccountPanel(AnchoredPanel):
         self.raise_()
 
 
+class ComboChoiceDelegate(W.QStyledItemDelegate):
+    """Paint the entire row, without stylesheet padding or focus overlays."""
+    def sizeHint(self, option, index):
+        return QSize(0, max(24, self.parent().fontMetrics().height() + 8))
+
+    def paint(self, painter, option, index):
+        from lcsc3d.ui.app_theme import theme_manager
+        c = theme_manager().tokens
+        view = self.parent()
+        prepared = W.QStyleOptionViewItem(option)
+        self.initStyleOption(prepared, index)
+        selected = bool(prepared.state & W.QStyle.State_Selected)
+        enabled = bool(prepared.state & W.QStyle.State_Enabled)
+        hovered = bool(prepared.state & W.QStyle.State_MouseOver)
+        row = QRect(prepared.rect)
+        row.setLeft(0)
+        row.setRight(view.viewport().width() - 1)
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(view.viewport().rect()), 5, 5)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.TextAntialiasing)
+        painter.setClipPath(clip, Qt.IntersectClip)
+        if selected or hovered:
+            painter.fillRect(row, QColor(c['accent' if selected else 'hover']))
+        text_rect = row.adjusted(8, 0, -8, 0)
+        if not prepared.icon.isNull():
+            extent = min(prepared.decorationSize.width(), row.height() - 4)
+            rect = QRect(text_rect.left(), row.center().y() - extent // 2, extent, extent)
+            prepared.icon.paint(painter, W.QStyle.visualRect(prepared.direction, row, rect),
+                                Qt.AlignCenter, QIcon.Normal if enabled else QIcon.Disabled)
+            text_rect.adjust(extent + 4, 0, 0, 0)
+        painter.setFont(prepared.font)
+        painter.setPen(QColor(c['disabled' if not enabled else 'on_accent' if selected else 'text']))
+        text = prepared.fontMetrics.elidedText(prepared.text, Qt.ElideRight, text_rect.width())
+        painter.drawText(W.QStyle.visualRect(prepared.direction, row, text_rect),
+                         W.QStyle.visualAlignment(prepared.direction, Qt.AlignLeft) | Qt.AlignVCenter,
+                         text)
+        painter.restore()
+
+
 class ComboDropdown(QObject):
     """Shared popup behavior, also used by Qt's embedded file chooser fields."""
     def __init__(self, combo, *, intercept=False):
@@ -264,6 +312,9 @@ class ComboDropdown(QObject):
             self.view.setEditTriggers(W.QAbstractItemView.NoEditTriggers)
             self.view.setVerticalScrollMode(W.QAbstractItemView.ScrollPerPixel)
             self.view.setUniformItemSizes(True)
+            self.view.setSpacing(0)
+            self.view.setMouseTracking(True)
+            self.view.setItemDelegate(ComboChoiceDelegate(self.view))
             self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             self.view.clicked.connect(self.choose_index)
             self.view.installEventFilter(self)
@@ -290,7 +341,7 @@ class ComboDropdown(QObject):
         view.setCurrentIndex(index)
         view.doItemsLayout()
         row_height = max(row_height, view.sizeHintForRow(0))
-        self.frame.place(min(8, combo.maxVisibleItems(), combo.count()) * row_height + 4)
+        self.frame.place(min(8, combo.maxVisibleItems(), combo.count()) * row_height + 2)
         self.frame.show()
         self.frame.raise_()
         view.scrollTo(index, W.QAbstractItemView.PositionAtCenter)

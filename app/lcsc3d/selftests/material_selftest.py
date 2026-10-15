@@ -66,6 +66,22 @@ def start(window, folder):
             report['default_workspace_fits'] = True
             assert window.table.horizontalHeader().length() == window.table.viewport().width()
             report['result_column_fills_right_edge'] = True
+            window.workspace_button.setFocus()
+            settle()
+            button_pixels = window.workspace_button.grab().toImage()
+            border = theme_manager().tokens['accent_ink']
+            band = max(4, round(button_pixels.devicePixelRatio() * 4))
+            width, height = button_pixels.width(), button_pixels.height()
+            cross_sections = (
+                [(width // 2, d) for d in range(band)],
+                [(width // 2, height - 1 - d) for d in range(band)],
+                [(d, height // 2) for d in range(band)],
+                [(width - 1 - d, height // 2) for d in range(band)])
+            coverage = [sum(button_pixels.pixelColor(x, y).name() == border
+                            and button_pixels.pixelColor(x, y).alpha() > 220 for x, y in line)
+                        for line in cross_sections]
+            assert min(coverage) > 0 and min(coverage) == max(coverage), coverage
+            report['uniform_button_edges'] = coverage
             capture(window, 'workspace-symbol-light')
             window.apply_preferences(Preferences(accent_text_color='#ffffff'))
             # Match the five-row layout regression's reference window size;
@@ -154,6 +170,22 @@ def start(window, folder):
             assert settings.star_button.text() == '⭐点个Star⭐'
             assert settings.sponsor_button.text() == '🍔赞助作者🍔'
             settings.section_buttons[0].click()
+            settings.language_combo.showPopup()
+            settle()
+            view = settings.language_combo.view()
+            index = view.model().index(1, 0)
+            view.setCurrentIndex(index)
+            settle()
+            rect = view.visualRect(index)
+            assert rect.bottom() == view.viewport().height() - 1
+            pixels = view.viewport().grab().toImage()
+            ratio = pixels.devicePixelRatio()
+            for x, y in ((1, rect.center().y()), (rect.right() - 1, rect.center().y()),
+                         (rect.center().x(), rect.top() + 1), (rect.center().x(), rect.bottom() - 1)):
+                assert pixels.pixelColor(round(x * ratio), round(y * ratio)).name() == theme_manager().tokens['accent']
+            capture(window, 'dropdown-full-selection')
+            settings.language_combo.hidePopup()
+            report['dropdown_selection_fills_row'] = True
             for combo, name in ((settings.text_color_combo, 'color'), (settings.font_combo, 'font')):
                 combo.showPopup()
                 settle()
@@ -248,6 +280,23 @@ def start(window, folder):
                 store.append_row(store.search_table, {'part': part, 'title': title})
             store.search_table.item(0, 0).setCheckState(Qt.Checked)
             capture(window, 'store-light')
+            from lcsc3d.ui.catalog_filters import CategoryPanel
+            category = CategoryPanel()
+            store.search_content.addWidget(category)
+            category.show_categories([dict(id='root', name='微控制器 / 逻辑器件', children=[
+                dict(id='mcu', name='单片机 / 微控制器', children=[
+                    dict(id='1', name='单片机 (MCU / MPU / SOC)', children=[]),
+                    dict(id='2', name='数字信号处理器 (DSP / DSC)', children=[]),
+                    dict(id='3', name='可编程逻辑器件 (CPLD / FPGA)', children=[])]),
+                dict(id='logic', name='逻辑器件', children=[])])])
+            category.tree.topLevelItem(0).setExpanded(True)
+            category.tree.setCurrentItem(category.tree.topLevelItem(0).child(0))
+            store.search_content.setCurrentWidget(category)
+            capture(window, 'category-vector-branches')
+            store.search_content.setCurrentWidget(store.search_results)
+            store.search_content.removeWidget(category)
+            category.deleteLater()
+            report['category_vector_disclosures'] = True
             window.apply_preferences(Preferences(theme_mode='dark', accent_color='#7c3aed'))
             capture(window, 'store-dark')
             store.client.account = {'name': 'Demo account'}

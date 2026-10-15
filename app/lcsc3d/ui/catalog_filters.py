@@ -2,7 +2,8 @@
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QPointF
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QScrollArea, QFrame, QLayout
 from lcsc3d.ui.localized_widgets import QLabel, QPushButton, QLineEdit, QComboBox, QCheckBox
 from lcsc3d.ui.ui_components import surface, IconButton
@@ -11,12 +12,39 @@ from lcsc3d.core.app_logging import log_event
 from lcsc3d.services.catalog_filters import (DEFAULTS, SORTS, normalize_filters, filter_count,
                                            range_input, range_bounds, option_in_range, finite_number)
 from lcsc3d.services.store import StoreError
+from lcsc3d.ui.app_theme import theme_manager
 
 
 def hint(text=''):
     label = QLabel(tr(text)); label.setObjectName('muted')
     label.setTextFormat(Qt.PlainText); label.setWordWrap(True)
     return label
+
+
+class CategoryTree(QTreeWidget):
+    """Draw disclosure chevrons as vectors, without stretched branch images."""
+    def drawBranches(self, painter, rect, index):
+        if not self.model().hasChildren(index):
+            return
+        c = theme_manager().tokens
+        item = self.itemFromIndex(index)
+        color = c['accent_ink'] if item.isSelected() else c['muted']
+        x, y = rect.right() - self.indentation() / 2 + 1, rect.center().y() + .5
+        path = QPainterPath()
+        if self.isExpanded(index):
+            path.moveTo(QPointF(x - 3.5, y - 2))
+            path.lineTo(QPointF(x, y + 2))
+            path.lineTo(QPointF(x + 3.5, y - 2))
+        else:
+            path.moveTo(QPointF(x - 2, y - 3.5))
+            path.lineTo(QPointF(x + 2, y))
+            path.lineTo(QPointF(x - 2, y + 3.5))
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor(color), 1.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(path)
+        painter.restore()
 
 
 class CategoryPanel(QWidget):
@@ -41,8 +69,8 @@ class CategoryPanel(QWidget):
         self.groups = QListWidget(); self.groups.setObjectName('catalogGroups'); self.groups.setMaximumWidth(210)
         self.groups.currentRowChanged.connect(self.populate)
         columns.addWidget(self.groups, 1)
-        self.tree = QTreeWidget(); self.tree.setHeaderHidden(True); self.tree.setObjectName('catalogTree')
-        self.tree.setIndentation(20); self.tree.setUniformRowHeights(True)
+        self.tree = CategoryTree(); self.tree.setHeaderHidden(True); self.tree.setObjectName('catalogTree')
+        self.tree.setIndentation(24); self.tree.setUniformRowHeights(True)
         self.tree.itemSelectionChanged.connect(self.update_choice)
         self.tree.itemDoubleClicked.connect(lambda *_: self.choose())
         columns.addWidget(self.tree, 3); body.addLayout(columns); layout.addWidget(card, 1)

@@ -360,22 +360,28 @@ class BackupUiTests(unittest.TestCase):
         self.window.set_running(False)
         self.assertTrue(self.panel.restore_button.isEnabled())
 
-    def test_size_column_drag_moves_its_own_right_edge_without_shrinking_the_path(self):
+    def test_size_column_stays_at_right_edge_and_cannot_be_dragged(self):
         from PySide6.QtCore import Qt, QPoint
         from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QHeaderView
         table = self.panel.table
         header = table.horizontalHeader()
-        path_width, size_width = table.columnWidth(2), table.columnWidth(3)
-        edge = header.sectionViewportPosition(3) + size_width - 1
-        for start, delta in ((edge, -24), (edge - 24, 16)):
-            point = QPoint(start, header.height() // 2)
+        self.assertEqual(header.sectionResizeMode(2), QHeaderView.Stretch)
+        self.assertEqual(header.sectionResizeMode(3), QHeaderView.ResizeToContents)
+        for width in (1060, 1380):
+            self.window.resize(width, 880)
+            QTest.qWait(50)
+            self.assertEqual(header.length(), table.viewport().width())
+            size_width = table.columnWidth(3)
+            edge = header.sectionViewportPosition(3) + size_width - 1
+            self.assertEqual(edge, table.viewport().width() - 1)
+            point = QPoint(edge, header.height() // 2)
             QTest.mousePress(header.viewport(), Qt.LeftButton, pos=point)
-            QTest.mouseMove(header.viewport(), point + QPoint(delta, 0), delay=30)
-            QTest.mouseRelease(header.viewport(), Qt.LeftButton, pos=point + QPoint(delta, 0))
+            QTest.mouseMove(header.viewport(), point - QPoint(24, 0), delay=30)
+            QTest.mouseRelease(header.viewport(), Qt.LeftButton, pos=point - QPoint(24, 0))
             QTest.qWait(40)
-            size_width += delta
             self.assertEqual(table.columnWidth(3), size_width)
-            self.assertEqual(table.columnWidth(2), path_width)
+            self.assertEqual(header.length(), table.viewport().width())
 
 
 if __name__ == '__main__':

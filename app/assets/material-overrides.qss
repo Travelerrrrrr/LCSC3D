@@ -21,7 +21,7 @@ QPushButton { color:%(accent_ink)s; background:transparent; border:1px solid %(b
 QPushButton:hover { color:%(accent_ink)s; background:%(hover)s; border-color:%(accent_ink)s; }
 QPushButton:pressed { background:%(border)s; }
 QPushButton:focus { border:1px solid %(accent_ink)s; }
-QPushButton:disabled { color:%(disabled)s; background:transparent; border-color:%(border)s; }
+QPushButton:disabled { color:%(disabled)s; background:transparent; border:1px solid %(border)s; }
 QPushButton#primary, QPushButton#previewMode:checked { background:%(accent)s; color:%(on_accent)s; border:1px solid %(accent)s; font-weight:600; }
 QPushButton#primary:hover, QPushButton#previewMode:checked:hover { background:%(accent_hover)s; color:%(on_accent_hover)s; }
 QPushButton#primary:disabled { background:%(hover)s; color:%(disabled)s; border-color:%(border)s; }
@@ -35,7 +35,7 @@ QPushButton[variant="danger"] { color:%(error)s; border:1px solid transparent; }
 QPushButton[variant="danger"]:disabled { color:%(disabled)s; }
 QPushButton#navButton { color:%(muted)s; border:1px solid transparent; text-align:left; padding:10px 12px; height:%(control_height)spx; }
 QPushButton#navButton:hover { background:%(hover)s; }
-QPushButton#navButton:checked { color:%(accent_ink)s; background:%(hover)s; border-left:3px solid %(accent)s; font-weight:600; padding-left:10px; }
+QPushButton#navButton:checked { color:%(accent_ink)s; background:%(hover)s; border:1px solid %(accent_ink)s; font-weight:600; }
 QPushButton#navButton:focus { background:transparent; border:1px solid %(accent_ink)s; }
 QPushButton#navButton:checked:focus { background:%(hover)s; }
 QComboBox QAbstractItemView, QListWidget, QMenu { background:%(surface)s; color:%(text)s; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
@@ -87,6 +87,8 @@ QListWidget#filterOptions::item { padding:8px 10px; border-bottom:1px solid %(bo
 QListWidget#catalogGroups::item:hover, QListWidget#filterOptions::item:hover, QTreeWidget#catalogTree::item:hover { background:%(hover)s; }
 QListWidget#catalogGroups, QTreeWidget#catalogTree { color:%(text)s; selection-color:%(accent_ink)s; selection-background-color:%(hover)s; }
 QListWidget#catalogGroups::item:selected, QTreeWidget#catalogTree::item:selected { background:%(hover)s; color:%(accent_ink)s; selection-color:%(accent_ink)s; }
+QTreeWidget#catalogTree::branch { background:transparent; image:none; border-image:none; border:0; }
+QTreeWidget#catalogTree::item { border-radius:0; }
 QToolTip { background:%(surface)s; color:%(text)s; border:1px solid %(border)s; padding:6px; }
 QFrame#previewEmpty, QGraphicsView#photoCanvas { background:%(field)s; border:1px solid %(border)s; border-radius:8px; }
 QLabel#previewCube { font-size:64px; color:%(accent_ink)s; }
@@ -98,8 +100,8 @@ QListWidget#thumbnailStrip { border:0; background:%(field)s; padding:8px; }
 QListWidget#thumbnailStrip::item { border:2px solid transparent; border-radius:6px; padding:4px; }
 QListWidget#thumbnailStrip::item:selected { border-color:%(accent)s; background:%(hover)s; selection-background-color:%(hover)s; color:%(text)s; selection-color:%(text)s; }
 
-QFrame#anchoredPanel { background:%(surface)s; border:1px solid %(border)s; border-radius:6px; }
-QListView#comboChoices { background:%(surface)s; color:%(text)s; border:0; outline:0; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
+QFrame#anchoredPanel { background:transparent; border:0; }
+QListView#comboChoices { background:transparent; color:%(text)s; border:0; outline:0; selection-background-color:%(accent)s; selection-color:%(on_accent)s; }
 QListView#comboChoices::item:selected { background:%(accent)s; color:%(on_accent)s; }
 QFrame#notification { background:%(surface)s; border:1px solid %(border)s; border-left:4px solid %(accent)s; border-radius:8px; }
 QFrame#notification[severity="success"] { border-left-color:%(success)s; }

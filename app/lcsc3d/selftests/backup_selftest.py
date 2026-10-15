@@ -92,12 +92,12 @@ def start(window, destination):
             commit_user_file(project, old, new)
             settings, panel = settings_page()
             assert len(panel.rows) == 3 and all(row.original_path for row in panel.rows)
-            path_width, size_width = panel.table.columnWidth(2), panel.table.columnWidth(3)
-            panel.table.setColumnWidth(3, size_width + 20)
-            settle()
-            assert panel.table.columnWidth(3) == size_width + 20 and panel.table.columnWidth(2) == path_width
-            panel.table.setColumnWidth(3, size_width)
-            report['size_column_resizes_independently'] = True
+            from PySide6.QtWidgets import QHeaderView
+            header = panel.table.horizontalHeader()
+            assert header.sectionResizeMode(2) == QHeaderView.Stretch
+            assert header.sectionResizeMode(3) == QHeaderView.ResizeToContents
+            assert header.length() == panel.table.viewport().width()
+            report['size_column_fixed_at_right_edge'] = True
             assert sum(row.stored_size for row in panel.rows) > sum(row.size for row in panel.rows)
             capture('backups-light')
             panel.auto_box.setChecked(False)

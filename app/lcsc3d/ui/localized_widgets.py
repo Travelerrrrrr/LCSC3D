@@ -61,7 +61,9 @@ class QLabel(TextControl, W.QLabel):
 
 
 class QPushButton(TextControl, W.QPushButton):
-    pass
+    def paintEvent(self, event):
+        from lcsc3d.ui.control_painting import paint_button
+        paint_button(self)
 
 
 class QCheckBox(TextControl, W.QCheckBox):
