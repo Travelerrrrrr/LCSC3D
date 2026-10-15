@@ -41,9 +41,14 @@ logs/ 包含当时的主程序、更新助手、轮转及崩溃日志，还有�
 def _files(folder, *, markers=False):
     """Never recurse, follow links, or collect arbitrary files in the log folder."""
     found, issues = [], []
-    if not folder.exists():
+    try:
+        paths = list(folder.iterdir())
+    except FileNotFoundError:
         return found, issues
-    for path in folder.iterdir():
+    except OSError as exc:
+        record_error(exc, 'logs.directory_scan_failed', level='WARNING')
+        return found, [{'reason': type(exc).__name__, 'stage': 'directory_scan'}]
+    for path in paths:
         if not LOG_NAME.fullmatch(path.name) and not (markers and MARKER_NAME.fullmatch(path.name)):
             continue
         try:

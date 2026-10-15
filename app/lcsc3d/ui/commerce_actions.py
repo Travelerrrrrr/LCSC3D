@@ -76,6 +76,10 @@ class CommerceActions:
     def load_cart(self):
         if self.cart_loading or self.cart_mutating or not self.require_commerce_account():
             return
+        if self.quantity_updates:
+            log_event('INFO', 'cart.pending_quantities_flushed', count=len(self.quantity_updates))
+            self.save_cart_quantities()
+            return
         self.cart_loading = True
         self.quantity_timer.stop(); self.quantity_updates.clear()
         self.cart_panel.set_busy(True)
@@ -116,6 +120,7 @@ class CommerceActions:
     def save_cart_quantities(self):
         if not self.quantity_updates or self.cart_mutating or self.closing:
             return
+        self.quantity_timer.stop()
         rows = list(self.quantity_updates.values()); self.quantity_updates.clear()
         self.cart_mutating = True; self.cart_panel.set_busy(True)
         self.cart_panel.hint.setText(tr('正在保存数量…'))
@@ -233,7 +238,10 @@ class CommerceActions:
             return
         table.setCurrentCell(row, 1)
         menu = self.make_product_menu(self.context_products(table, row), table)
-        menu.exec(table.viewport().mapToGlobal(position))
+        try:
+            menu.exec(table.viewport().mapToGlobal(position))
+        finally:
+            menu.deleteLater()
 
     def make_product_menu(self, products, parent):
         menu = QMenu(parent)

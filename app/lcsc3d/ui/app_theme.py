@@ -21,7 +21,6 @@ def material_stylesheet(c):
     another's icons. Absolute URLs also avoid Qt's global icon search path
     selecting icons left over from a previously applied palette.
     """
-    from qt_material import build_stylesheet
     theme = dict(primaryColor=c['accent'], primaryLightColor=c['accent_hover'],
                  secondaryColor=c['field'], secondaryLightColor=c['border'],
                  secondaryDarkColor=c['surface'], primaryTextColor=c['text'],
@@ -35,6 +34,7 @@ def material_stylesheet(c):
     qss = cache / 'material.qss'
     if qss.is_file():
         return qss.read_text(encoding='utf-8')
+    from qt_material import build_stylesheet
     with tempfile.TemporaryDirectory(prefix='build-', dir=root) as directory:
         stage = Path(directory) / key
         stage.mkdir()

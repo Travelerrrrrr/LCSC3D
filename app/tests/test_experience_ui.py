@@ -7,10 +7,10 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from PySide6.QtCore import Qt, QEvent
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QEvent, QRect
+from PySide6.QtGui import QFont, QImage, QPainter, QFontMetrics
 from PySide6.QtTest import QTest, QSignalSpy
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QStyleOptionViewItem, QStyle
 from lcsc3d.core import app_logging as logs
 from lcsc3d.core.i18n import set_language
 from lcsc3d.core.app_settings import Preferences
@@ -23,7 +23,7 @@ from lcsc3d.ui.catalog_filters import CategoryPanel
 from lcsc3d.ui.commerce import CartPanel
 from lcsc3d.ui.order_details import OrderDetailPanel
 from lcsc3d.ui.pagination import PaginationBar, visible_pages
-from lcsc3d.ui.product_summary import SUMMARY_ROLE, summary_lines
+from lcsc3d.ui.product_summary import SUMMARY_ROLE, summary_lines, set_product_summary
 
 
 class PageSequenceTests(unittest.TestCase):
@@ -167,6 +167,60 @@ class ExperienceUiTests(unittest.TestCase):
         self.assertTrue(title.endswith('设置'))
         self.assertIn('No description', description)
         self.assertNotIn('已停售', title)
+
+    def test_cached_product_painting_tracks_content_width_font_language_and_selection(self):
+        from lcsc3d.ui.commerce import native_table, table_cell
+        from lcsc3d.ui.product_summary import ProductSummaryDelegate
+        table = self.show(native_table(['选择', '编号', '商品'], 2))
+        table.setRowCount(1)
+        item = table_cell(table, 0, 2, 'Part')
+        delegate = ProductSummaryDelegate(table)
+        option = QStyleOptionViewItem()
+        option.widget = table
+        def paint():
+            target = QImage(520, 230, QImage.Format_ARGB32_Premultiplied)
+            target.fill(Qt.transparent)
+            painter = QPainter(target)
+            try:
+                delegate.paint(painter, option, table.model().index(0, 2))
+            finally:
+                painter.end()
+            return target
+        previous = None
+        for index, (width, size, mode, selected, language) in enumerate((
+                (300, 13, 'light', False, 'zh_CN'), (500, 13, 'light', False, 'zh_CN'),
+                (300, 24, 'light', False, 'zh_CN'), (300, 24, 'dark', True, 'en_US'),
+                (300, 24, 'dark', False, 'en_US'))):
+            theme_manager().apply(Preferences(theme_mode=mode, font_size=size))
+            set_language(language)
+            option.font = QFont(table.font()); option.font.setPixelSize(size)
+            option.rect = QRect(0, 0, width, 230)
+            option.state = QStyle.State_Enabled | (QStyle.State_Selected if selected else QStyle.State_None)
+            set_product_summary(item, dict(title=f'器件 {index}', description='多行商品简介含 Unicode 和 English，' * 12))
+            cached = paint()
+            self.assertEqual(cached, paint())
+            delegate.layouts.clear(); delegate.layout_characters = 0
+            self.assertEqual(cached, paint())
+            if previous is not None:
+                self.assertNotEqual(cached, previous)
+            previous = cached
+        for index in range(350):
+            delegate.text_layout('description ' + str(index) + 'x' * 1000, 250, option.font, 2, cached)
+        self.assertLessEqual(len(delegate.layouts), 256)
+        self.assertLessEqual(delegate.layout_characters, 131072)
+
+    def test_supplementary_characters_do_not_erase_the_second_description_line(self):
+        from lcsc3d.ui.commerce import native_table
+        from lcsc3d.ui.product_summary import ProductSummaryDelegate
+        table = self.show(native_table(['选择', '编号', '商品'], 2))
+        delegate = ProductSummaryDelegate(table)
+        font = QFont(table.font())
+        font.setPixelSize(13)
+        target = QImage(200, 100, QImage.Format_ARGB32_Premultiplied)
+        prefix = '😀' * 6 + ' '
+        result = delegate.text_layout(prefix + 'tail', QFontMetrics(font).horizontalAdvance(prefix), font, 2, target)
+        self.assertEqual(len(result[1]), 2)
+        self.assertEqual(result[2], 'tail')
 
 
 if __name__ == '__main__':

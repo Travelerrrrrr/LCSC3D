@@ -1163,7 +1163,10 @@ class MainWindow(FramelessMainWindow):
         store = self.ensure_store()
         store.set_import_enabled(not self.batch_running)
         menu = store.make_product_menu(products, self.table)
-        menu.exec(self.table.viewport().mapToGlobal(position))
+        try:
+            menu.exec(self.table.viewport().mapToGlobal(position))
+        finally:
+            menu.deleteLater()
 
     def refresh_store_account(self):
         if self.preferences.language == 'en_US':

@@ -1,7 +1,7 @@
 """Native shopping tables. No web view or intermediate quantity page."""
 from decimal import Decimal
 
-from PySide6.QtCore import Qt, Signal, QSize, QTimer
+from PySide6.QtCore import Qt, Signal, QSize, QTimer, QSignalBlocker
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QSpinBox, QHeaderView, QAbstractItemView, QStackedWidget
 
 from lcsc3d.core.i18n import text as tr, message as msg
@@ -221,8 +221,10 @@ class CartPanel(QWidget):
 
     def toggle_selection(self):
         checked = len(self.selected_rows()) != len(self.rows)
-        for index in range(len(self.rows)):
-            self.table.item(index, 0).setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        with QSignalBlocker(self.table):
+            for index in range(len(self.rows)):
+                self.table.item(index, 0).setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        self.update_summary()
 
     def set_busy(self, value):
         self.busy = value

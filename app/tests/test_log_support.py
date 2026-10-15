@@ -83,6 +83,22 @@ class LogSupportTests(PreferencesTestCase):
         self.assertNotIn(b'PRIVATE', b'\n'.join(contents.values()))
         self.assertIn('logs/LCSC3D.log', contents)
 
+    def test_unreadable_directory_keeps_environment_diagnostics_and_logs(self):
+        original = type(self.log_dir).iterdir
+        def unreadable(path):
+            if path == self.log_dir:
+                raise PermissionError('PRIVATE-directory')
+            return original(path)
+        with patch.object(type(self.log_dir), 'iterdir', unreadable):
+            result, contents, metadata = self.bundle()
+        self.assertIn({'reason': 'PermissionError', 'stage': 'directory_scan'}, result['issues'])
+        self.assertTrue(metadata['environment']['qt'])
+        self.assertNotIn(b'PRIVATE-directory', b'\n'.join(contents.values()))
+        self.assertTrue(logs.log_event('ERROR', 'test.after_bad_directory'))
+        self.assertIn('logs.directory_scan_failed', [row['event'] for row in self.log_entries()])
+        _, contents, _ = self.bundle()
+        self.assertIn('logs/LCSC3D.log', contents)
+
     def test_unreadable_file_is_reported_and_other_files_are_still_packaged(self):
         path = self.log_dir / 'LCSC3D-update.log'
         path.write_text('unavailable', encoding='utf-8')

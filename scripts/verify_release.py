@@ -17,15 +17,18 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--exe', type=Path, default=ROOT / 'app/dist/LCSC3D.exe')
+    parser.add_argument('--verify-dir', type=Path, default=ROOT / 'work/release-verification',
+                        help='Fresh isolated directory for this acceptance run')
     args = parser.parse_args()
     if sys.platform != 'win32':
         parser.error('Frozen acceptance requires Windows')
     executable = args.exe.resolve(strict=True)
-    work = ROOT / 'work/release-verification'
+    work = args.verify_dir.resolve()
     work.mkdir(parents=True, exist_ok=True)
     outputs = ROOT / 'outputs'
     outputs.mkdir(exist_ok=True)
-    shutil.copyfile(executable, outputs / 'LCSC3D.exe')
+    if executable != (outputs / 'LCSC3D.exe').resolve():
+        shutil.copyfile(executable, outputs / 'LCSC3D.exe')
     version = re.search(r"^VERSION = '([^']+)'", (ROOT / 'app/lcsc3d/ui/main.py').read_text('utf-8'), re.M)[1]
     report = dict(version=version, source_commit=os.environ.get('GITHUB_SHA', ''), cases=[], errors=[], success=False)
     environment = os.environ.copy()

@@ -57,6 +57,8 @@ python scripts/finalize_delivery.py --test-count 322
 
 `verify_app_data.py --output-dir <成品目录> --verify-dir <验证目录>` 使用真实 EXE 和独立 Windows 用户数据目录，普通启动后只关闭本次复制的程序窗口，验证旧配置迁移、新用户默认配置、AppData 日志和运行时解压，以及 EXE 目录没有新增文件。原有用户文件必须保留。
 
+全套成品验收可使用 `python scripts/verify_release.py --exe outputs/LCSC3D.exe --verify-dir work/<本次验收目录>`。指定全新的验收目录可保留先前证据；传入固定交付入口时不会将 EXE 复制到自身。`python scripts/measure_ui_performance.py --output work/ui-performance.json` 用合成的 500 行购物车测量批量勾选和商品简介绘制，不访问真实账号。
+
 不发布 GitHub 也可以测试完整更新窗口：运行 `python scripts/local_update_test.py`，在自动打开的隔离副本中点击“设置 → 检查更新”→“下载并重启”。追加 `--auto` 自动点击并核对结果；`--scenario bad-checksum` 和 `--scenario no-update` 分别测试校验失败与没有新版。仅启动本机服务，不读取真实会话，不覆盖原始 EXE。完整入口、文件位置和自选候选包见 [本地更新测试](docs/本地更新测试.md)。该脚本只依赖标准库；测试服务仅绑定数字回环地址，不能扩大到局域网或外部更新源。
 
 完整源码包为 `outputs/LCSC3D.zip`，包含应用、构建脚本、文档和许可证。`finalize_delivery.py` 核对成品、更新记录后重新打包源码，逐文件核对 ZIP，比较 EXE 内模块与工作区并生成 SHA-256。上例的测试数量需与实际测试结果一致。可用 `--output-dir`、`--portable-dir`、`--update-report` 和 `--store-dir` 指向独立发行准备目录；本地设置和离线商城记录可分别通过 `--settings-dir` 和 `--store-offline-dir` 提供，`--verification-date` 指定验证日期。即使使用版本子目录，也必须在任务结束前将验证后的最新 EXE、源码 ZIP、使用说明和校验和同步到 `outputs/` 根目录。每次有改动的任务完成后本地提交 Git，详见 [AGENTS.md](AGENTS.md)。

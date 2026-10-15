@@ -1,4 +1,5 @@
 """Paint readable product introductions without creating a widget per row."""
+from collections import OrderedDict
 from PySide6.QtCore import Qt, QRectF, QPointF, QSize, QEvent
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QTextLayout, QTextOption
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle, QStyleOptionViewItem
@@ -34,6 +35,8 @@ class ProductSummaryDelegate(QStyledItemDelegate):
         super().__init__(table)
         self.table = table
         self.column = column
+        self.layouts = OrderedDict()
+        self.layout_characters = 0
         table.setItemDelegateForColumn(column, self)
         table.installEventFilter(self)
         self.refresh_rows()
@@ -57,34 +60,63 @@ class ProductSummaryDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         return QSize(self.table.minimum_flexible_width, self.row_height())
 
-    @staticmethod
-    def draw_lines(painter, text, rect, font, color, count=1):
+    def text_layout(self, text, width, font, count, device):
+        key = (text, width, font.key(), font.styleStrategy().value,
+               font.hintingPreference().value, count, device.logicalDpiX(), device.logicalDpiY())
+        if key in self.layouts:
+            self.layouts.move_to_end(key)
+            return self.layouts[key]
+        metrics = QFontMetrics(font, device)
+        layout = None
+        lines = []
+        if count > 1:
+            layout = QTextLayout(text, font, device)
+            layout.setCacheEnabled(True)
+            wrap = QTextOption()
+            wrap.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+            layout.setTextOption(wrap)
+            layout.beginLayout()
+            for _ in range(count):
+                line = layout.createLine()
+                if not line.isValid():
+                    break
+                line.setLineWidth(width)
+                lines.append(line)
+            layout.endLayout()
+        remainder = text
+        if len(lines) == count:
+            # QTextLine offsets count UTF-16 units; Python indexes code points.
+            # Supplementary characters must not eat the next line's prefix.
+            remainder = text.encode('utf-16-le', errors='surrogatepass')[lines[-1].textStart() * 2:].decode(
+                'utf-16-le', errors='surrogatepass')
+        final = metrics.elidedText(remainder, Qt.ElideRight, int(width))
+        value = (layout, lines, final, metrics.height(), metrics.lineSpacing())
+        # Bound both the entry count and retained source text. Selection and
+        # hover change colors only; fonts, widths and contents have distinct keys.
+        if len(text) <= 4096:
+            self.layouts[key] = value
+            self.layout_characters += len(text)
+            while len(self.layouts) > 256 or self.layout_characters > 131072:
+                removed, _ = self.layouts.popitem(last=False)
+                self.layout_characters -= len(removed[0])
+        return value
+
+    def draw_lines(self, painter, text, rect, font, color, count=1):
         if not text or rect.width() <= 0:
             return
         painter.setFont(font)
         painter.setPen(color)
         text = ' '.join(text.split())
-        metrics = QFontMetrics(font)
-        layout = QTextLayout(text, font)
-        wrap = QTextOption()
-        wrap.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
-        layout.setTextOption(wrap)
-        layout.beginLayout()
-        lines = []
-        for index in range(count):
-            line = layout.createLine()
-            if not line.isValid():
-                break
-            line.setLineWidth(rect.width())
-            lines.append(line)
-        layout.endLayout()
+        layout, lines, final, height, spacing = self.text_layout(text, rect.width(), font, count, painter.device())
+        if count == 1:
+            painter.drawText(QRectF(rect.x(), rect.y(), rect.width(), height), Qt.AlignLeft | Qt.AlignVCenter, final)
+            return
         for index, line in enumerate(lines):
             if index == count - 1:
-                remainder = metrics.elidedText(text[line.textStart():], Qt.ElideRight, int(rect.width()))
-                painter.drawText(QRectF(rect.x(), rect.y() + index * metrics.lineSpacing(), rect.width(), metrics.height()),
-                                 Qt.AlignLeft | Qt.AlignVCenter, remainder)
+                painter.drawText(QRectF(rect.x(), rect.y() + index * spacing, rect.width(), height),
+                                 Qt.AlignLeft | Qt.AlignVCenter, final)
             else:
-                line.draw(painter, QPointF(rect.x(), rect.y() + index * metrics.lineSpacing()))
+                line.draw(painter, QPointF(rect.x(), rect.y() + index * spacing))
 
     def paint(self, painter, option, index):
         product = index.data(SUMMARY_ROLE)

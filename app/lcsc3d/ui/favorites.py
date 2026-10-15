@@ -1471,8 +1471,10 @@ class FavoritesDialog(CommerceActions, CatalogActions, QDialog):
         for row in range(self.favorite_table.rowCount()):
             value = ' '.join(self.favorite_table.item(row, c).text() for c in (1, 2, 3, 4)).casefold()
             self.favorite_table.setRowHidden(row, bool(keyword and keyword not in value))
-        if self.tabs.currentIndex() == 1 and self.favorite_table.isRowHidden(self.favorite_table.currentRow()):
-            self.clear_detail()
+        if self.tabs.currentIndex() == 1:
+            selected = self.selected_product()
+            if (selected or {}).get('part') != (self.current_product or {}).get('part'):
+                self.selection_changed()
         self.update_count()
         self.favorite_table.thumbnail_timer.start(60)
 

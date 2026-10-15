@@ -320,6 +320,67 @@ class CommerceUiTests(unittest.TestCase):
         self.assertIsNone(table.cellWidget(0, 5))
         self.assertEqual(table.item(0, 5).text(), '—')
 
+    def test_refresh_flushes_pending_quantity_before_reloading_cart(self):
+        self.dialog.add_cart_products([dict(part='C2040', purchase_quantity=5)])
+        self.wait(lambda: not self.dialog.cart_busy)
+        self.dialog.tabs.setCurrentIndex(2)
+        self.wait(lambda: self.dialog.cart_panel.loaded)
+        panel = self.dialog.cart_panel
+        panel.table.cellWidget(0, 5).setValue(25)
+        panel.refresh.click()  # Before the 300 ms save debounce expires.
+        self.wait(lambda: not self.dialog.cart_loading and not self.dialog.cart_mutating)
+        self.assertEqual(panel.rows[0]['quantity'], 25)
+        self.assertEqual(len(self.service.cart_updates), 1)
+        self.assertFalse(self.dialog.quantity_updates)
+
+    def test_favorite_filter_restores_details_of_the_current_visible_row(self):
+        product = dict(part='C1', title='One', details_complete=True)
+        self.dialog.items['C1'] = product
+        self.dialog.append_row(self.dialog.favorite_table, product)
+        self.dialog.tabs.setCurrentIndex(1)
+        self.dialog.favorite_table.selectRow(0)
+        self.assertEqual(self.dialog.current_product['part'], 'C1')
+        self.dialog.filter_input.setText('no match')
+        self.assertIsNone(self.dialog.current_product)
+        self.dialog.filter_input.clear()
+        self.assertEqual(self.dialog.favorite_table.currentRow(), 0)
+        self.assertEqual(self.dialog.current_product['part'], 'C1')
+
+    def test_context_menus_release_actions_after_dismissal(self):
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QMenu
+        self.products()
+        table = self.dialog.search_table
+        self.app.processEvents()
+        position = table.visualItemRect(table.item(0, 1)).center()
+        create = self.dialog.make_product_menu
+        def dismiss(*args):
+            menu = create(*args)
+            QTimer.singleShot(0, menu.close)
+            return menu
+        with patch.object(self.dialog, 'make_product_menu', side_effect=dismiss):
+            for _ in range(20):
+                self.dialog.product_context_menu(table, position)
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.assertFalse(table.findChildren(QMenu))
+
+    def test_cart_bulk_selection_updates_total_once_and_keeps_quantities(self):
+        from lcsc3d.ui.commerce import CartPanel
+        rows = [dict(key=str(i), part=f'C{i + 1}', title='Part', package='', image='', status='',
+                     checked=False, price='1.25', total='2.50', quantity=2, minimum=1, currency='¥')
+                for i in range(200)]
+        panel = CartPanel(self.dialog)
+        panel.show_rows(rows)
+        with patch.object(panel, 'update_summary', wraps=panel.update_summary) as summary:
+            panel.toggle_selection()
+            self.assertEqual(len(panel.selected_rows()), 200)
+            self.assertIn('500.00', panel.summary.text())
+            self.assertEqual(summary.call_count, 1)
+            panel.toggle_selection()
+            self.assertEqual(panel.selected_rows(), [])
+            self.assertEqual(summary.call_count, 2)
+        self.assertTrue(all(panel.table.cellWidget(i, 5).value() == 2 for i in range(200)))
+
     def test_batch_favorite_expiration_clears_session_and_stops_remaining_writes(self):
         products = [dict(part=f'C{i}', title=str(i), product_id=str(i)) for i in range(1, 4)]
         self.client.account = {'name': 'OFFLINE'}

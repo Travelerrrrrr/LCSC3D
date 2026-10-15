@@ -30,8 +30,13 @@ class CatalogActions:
         self.update_count()
 
     def close_catalog_panel(self):
-        self.filter_timer.stop(); self.jobs.cancel('filter-options'); self.jobs.cancel('catalog-categories')
+        self.filter_timer.stop(); self.jobs.cancel('filter-options'); self.cancel_category_request()
         self.show_catalog_panel(self.search_results)
+
+    def cancel_category_request(self):
+        self.jobs.cancel('catalog-categories')
+        self.category_panel.refresh.setEnabled(True)
+        self.category_panel.hint.setText(tr('分类来自立创商城，双击分类可查看商品。'))
 
     def open_categories(self):
         self.filter_timer.stop(); self.jobs.cancel('filter-options'); self.show_catalog_panel(self.category_panel)
@@ -55,7 +60,7 @@ class CatalogActions:
         self.category_button.setToolTip(category['name']); self.apply_catalog_filters({'catalogIdFilter': category['id']})
 
     def open_filters(self):
-        self.jobs.cancel('catalog-categories'); self.filter_panel.begin(self.catalog_filters, self.search_facets)
+        self.cancel_category_request(); self.filter_panel.begin(self.catalog_filters, self.search_facets)
         self.show_catalog_panel(self.filter_panel)
         if not (self.search_keyword or self.catalog_filters.get('catalogIdFilter')):
             self.filter_panel.hint.setText(tr('先搜索商品或选择分类，再筛选当前范围。')); self.filter_panel.apply.setEnabled(False)

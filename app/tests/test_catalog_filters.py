@@ -181,6 +181,21 @@ class FilterUiTests(unittest.TestCase):
         self.assertIn('64KB@param_31013_n', unquote(requests[-1]['queryParameterValue']))
         self.assertEqual(requests[-1]['spotFilter'], 0)
 
+    def test_cancelled_category_refresh_can_be_retried_with_cached_categories(self):
+        d = self.dialog
+        d.open_categories(); self.wait(lambda: bool(d.categories))
+        for leave in (d.close_catalog_panel, d.open_filters):
+            with patch.object(d.jobs, 'start'):
+                d.load_categories()
+                self.assertFalse(d.category_panel.refresh.isEnabled())
+                leave()
+                d.open_categories()
+                self.assertTrue(d.category_panel.refresh.isEnabled())
+                self.assertNotIn('正在读取', d.category_panel.hint.text())
+            d.category_panel.refresh.click()
+            self.wait(lambda: not d.has_jobs())
+            self.assertTrue(d.category_panel.refresh.isEnabled())
+
     def test_range_selection_clear_and_query_validation(self):
         panel = self.dialog.filter_panel
         panel.begin({'catalogIdFilter': '11329'}, parameter_facets(parameters()))
