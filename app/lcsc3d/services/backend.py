@@ -28,7 +28,8 @@ from lcsc3d.core.app_paths import temporary_directory, replace_file
 from lcsc3d.models.model3d import (ModelReference, document, model_reference,
                      model_library_reference, model_library_asset)
 from lcsc3d.models.model_cache import cached_model, reuse_models
-from lcsc3d.eda.altium import export_schlib, export_pcblib, export_linked_schlib, export_linked_pcblib, MergedLibrary
+from lcsc3d.eda.altium import (export_schlib, export_pcblib, export_linked_schlib, export_linked_pcblib,
+                              MergedLibrary, validate_model_layer)
 from lcsc3d.eda.library_merge import read_library, append_library
 from lcsc3d.eda.altium_project import commit_user_file, add_libraries_to_project, read_project
 from lcsc3d.eda.easyeda_import import parse_component
@@ -533,9 +534,11 @@ class Options:
     keep_kicad_footprints: bool = False
     bind_3d_models: bool = True
     kicad_3d_mode: str = 'embedded'
+    ad_3d_layer: int = 1
 
     def __post_init__(self):
         self.symbol_style = normalize_symbol_style(self.symbol_style)
+        self.ad_3d_layer = validate_model_layer(self.ad_3d_layer)
         if self.kicad_3d_mode not in ('embedded', 'external'):
             raise DownloadError('请选择 KiCad 9/10 内嵌模式或 KiCad 8 兼容模式')
         # The demo.1 combined switch remains a supported caller contract.
@@ -821,7 +824,8 @@ def download_part(part: str, options: Options, api: NetworkApi,
                     payload = exporter(component, part, api.check_cancelled, symbol_style=options.symbol_style)
                 elif fmt == 'PCBLIB':
                     exporter = export_linked_pcblib if options.merge_pcblib else export_pcblib
-                    payload = exporter(component, part, api.check_cancelled, model_assets=model_assets)
+                    payload = exporter(component, part, api.check_cancelled, model_assets=model_assets,
+                                       model_layer=options.ad_3d_layer)
                 elif not model:
                     log_event('WARNING', 'download.format_unavailable', format=fmt, reason='no_model')
                     errors.append(f'{fmt}：' + (model_error or '官方库中没有关联的 3D 模型'))
@@ -887,9 +891,10 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                   ('KICAD_SYMBOL', options.kicad_merge_symbols), ('KICAD_FOOTPRINT', options.kicad_merge_footprints))) else 'individual', formats=options.formats,
               existing_formats=list(options.existing_targets()), project_selected=bool(options.project_path),
               import_project=options.imports_project(),
+              ad_3d_layer=options.ad_3d_layer if options.bind_3d_models and 'PCBLIB' in options.formats else None,
               individual_formats=[fmt for fmt in merged_paths if options.keeps_individual(fmt)])
     libraries = {fmt: MergedLibrary(fmt, merge_pcb='PCBLIB' in merged_paths,
-                                   symbol_style=options.symbol_style) for fmt in merged_paths}
+                                   symbol_style=options.symbol_style, model_layer=options.ad_3d_layer) for fmt in merged_paths}
     merge_lock = threading.Lock()
     kicad_entries = {}
     deferred_outputs = {} if 'PCBLIB' in merged_paths else None
@@ -1017,7 +1022,8 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                 exporter = export_linked_schlib if fmt == 'SCHLIB' else export_linked_pcblib
                 payload = exporter(data, result.part, api.check_cancelled,
                                    footprint_name=footprint_names.get(result.part),
-                                   **({'symbol_style': options.symbol_style} if fmt == 'SCHLIB' else {'model_assets':model_assets}))
+                                   **({'symbol_style': options.symbol_style} if fmt == 'SCHLIB' else
+                                      {'model_assets':model_assets, 'model_layer':options.ad_3d_layer}))
                 api.check_cancelled()
                 stage = 'write'
                 with log_context(part=safe_part(result.part), format=fmt):

@@ -246,10 +246,11 @@ def schematic(component, check, *, merged=False, merge_pcb=False, fonts=None, fo
                     section + '/Data': b''.join(records), 'Storage': a._parameters({'HEADER': 'Icon storage'})}
 
 
-def pcb(component, check, *, merged=False, footprint_name=None, model_assets=None):
+def pcb(component, check, *, merged=False, footprint_name=None, model_assets=None, model_layer=1):
     if model_assets is None and any(m.transform for m in component.models):
         raise DownloadError('已解析的模型缺少资源，无法写入 AD 封装')
     from lcsc3d.eda import altium as a
+    model_layer = a.validate_model_layer(model_layer)
     footprint = ALTIUM.require(component, 'footprint')
     name = a._library_name(footprint.name, component.part + '_Footprint')
     if merged:
@@ -365,5 +366,5 @@ def pcb(component, check, *, merged=False, footprint_name=None, model_assets=Non
         streams[f'Library/{folder}/Header'], streams[f'Library/{folder}/Data'] = struct.pack('<I', 0), b''
     if model_assets is not None:
         from lcsc3d.eda.altium_models import embed_models
-        embed_models(component, streams, section, model_assets, check)
+        embed_models(component, streams, section, model_assets, check, model_layer=model_layer)
     return name, streams

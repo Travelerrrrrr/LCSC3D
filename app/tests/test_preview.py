@@ -123,7 +123,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.window.save_settings()
         self.window.settings_enabled = False
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
-                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'bind_3d_models', 'kicad_3d_mode', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
+                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'bind_3d_models', 'ad_3d_layer', 'kicad_3d_mode', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
                           'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
                           'kicad_symbol', 'kicad_footprint', 'kicad_merge_symbols', 'kicad_merge_footprints',
                           'export_target', 'kicad_electrical_policy', 'kicad_symbol_name', 'kicad_footprint_name',
@@ -955,7 +955,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.window.settings_enabled = False
         self.assertTrue(self.window.step_box.isChecked())
         self.assertEqual(set(json.loads(settings_path.read_text(encoding='utf-8'))),
-                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'bind_3d_models', 'kicad_3d_mode', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
+                         {'destination', 'step', 'obj', 'schlib', 'pcblib', 'bind_3d_models', 'ad_3d_layer', 'kicad_3d_mode', 'store_proxy', 'update_proxy', 'log_level', 'language', 'theme_mode', 'accent_color', 'accent_text_color', 'font_family', 'font_size', 'auto_backup',
                           'merge_schlib', 'merge_pcblib', 'schlib_name', 'pcblib_name',
                           'kicad_symbol', 'kicad_footprint', 'kicad_merge_symbols', 'kicad_merge_footprints',
                           'export_target', 'kicad_electrical_policy', 'kicad_symbol_name', 'kicad_footprint_name',

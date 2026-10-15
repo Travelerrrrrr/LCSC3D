@@ -26,6 +26,7 @@ from lcsc3d.services.backend import (Cancelled, DownloadError, NetworkApi, Optio
 from lcsc3d.models.model3d import model_reference, read_obj
 from lcsc3d.ui.library_preview import build_library_preview, styled_symbol, VectorPreviewView, SYMBOL_BACKGROUND, FOOTPRINT_BACKGROUND
 from lcsc3d.eda.symbol_style import SYMBOL_STYLES, normalize_symbol_style
+from lcsc3d.eda.altium import MODEL_LAYERS
 from lcsc3d.eda.kicad import ELECTRICAL_TYPES, ELECTRICAL_POLICIES
 from lcsc3d.ui.update_ui import UpdateDialog, StartupUpdateCheck
 from lcsc3d.services.updater import acknowledge_update, cleanup_updates, launch_update
@@ -590,6 +591,17 @@ class MainWindow(FramelessMainWindow):
         self.bind_3d_box.setChecked(True)
         self.bind_3d_box.setToolTip(ui_text('按官方参数关联模型；开启后自动获取所需 STEP，不依赖单独下载选项'))
         model_row.addWidget(self.bind_3d_box)
+        self.ad_3d_layer_options = QWidget()
+        ad_model_row = QHBoxLayout(self.ad_3d_layer_options)
+        ad_model_row.setContentsMargins(0, 0, 0, 0)
+        ad_model_row.addWidget(label(ui_text('3D 模型机械层'), 'muted'))
+        self.ad_3d_layer_box = QComboBox()
+        self.ad_3d_layer_box.setAccessibleName(ui_text('3D 模型机械层'))
+        self.ad_3d_layer_box.setToolTip(ui_text('设置新导出 AD 封装中 3D 模型所在的机械层'))
+        for layer in MODEL_LAYERS:
+            self.ad_3d_layer_box.addItem(f'Mechanical {layer}', layer)
+        ad_model_row.addWidget(self.ad_3d_layer_box)
+        model_row.addWidget(self.ad_3d_layer_options)
         self.kicad_3d_mode_box = QComboBox()
         self.kicad_3d_mode_box.setAccessibleName(ui_text('KiCad 模型兼容模式'))
         self.kicad_3d_mode_box.addItem(ui_text('KiCad 9/10 · 内嵌模型'), 'embedded')
@@ -890,6 +902,9 @@ class MainWindow(FramelessMainWindow):
         self.schlib_box.setChecked(bool(settings.get('schlib')))
         self.pcblib_box.setChecked(bool(settings.get('pcblib')))
         self.bind_3d_box.setChecked(settings.get('bind_3d_models', True) is not False)
+        model_layer = settings.get('ad_3d_layer', 1)
+        self.ad_3d_layer_box.setCurrentIndex(self.ad_3d_layer_box.findData(
+            model_layer if type(model_layer) is int and model_layer in MODEL_LAYERS else 1))
         self.kicad_3d_mode_box.setCurrentIndex(self.kicad_3d_mode_box.findData(
             'external' if settings.get('kicad_3d_mode') == 'external' else 'embedded'))
         self.kicad_symbol_box.setChecked(settings.get('kicad_symbol') is True)
@@ -959,6 +974,7 @@ class MainWindow(FramelessMainWindow):
                 'obj': self.obj_box.isChecked(), 'schlib': self.schlib_box.isChecked(),
                 'pcblib': self.pcblib_box.isChecked(),
                 'bind_3d_models': self.bind_3d_box.isChecked(),
+                'ad_3d_layer': self.ad_3d_layer_box.currentData(),
                 'kicad_3d_mode': self.kicad_3d_mode_box.currentData(),
                 'kicad_symbol': self.kicad_symbol_box.isChecked(),
                 'kicad_footprint': self.kicad_footprint_box.isChecked(),
@@ -1505,6 +1521,8 @@ class MainWindow(FramelessMainWindow):
         self.ad_format_options.setVisible(ad)
         self.kicad_options.setVisible(not ad)
         self.bind_3d_box.setEnabled(not self.batch_running)
+        self.ad_3d_layer_options.setVisible(ad)
+        self.ad_3d_layer_box.setEnabled(not self.batch_running and ad and self.bind_3d_box.isChecked())
         self.kicad_3d_mode_box.setVisible(not ad)
         self.kicad_3d_mode_box.setEnabled(not self.batch_running and self.bind_3d_box.isChecked())
         for widget in (self.kicad_symbol_box, self.kicad_footprint_box):
@@ -1642,6 +1660,7 @@ class MainWindow(FramelessMainWindow):
                        kicad_merge_footprints=kicad_merge and self.kicad_footprint_box.isChecked() and self.kicad_merge_footprint_box.isChecked(),
                        kicad_electrical_policy=self.kicad_electrical_box.currentData(),
                        bind_3d_models=self.bind_3d_box.isChecked(),
+                       ad_3d_layer=self.ad_3d_layer_box.currentData(),
                        kicad_3d_mode=self.kicad_3d_mode_box.currentData(),
                        kicad_symbol_name=self.kicad_symbol_name_input.text().strip() if kicad_merge and self.kicad_merge_symbol_box.isChecked() else '',
                        kicad_footprint_name=self.kicad_footprint_name_input.text().strip() if kicad_merge and self.kicad_merge_footprint_box.isChecked() else '',

@@ -107,6 +107,7 @@ def start(window, folder):
                     return
                 name,target,merge,keep,mode,parts = cases[state['index']]
                 state.update(name=name,target=target,parts=parts,mode=mode,output=root/name,phase='wait')
+                state['ad_3d_layer'] = {'ad':13,'ad-merge':17,'ad-copies':32}.get(name,1)
                 assert window.bind_3d_box.isChecked()
                 window.step_box.setChecked(False)
                 window.obj_box.setChecked(False)
@@ -114,6 +115,8 @@ def start(window, folder):
                 window.export_target_box.setCurrentIndex(window.export_target_box.findData(target))
                 window.schlib_box.setChecked(True)
                 window.pcblib_box.setChecked(True)
+                window.ad_3d_layer_box.setCurrentIndex(window.ad_3d_layer_box.findData(state['ad_3d_layer']))
+                assert window.ad_3d_layer_options.isHidden() == (target!='ad')
                 window.lib_merge_box.setChecked(merge)
                 window.merge_schlib_box.setChecked(merge)
                 window.merge_pcblib_box.setChecked(merge)
@@ -131,6 +134,7 @@ def start(window, folder):
                 window.input.setPlainText('\n'.join(parts))
                 assert window.load_queue()
                 window.start_batch()
+                assert not window.ad_3d_layer_box.isEnabled()
             elif state['phase']=='wait' and not window.batch_running and not (window.worker and window.worker.isRunning()):
                 rows = [window.results[p] for p in state['parts']]
                 assert [r.status for r in rows] == (['成功','部分完成','成功'] if state['name']=='mixed' else ['成功']*len(rows)), [r.message for r in rows]
@@ -148,21 +152,25 @@ def start(window, folder):
                                 model_count+=1
                             # Independent golden pose for the real C2765186:
                             # source anchor (0, .125, -2.58), JSON (0,-1.1999976,-.8999982).
+                            from lcsc3d.eda.library_merge import Reader, parameters
+                            poses = []
+                            for stream in ole.listdir():
+                                if len(stream)!=2 or stream[0]=='Library' or stream[1]!='Data':
+                                    continue
+                                reader = Reader(ole.openstream(stream).read())
+                                reader.string()
+                                while reader.offset < len(reader.data):
+                                    kind = reader.take(1)[0]
+                                    blocks = [reader.block() for _ in range(6 if kind==2 else 2 if kind==5 else 1)]
+                                    if kind==12:
+                                        body = blocks[0][1]
+                                        values = parameters(Reader(body[18:]).block()[1])
+                                        assert values['V7_LAYER']==f'MECHANICAL{state["ad_3d_layer"]}'
+                                        assert body[0]==56+min(state['ad_3d_layer'],16)
+                                        poses.append([float(values[k].removesuffix('mil'))*.0254
+                                            for k in ('MODEL.2D.X','MODEL.2D.Y','MODEL.3D.DZ')])
+                            assert poses
                             if state['name'] in ('ad','ad-original-size'):
-                                from lcsc3d.eda.library_merge import Reader, parameters
-                                poses = []
-                                for stream in ole.listdir():
-                                    if len(stream)!=2 or stream[0]=='Library' or stream[1]!='Data':
-                                        continue
-                                    reader = Reader(ole.openstream(stream).read())
-                                    reader.string()
-                                    while reader.offset < len(reader.data):
-                                        kind = reader.take(1)[0]
-                                        blocks = [reader.block() for _ in range(6 if kind==2 else 2 if kind==5 else 1)]
-                                        if kind==12:
-                                            values = parameters(Reader(blocks[0][1][18:]).block()[1])
-                                            poses.append([float(values[k].removesuffix('mil'))*.0254
-                                                for k in ('MODEL.2D.X','MODEL.2D.Y','MODEL.3D.DZ')])
                                 assert len(poses)==1,poses
                                 assert max(abs(a-b) for a,b in zip(poses[0],(0,-1.3249976,1.6800018)))<.000003,poses
                     elif path.suffix=='.kicad_mod':
@@ -179,6 +187,7 @@ def start(window, folder):
                 assert model_count>0
                 report['cases'].append({'name':state['name'],'statuses':[r.status for r in rows],
                     'model_instances':model_count,'files':[str(p) for p in paths],
+                    'ad_3d_layer':state['ad_3d_layer'] if state['target']=='ad' else None,
                     'diagnostics':{r.part:r.model_diagnostics for r in rows},'success':True})
                 window.grab().save(str(root/(state['name']+'.png')))
                 state['phase']='next'

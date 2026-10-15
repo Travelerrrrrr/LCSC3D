@@ -13,6 +13,7 @@ import uuid
 import zlib
 
 from lcsc3d.core.errors import DownloadError
+from lcsc3d.core.app_logging import log_event, safe_part
 from lcsc3d.eda.eda_ir import Pad
 from lcsc3d.models.model_export import resolved_models
 from lcsc3d.models.model_geometry import euler_xyz
@@ -98,7 +99,7 @@ def _footprint_outline(component):
 
 
 @reuse_models
-def embed_models(component, streams, section, payloads, check):
+def embed_models(component, streams, section, payloads, check, *, model_layer=1):
     from lcsc3d.eda import altium as a
     entries, records = {}, []
     for model,asset,original in resolved_models(component,payloads):
@@ -126,7 +127,7 @@ def embed_models(component, streams, section, payloads, check):
         else:
             outline = _footprint_outline(component)
             low = high = 0.  # Unknown physical heights; the embedded model supplies the solid.
-        fields = {'V7_LAYER':'MECHANICAL1','NAME':'','KIND':0,'SUBPOLYINDEX':-1,'UNIONINDEX':0,
+        fields = {'V7_LAYER':f'MECHANICAL{model_layer}','NAME':'','KIND':0,'SUBPOLYINDEX':-1,'UNIONINDEX':0,
                   'ARCRESOLUTION':'0.5mil','ISSHAPEBASED':'FALSE','CAVITYHEIGHT':'0mil',
                   'STANDOFFHEIGHT':_mil(low),'OVERALLHEIGHT':_mil(high),'BODYPROJECTION':0,
                   'BODYCOLOR3D':8421504,'BODYOPACITY3D':'1.000','IDENTIFIER':'','TEXTURE':'',
@@ -135,7 +136,9 @@ def embed_models(component, streams, section, payloads, check):
                   'MODEL.2D.X':_mil(offset[0]),'MODEL.2D.Y':_mil(offset[1]),'MODEL.2D.ROTATION':0,
                   'MODEL.3D.ROTX':angles[0],'MODEL.3D.ROTY':angles[1],'MODEL.3D.ROTZ':angles[2],
                   'MODEL.3D.DZ':_mil(offset[2]),'MODEL.MODELTYPE':1}
-        body = a._common(57)+bytes(5)+a._parameters(fields)+struct.pack('<I',len(outline))
+        # Extended mechanical layers use the legacy Mechanical 16 byte and
+        # carry the actual layer in V7_LAYER.
+        body = a._common(56+min(model_layer,16))+bytes(5)+a._parameters(fields)+struct.pack('<I',len(outline))
         body += b''.join(struct.pack('<dd',_raw(x),_raw(y)) for x,y in outline)
         records.append(b'\x0c'+a._block(body))
     if records:
@@ -146,6 +149,8 @@ def embed_models(component, streams, section, payloads, check):
         streams['Library/Models/Data'] = b''.join(block for block,_ in entries.values())
         for i,(_,data) in enumerate(entries.values()):
             streams['Library/Models/'+str(i)] = data
+        log_event('DEBUG', 'export.ad_models_embedded', part=safe_part(component.part),
+                  ad_3d_layer=model_layer, count=len(records))
 
 
 def _model_table(streams):

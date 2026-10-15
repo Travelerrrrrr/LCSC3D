@@ -19,9 +19,16 @@ from lcsc3d.core.errors import DownloadError
 
 SOURCE = 'JLCEDA/EasyEDA Official Library'
 HOMEPAGES = 'https://lceda.cn/ ; https://easyeda.com/'
+MODEL_LAYERS = tuple(range(1, 33))
 LAYER_NAMES = {1: 'TOP', 32: 'BOTTOM', 33: 'TOPOVERLAY', 34: 'BOTTOMOVERLAY',
                35: 'TOPPASTE', 36: 'BOTTOMPASTE', 37: 'TOPSOLDER', 38: 'BOTTOMSOLDER',
                56: 'KEEPOUT', 74: 'MULTILAYER', **{n: f'MECHANICAL{n - 56}' for n in range(57, 73)}}
+
+
+def validate_model_layer(value):
+    if type(value) is not int or value not in MODEL_LAYERS:
+        raise DownloadError('请选择 Mechanical 1–32 作为 AD 3D 模型机械层')
+    return value
 
 
 def _decimal(value):
@@ -260,17 +267,18 @@ The legacy reader requires numeric fields even when their value is zero.
     return p
 
 
-@traced('export.pcblib', lambda data, part, *a, **kw: {'part': safe_part(part), 'format': 'PCBLIB'}, level='INFO')
-def export_pcblib(data, part, check_cancelled=lambda: None, *, model_assets=None):
-    _, streams = _pcblib_component(data, part, check_cancelled, model_assets=model_assets)
+@traced('export.pcblib', lambda data, part, *a, **kw: {
+    'part': safe_part(part), 'format': 'PCBLIB', 'ad_3d_layer': kw.get('model_layer', 1)}, level='INFO')
+def export_pcblib(data, part, check_cancelled=lambda: None, *, model_assets=None, model_layer=1):
+    _, streams = _pcblib_component(data, part, check_cancelled, model_assets=model_assets, model_layer=model_layer)
     return compound_file(streams, check_cancelled)
 
 
-def _pcblib_component(data, part, check_cancelled, *, merged=False, footprint_name=None, model_assets=None):
+def _pcblib_component(data, part, check_cancelled, *, merged=False, footprint_name=None, model_assets=None, model_layer=1):
     from lcsc3d.eda.easyeda_import import parse_component
     from lcsc3d.eda.altium_ir import pcb
     return pcb(parse_component(data, part, check_cancelled, domains=('footprint',)), check_cancelled,
-               merged=merged, footprint_name=footprint_name, model_assets=model_assets)
+               merged=merged, footprint_name=footprint_name, model_assets=model_assets, model_layer=model_layer)
 
 
 def merged_name(name, part):
@@ -280,10 +288,11 @@ def merged_name(name, part):
 
 class MergedLibrary:
     """Compile components into one native library. Caller serializes add/build."""
-    def __init__(self, format, *, merge_pcb=False, symbol_style='jlc'):
+    def __init__(self, format, *, merge_pcb=False, symbol_style='jlc', model_layer=1):
         self.format = format
         self.merge_pcb = merge_pcb
         self.symbol_style = symbol_style
+        self.model_layer = validate_model_layer(model_layer)
         self.fonts = [('Times New Roman', 8)]
         self.entries = {}
         self.footprint_names = {}
@@ -295,7 +304,8 @@ class MergedLibrary:
             entry = _schlib_component(data, part, check_cancelled, merged=True,
                                       merge_pcb=self.merge_pcb, fonts=self.fonts, symbol_style=self.symbol_style)
         else:
-            entry = _pcblib_component(data, part, check_cancelled, merged=True, model_assets=model_assets)
+            entry = _pcblib_component(data, part, check_cancelled, merged=True, model_assets=model_assets,
+                                      model_layer=self.model_layer)
         check_cancelled()
         self.entries[part] = entry
 
@@ -365,7 +375,8 @@ def export_linked_schlib(data, part, check_cancelled, *, footprint_name=None, sy
     return compound_file(streams, check_cancelled)
 
 
-def export_linked_pcblib(data, part, check_cancelled, *, footprint_name=None, model_assets=None):
+def export_linked_pcblib(data, part, check_cancelled, *, footprint_name=None, model_assets=None, model_layer=1):
     """Keep the standalone pair usable when also writing a combined library."""
-    _, streams = _pcblib_component(data, part, check_cancelled, merged=True, footprint_name=footprint_name, model_assets=model_assets)
+    _, streams = _pcblib_component(data, part, check_cancelled, merged=True, footprint_name=footprint_name,
+                                  model_assets=model_assets, model_layer=model_layer)
     return compound_file(streams, check_cancelled)

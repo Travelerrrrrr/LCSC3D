@@ -402,6 +402,87 @@ class ModelPlacementTests(unittest.TestCase):
         self.assertEqual(params['STANDOFFHEIGHT'],'0.0000000000mil')
         self.assertEqual(params['OVERALLHEIGHT'],'0.0000000000mil')
 
+    @unittest.skipUnless(sys.platform=='win32','Native CFB writer')
+    def test_ad_model_layer_changes_only_the_body_layer(self):
+        from altium_inspect import pcb, Reader, parameters
+        c,assets = self.resolved(source('20,30,40','-2'),ad=True)
+        baseline = export_pcblib(c,c.part,model_assets=assets)
+        _,pads,primitives = pcb(baseline)
+        original = next(body for kind,body in primitives if kind==12)
+        original_reader = Reader(original[18:])
+        original_values = parameters(original_reader.block()[1])
+        for layer in range(1,33):
+            with self.subTest(layer=layer):
+                content = export_pcblib(c,c.part,model_assets=assets,model_layer=layer)
+                _,actual_pads,actual_primitives = pcb(content)
+                self.assertEqual(actual_pads,pads)
+                self.assertEqual([p for p in actual_primitives if p[0]!=12],
+                                 [p for p in primitives if p[0]!=12])
+                body = next(body for kind,body in actual_primitives if kind==12)
+                self.assertEqual(body[0],56+min(layer,16))
+                self.assertEqual(body[1:18],original[1:18])
+                reader = Reader(body[18:])
+                values = parameters(reader.block()[1])
+                self.assertEqual(values,{**original_values,'V7_LAYER':f'MECHANICAL{layer}'})
+                self.assertEqual(body[18+reader.offset:],original[18+original_reader.offset:])
+                with olefile.OleFileIO(io.BytesIO(content)) as ole:
+                    self.assertEqual(zlib.decompress(ole.openstream('Library/Models/0').read()),self.step)
+
+    @unittest.skipUnless(sys.platform=='win32','Native CFB writer')
+    def test_backend_uses_ad_layer_for_individual_merge_append_and_copies(self):
+        from altium_inspect import pcb, Reader, parameters
+        for mode,layer in (('individual',13),('merge',17),('append',32)):
+            with self.subTest(mode=mode):
+                root = self.root/mode
+                root.mkdir()
+                options = backend.Options(root,('PCBLIB',),ad_3d_layer=layer,
+                    merge_pcblib=mode=='merge',keep_pcblib=True)
+                target = root/'Parts.PcbLib'
+                if mode=='append':
+                    c,assets = self.resolved(ad=True)
+                    target.write_bytes(export_pcblib(c,c.part,model_assets=assets))
+                    options = replace(options,append_mode=True,pcblib_target=str(target),keep_individual=True)
+                results = backend.download_batch(['C999'],options,api=self.api(),workers=1)
+                self.assertEqual([r.status for r in results],['成功'],results[0].message)
+                paths = {Path(p) for p in results[0].files}
+                self.assertEqual(len(paths),1 if mode=='individual' else 2)
+                for path in paths:
+                    layers = []
+                    with olefile.OleFileIO(path) as ole:
+                        sections = [s[0] for s in ole.listdir() if len(s)==2 and s[0]!='Library' and s[1]=='Data']
+                    for section in sections:
+                        for kind,body in pcb(path.read_bytes(),section)[2]:
+                            if kind==12:
+                                values = parameters(Reader(body[18:]).block()[1])
+                                layers.append(values['V7_LAYER'])
+                                number = int(values['V7_LAYER'].removeprefix('MECHANICAL'))
+                                self.assertEqual(body[0],56+min(number,16))
+                    expected = ['MECHANICAL1',f'MECHANICAL{layer}'] if mode=='append' and path==target else [f'MECHANICAL{layer}']
+                    self.assertCountEqual(layers,expected)
+
+    def test_invalid_ad_model_layers_are_rejected_and_diagnosable(self):
+        from lcsc3d.core import app_logging as logs
+        c,assets = self.resolved(ad=True)
+        for layer in (0,33,-1,True,13.0,'13',None):
+            with self.subTest(layer=layer):
+                with self.assertRaises(DownloadError):
+                    backend.Options(self.root,('PCBLIB',),ad_3d_layer=layer)
+                with self.assertRaises(DownloadError):
+                    export_pcblib(c,c.part,model_assets=assets,model_layer=layer)
+        log_dir = self.root/'profile/LCSC3D/logs'
+        logs.configure_logging(directory=log_dir)
+        export_pcblib(c,c.part,model_assets=assets,model_layer=13)
+        with self.assertRaises(DownloadError):
+            export_pcblib(c,c.part,model_assets=assets,model_layer=33)
+        rows = [json.loads(line) for line in (log_dir/'LCSC3D.log').read_text('utf-8').splitlines()]
+        written = next(r for r in rows if r['event']=='export.ad_models_embedded' and r.get('ad_3d_layer')==13)
+        self.assertEqual(written['count'],1)
+        failed = next(r for r in reversed(rows) if r['event']=='export.pcblib.failed')
+        self.assertEqual(failed['ad_3d_layer'],33)
+        self.assertEqual(failed['error'],'DownloadError')
+        self.assertTrue(failed['error_id'])
+        self.assertTrue(failed['frames'])
+
     def test_cancellation_is_not_a_model_warning(self):
         with self.assertRaises(Cancelled):
             resolve_models(parse_component(source(),'C20197'),lambda _:None,

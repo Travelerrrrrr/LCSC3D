@@ -56,10 +56,41 @@ class KiCadUiTests(unittest.TestCase):
         self.assertFalse(self.window.kicad_symbol_box.isChecked())
         self.assertFalse(self.window.kicad_footprint_box.isChecked())
         self.assertTrue(self.window.bind_3d_box.isChecked())
+        self.assertEqual(self.window.ad_3d_layer_box.currentData(),1)
         self.assertEqual(self.window.kicad_3d_mode_box.currentData(),'embedded')
         self.assertTrue(self.window.model_options.isHidden())
         self.window.pcblib_box.setChecked(True)
         self.assertFalse(self.window.model_options.isHidden())
+
+    def test_ad_model_layer_survives_restart_and_locks_in_batch(self):
+        w = self.window
+        w.pcblib_box.setChecked(True)
+        self.assertFalse(w.ad_3d_layer_options.isHidden())
+        self.assertEqual([w.ad_3d_layer_box.itemData(i) for i in range(w.ad_3d_layer_box.count())],list(range(1,33)))
+        w.ad_3d_layer_box.setCurrentIndex(w.ad_3d_layer_box.findData(32))
+        self.assertTrue(w.save_settings())
+        restored = self.create_window()
+        self.assertEqual(restored.export_options().ad_3d_layer,32)
+        restored.bind_3d_box.setChecked(False)
+        self.assertFalse(restored.ad_3d_layer_box.isEnabled())
+        restored.bind_3d_box.setChecked(True)
+        self.assertTrue(restored.ad_3d_layer_box.isEnabled())
+        restored.set_running(True)
+        self.assertFalse(restored.ad_3d_layer_box.isEnabled())
+        restored.set_running(False)
+        restored.export_target_box.setCurrentIndex(restored.export_target_box.findData('kicad'))
+        self.assertTrue(restored.ad_3d_layer_options.isHidden())
+        restored.export_target_box.setCurrentIndex(restored.export_target_box.findData('ad'))
+        self.assertFalse(restored.ad_3d_layer_options.isHidden())
+        self.assertEqual(restored.ad_3d_layer_box.currentData(),32)
+
+    def test_invalid_saved_ad_model_layer_defaults_to_one(self):
+        main.SETTINGS_PATH.parent.mkdir(parents=True,exist_ok=True)
+        for layer in (0,33,True,13.0,'13',None,[],{}):
+            with self.subTest(layer=layer):
+                main.SETTINGS_PATH.write_text(json.dumps({'ad_3d_layer':layer}),'utf-8')
+                self.window._restore_settings()
+                self.assertEqual(self.window.export_options().ad_3d_layer,1)
 
     def test_model_binding_and_compatibility_survive_restart_and_lock_in_batch(self):
         w = self.window
