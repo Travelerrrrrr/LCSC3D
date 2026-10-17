@@ -83,7 +83,7 @@ class DownloadPerformanceTests(unittest.TestCase):
         with patch('lcsc3d.services.backend.download_part', side_effect=first) as fetch:
             results = backend.download_batch(['C1', 'C2', 'C3'], backend.Options(Path('unused'), bind_3d_models=False), cancelled, api=FakeApi(), workers=1)
         self.assertEqual(fetch.call_count, 1)
-        self.assertEqual([result.status for result in results], ['成功', '已取消', '已取消'])
+        self.assertEqual([result.status for result in results], ['已取消', '已取消', '已取消'])
 
     def test_download_always_bypasses_cached_network_payloads(self):
         with patch('lcsc3d.services.backend.NetworkApi', return_value=FakeApi()) as factory, \

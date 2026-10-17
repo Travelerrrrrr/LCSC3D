@@ -33,7 +33,8 @@ def verify(exe, root):
     assert process.returncode==0 and report['success'] and report['frozen'],report
     for flag in ('full_after_commit','newest_top_right','older_moves_down','history_saved_reloaded',
                  'messages_page_and_copy','progress_and_notification_logs','logs_packaged_and_writable_after_clear',
-                 'message_history_survives_log_clear','single_native_window'):
+                 'message_history_survives_log_clear','single_native_window','anonymous_deferred_store_download',
+                 'cancel_removes_new_and_restores_previous','store_open_during_download','retry_after_cancel'):
         assert report[flag],flag
     assert len(report['download_intermediate_values'])>3
     assert {p.name for p in application.iterdir()}=={'LCSC3D.exe'}

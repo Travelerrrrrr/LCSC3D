@@ -323,7 +323,7 @@ class ResourceNetworkTests(unittest.TestCase):
         self.assertEqual(len(requests), 6)
         self.assertEqual(list(counts.values()), [2, 2, 2])
 
-    def test_cancelled_large_batch_preserves_completed_and_existing_files(self):
+    def test_cancelled_large_batch_removes_batch_outputs_and_preserves_existing_files(self):
         fixture = json.loads((Path(__file__).parent / 'fixtures/C2040.json').read_text(encoding='utf-8'))
         component = json.dumps({'success': True, 'result': fixture}).encode()
         limited = threading.Event()
@@ -347,8 +347,9 @@ class ResourceNetworkTests(unittest.TestCase):
             self.assertTrue(limited.wait(5))
             cancelled.set()
             results = pending.result(timeout=2)
-        self.assertEqual([result.status for result in results], ['成功'] * 29 + ['已取消'] * 11)
-        self.assertTrue(all(Path(result.files[0]).read_bytes() == STEP for result in results[:29]))
+        self.assertEqual([result.status for result in results], ['已取消'] * 40)
+        self.assertTrue(all(not result.files for result in results))
+        self.assertEqual(list((self.folder / 'exports').rglob('*.step')), [existing])
         self.assertEqual(existing.read_bytes(), b'previous complete file')
         self.assertFalse(any(path == '/components/C31' for path, _ in requests))
 

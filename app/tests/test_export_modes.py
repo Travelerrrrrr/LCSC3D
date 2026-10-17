@@ -308,8 +308,9 @@ class ExportMatrixTests(ExportFixture):
             if row.pending_formats:
                 self.api.cancelled.set()
         rows = backend.download_batch(['C2040'], options, self.api.cancelled, api=self.api, on_result=stop)
-        self.assertEqual(rows[0].status, '部分完成')
-        self.assertEqual([Path(file).suffix for file in rows[0].files], ['.step'])
+        self.assertEqual(rows[0].status, '已取消')
+        self.assertEqual(rows[0].files, [])
+        self.assertEqual(list(self.root.rglob('*.step')), [])
         self.assertEqual(project.read_bytes(), old_project)
         for fmt, path in options.existing_targets().items():
             self.assertEqual(path.read_bytes(), self.originals[fmt])

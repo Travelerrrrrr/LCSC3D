@@ -24,6 +24,8 @@ def start(window, folder):
     report=dict(version=main.VERSION, frozen=bool(getattr(sys,'frozen',False)))
     window.request_component_info=lambda:None
     window.show_preview=lambda *a,**kw:None
+    window.ensure_store(deferred=True)
+    assert not window.favorites_dialog.ui_ready
 
     class OfflineApi(main.NetworkApi):
         def fetch(self,*a,**kw):
@@ -32,10 +34,16 @@ def start(window, folder):
             return {'title':'Progress example','packageDetail':{'dataStr':{'head':{},'shape':[
                 'SVGNODE~'+json.dumps({'attrs':{'uuid':'offline-model','title':'test','c_etype':'outline3D'}})]}}}
         def get_step_3d_model(self,uuid):
+            if state.get('cancel_run'):
+                return step.replace(b'HEADER;', b'HEADER;\n/* new batch */')
             entered.set()
             while not release.wait(.025):self.check_cancelled()
             self.check_cancelled()
             return step
+        def get_raw_3d_model_obj(self,uuid):
+            while not self.cancelled.wait(.025):
+                self.check_cancelled()
+            self.check_cancelled()
     main.NetworkApi=OfflineApi
     timer=QTimer(window)
     timer.setInterval(25)
@@ -62,7 +70,7 @@ def start(window, folder):
                 window.path_input.setText(str(root/'export'))
                 window.step_box.setChecked(True);window.obj_box.setChecked(False)
                 window.schlib_box.setChecked(False);window.pcblib_box.setChecked(False)
-                window.start_batch()
+                window.start_button.click()
                 state.update(mode='blocked',started=time.monotonic())
             elif mode=='blocked':
                 state['samples'].append(window.progress_bar.value())
@@ -77,6 +85,36 @@ def start(window, folder):
                 assert window.results['C2040'].status=='成功'
                 assert any(Path(p).read_bytes()==step for p in window.results['C2040'].files)
                 report['full_after_commit']=True
+                report['anonymous_deferred_store_download']=not window.favorites_dialog.ui_ready
+                state['before']={str(p):p.read_bytes() for p in (root/'export').rglob('*') if p.is_file()}
+                state['cancel_run']=True
+                window.input.setPlainText('C2040\nC20197');window.load_queue()
+                window.obj_box.setChecked(True)
+                window.start_button.click()
+                state['mode']='cancel-written'
+            elif mode=='cancel-written':
+                files=list((root/'export').rglob('*.step'))
+                if len(files)<2 or not all(b'new batch' in p.read_bytes() for p in files):return
+                window.ensure_store()
+                assert not window.favorites_dialog.cart_panel.import_enabled
+                assert not window.favorites_dialog.orders_panel.detail.import_enabled
+                window.stop_button.click()
+                state['mode']='cancelled'
+            elif mode=='cancelled' and not window.batch_running and not window.worker.isRunning():
+                assert all(r.status=='已取消' and not r.files for r in window.results.values())
+                assert {str(p):p.read_bytes() for p in (root/'export').rglob('*') if p.is_file()}==state['before']
+                assert not list((root/'export').glob('*_C20197'))
+                assert window.start_button.isEnabled()
+                assert window.favorites_dialog.cart_panel.import_enabled
+                report['cancel_removes_new_and_restores_previous']=True
+                report['store_open_during_download']=True
+                state['cancel_run']=False
+                window.obj_box.setChecked(False)
+                window.start_button.click()
+                state['mode']='retried'
+            elif mode=='retried' and not window.batch_running and not window.worker.isRunning():
+                assert all(r.status=='成功' for r in window.results.values())
+                report['retry_after_cancel']=True
                 for toast in list(window.notifications.toasts):toast.close()
                 state['older']=notify(window,'Earlier notice','Earlier detail',severity='info',persistent=True)
                 state.update(mode='stack-second',started=time.monotonic())
@@ -93,17 +131,20 @@ def start(window, folder):
                 report['newest_top_right']=report['older_moves_down']=True
                 window.messages_button.click()
                 page=window.messages_page
-                assert page.table.rowCount()==3
+                assert page.table.rowCount()==5
                 assert page.rows[0]['title']=='Latest notice'
                 page.copy_button.click()
                 assert 'Latest detail' in QApplication.clipboard().text()
-                assert len(NotificationHistory().entries)==3
+                history=NotificationHistory().entries
+                assert len(history)==5
+                assert sum(row['title']=='下载已停止' for row in history)==1
                 window.grab().save(str(root/'messages.png'))
                 report['history_saved_reloaded']=report['messages_page_and_copy']=True
                 logs=Path(get_log_directory())/'LCSC3D.log'
                 events=[json.loads(line) for line in logs.read_text('utf-8').splitlines()]
                 assert all(event in {r['event'] for r in events} for event in
-                    ('download.progress','download.batch_result','notification.created','notification.history_opened'))
+                    ('download.progress','download.batch_result','download.rollback_completed',
+                     'notification.created','notification.history_opened'))
                 report['progress_and_notification_logs']=True
                 bundle=package_logs()
                 assert bundle['path'].is_file()

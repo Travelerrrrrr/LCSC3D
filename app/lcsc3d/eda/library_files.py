@@ -11,6 +11,7 @@ import tempfile
 from lcsc3d.core.app_paths import temporary_directory, replace_file
 from lcsc3d.core.errors import DownloadError
 from lcsc3d.core.app_logging import log_event, traced
+from lcsc3d.services.output_transaction import output_change, output_directory_removal
 
 
 def _move_new(source, target):
@@ -190,9 +191,10 @@ def _replace_libraries(root, artifacts, check):
             def publish(artifact, path):
                 check()
                 unchanged(path)
-                parents(path)
-                source = staging/'new'/artifact.path
-                (replace_file if path in before else _move_new)(source, path)
+                with output_change(path, hashlib.sha256(artifact.payload).hexdigest()):
+                    parents(path)
+                    source = staging/'new'/artifact.path
+                    (replace_file if path in before else _move_new)(source, path)
                 journal.append((path, hashlib.sha256(artifact.payload).hexdigest()))
             for artifact,path in paths:
                 if artifact.format == 'KICAD_MODEL':
@@ -204,14 +206,16 @@ def _replace_libraries(root, artifacts, check):
             for path in sorted(old_files - selected):
                 check()
                 unchanged(path)
-                path.unlink()
+                with output_change(path, None):
+                    path.unlink()
                 journal.append((path, None))
             for artifact,path in paths:
                 if artifact.format not in ('KICAD_MODEL','KICAD_FOOTPRINT'):
                     publish(artifact, path)
             wanted_dirs = {parent for _,path in paths for parent in path.parents if parent.is_relative_to(root)}
             for directory in sorted(old_dirs - wanted_dirs, key=lambda p:len(p.parts), reverse=True):
-                checked(directory).rmdir()
+                with output_directory_removal(directory):
+                    checked(directory).rmdir()
                 removed_dirs.append(directory)
             check()
             log_event('INFO', 'library.replacement_completed', files=len(paths), removed_files=len(old_files - selected))
@@ -228,9 +232,11 @@ def _replace_libraries(root, artifacts, check):
                         path.parent.mkdir(parents=True, exist_ok=True)
                         restore = staging/'restore'
                         shutil.copy2(before[path][0], restore)
-                        (replace_file if path.exists() else _move_new)(restore, path)
+                        with output_change(path, before[path][1]):
+                            (replace_file if path.exists() else _move_new)(restore, path)
                     else:
-                        path.unlink()
+                        with output_change(path, None):
+                            path.unlink()
                 except Exception:
                     failures.append(str(path))
             for directory in sorted(removed_dirs, key=lambda p:len(p.parts)):

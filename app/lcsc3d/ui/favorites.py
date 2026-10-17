@@ -868,6 +868,9 @@ class FavoritesDialog(CommerceActions, CatalogActions, QDialog):
             self.status.setText('Search LCSC International. Prices are shown in USD; choose a category for broad keywords.')
         self.refresh_account_action()
 
+        # A download can begin before the deferred storefront is first opened.
+        self.set_import_enabled(self.import_enabled)
+
     def show(self):
         self.setup_ui()
         super().show()
@@ -1508,6 +1511,8 @@ class FavoritesDialog(CommerceActions, CatalogActions, QDialog):
 
     def set_import_enabled(self, enabled):
         self.import_enabled = enabled
+        if not self.ui_ready:
+            return
         self.update_count()
         self.cart_panel.import_enabled = enabled
         self.cart_panel.update_summary()

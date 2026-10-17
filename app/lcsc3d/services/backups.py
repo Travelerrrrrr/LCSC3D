@@ -105,6 +105,7 @@ def list_backups():
 
 def create_backup(path, payload, *, reason='automatic'):
     from lcsc3d.services.backend import atomic_write
+    from lcsc3d.services.output_transaction import suspend_output_tracking
     path = Path(path).resolve()
     if path.suffix.lower() not in SUFFIXES or len(payload) > MAX_BYTES:
         raise DownloadError(ui_text('仅支持备份不超过 512 MiB 的 SchLib、PcbLib 和 PrjPcb 文件。'))
@@ -119,10 +120,12 @@ def create_backup(path, payload, *, reason='automatic'):
         data = stage / ('original' + path.suffix)
         metadata = stage / 'metadata.json'
         try:
-            atomic_write(data, payload)
+            with suspend_output_tracking():
+                atomic_write(data, payload)
             value = dict(version=1, original_path=str(path), created=datetime.now(timezone.utc).isoformat(),
                          size=len(payload), sha256=digest(payload), reason=reason)
-            atomic_write(metadata, json.dumps(value, ensure_ascii=False, indent=2).encode('utf-8'))
+            with suspend_output_tracking():
+                atomic_write(metadata, json.dumps(value, ensure_ascii=False, indent=2).encode('utf-8'))
             stage.rename(destination)
         finally:
             if stage.exists():

@@ -23,6 +23,7 @@ from shiboken6 import isValid
 
 from lcsc3d.services.backend import (Cancelled, DownloadError, NetworkApi, Options, Result, download_batch,
                      get_component_metadata, parse_part_numbers, import_existing_libraries)
+from lcsc3d.services.output_transaction import BatchCancellation
 from lcsc3d.models.model3d import model_reference, read_obj
 from lcsc3d.ui.library_preview import build_library_preview, styled_symbol, VectorPreviewView, SYMBOL_BACKGROUND, FOOTPRINT_BACKGROUND
 from lcsc3d.eda.symbol_style import SYMBOL_STYLES, normalize_symbol_style
@@ -50,7 +51,7 @@ from lcsc3d.core.assets import SOURCE_APP_DIR, RESOURCE_ROOT
 from lcsc3d.ui.progress_ui import SmoothProgressBar
 from lcsc3d.ui.messages_ui import MessagesPage
 
-VERSION = '2.4.3'
+VERSION = '2.4.4'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = RESOURCE_ROOT
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else SOURCE_APP_DIR
@@ -81,7 +82,7 @@ class BatchWorker(QThread):
         super().__init__(parent)
         self.ids, self.options = ids, options
         self.rows = list(range(len(ids))) if rows is None else rows
-        self.cancelled = threading.Event()
+        self.cancelled = BatchCancellation()
         self.log_context = new_context(feature='download')
 
     @contextual
@@ -1672,6 +1673,18 @@ class MainWindow(FramelessMainWindow):
                        **(self.export_targets if append else {}))
 
     def start_batch(self):
+        try:
+            self._start_batch()
+        except Exception as exc:
+            record_error(exc, 'download.start_failed', stage='start')
+            if self.worker and self.worker.isRunning():
+                self.worker.cancelled.set()
+            else:
+                self.set_running(False)
+            self.run_status.setText(ui_text('下载启动失败，请重试。错误详情已记录到日志。'))
+            notify(self, ui_text('无法开始下载'), self.run_status.source_text(), severity='error')
+
+    def _start_batch(self):
         if self.settings_dialog is not None and self.settings_dialog.backup_panel.busy:
             self.run_status.setText(ui_text('请等待备份操作完成后再开始导出。'))
             return
@@ -1850,9 +1863,10 @@ class MainWindow(FramelessMainWindow):
     @traced('download.stop_requested', level='INFO')
     def stop_batch(self):
         if self.worker:
-            self.worker.cancelled.set()
+            if self.worker.cancelled.set() is False:
+                return
             self.stop_button.setEnabled(False)
-            self.run_status.setText(ui_text('正在停止，等待当前网络请求结束…'))
+            self.run_status.setText(ui_text('正在停止并清理本次下载的文件，请等待当前请求结束…'))
 
     def selected_part(self):
         row = self.table.currentRow()

@@ -19,6 +19,7 @@ from urllib.parse import urlsplit, unquote
 
 from lcsc3d.core.errors import Cancelled, DownloadError
 from lcsc3d.services.download_progress import BatchProgress
+from lcsc3d.services.output_transaction import OutputTransaction, track_file_write
 from lcsc3d.core.app_settings import proxy_for_url, proxy_mode
 from lcsc3d.eda.symbol_style import normalize_symbol_style
 from lcsc3d.core.app_logging import (log_event, record_error, traced, log_context, submit_logged,
@@ -183,6 +184,7 @@ def safe_filename(name: str) -> str:
 
 
 @traced('file.write', lambda path, data: {'format': path.suffix.lower(), 'bytes': len(data)})
+@track_file_write
 def atomic_write(path: Path, data: bytes) -> None:
     """Replace complete files only. Partial downloads never become final files."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -202,7 +204,7 @@ class NetworkApi:
     """Official component/model APIs with bounded requests and cancellation."""
     def __init__(self, cancelled: threading.Event | None = None, use_cache=True):
         self.cancelled = cancelled or threading.Event()
-        self.headers = {'User-Agent': 'LCSC3D/2.4.3', 'Accept-Encoding': 'gzip',
+        self.headers = {'User-Agent': 'LCSC3D/2.4.4', 'Accept-Encoding': 'gzip',
                         'Accept': '*/*'}
         self.use_cache = use_cache
 
@@ -876,6 +878,43 @@ def download_part(part: str, options: Options, api: NetworkApi,
 @traced('download.batch', lambda parts, options, *a, **kw: {'count': len(parts), 'formats': options.formats}, level='INFO')
 @reuse_models
 def download_batch(parts, options, cancelled=None, progress=None, on_result=None, api=None, workers=3, on_progress=None):
+    """Track a whole batch so cancellation also undoes already completed exports."""
+    cancelled = cancelled or getattr(api, 'cancelled', None) or threading.Event()
+    with OutputTransaction() as transaction:
+        results = None
+        try:
+            results = _download_batch(parts, options, cancelled, progress, on_result, api, workers, on_progress)
+        except Exception as exc:
+            if not cancelled.is_set():
+                raise
+            if not isinstance(exc, Cancelled):
+                record_error(exc, 'download.cancelled_batch_failed', stage='batch')
+            results = [Result(part, '已取消') for part in parts]
+        finally:
+            stopped = cancelled.finish() if hasattr(cancelled, 'finish') else cancelled.is_set()
+            if stopped:
+                failures = transaction.rollback()
+        if stopped:
+            for index, result in enumerate(results):
+                result.status = '失败' if failures else '已取消'
+                result.files = [name for name in result.files if Path(name) in failures and Path(name).is_file()]
+                result.completed_formats.clear()
+                result.pending_formats.clear()
+                result.model_diagnostics.clear()
+                result.message = ('取消清理未完成，保留无法恢复或已被修改的文件；恢复资料：' + str(transaction.recovery)
+                                  if failures else '任务已取消；本次下载的文件已删除，原有文件已恢复')
+                result.export_errors = [result.message] if failures else []
+                if on_result:
+                    on_result(index, result)
+        log_event('INFO', 'download.batch_result', count=len(results),
+                  succeeded=sum(r.status == '成功' for r in results),
+                  partial=sum(r.status == '部分完成' for r in results),
+                  failed=sum(r.status in ('失败', '无模型') for r in results),
+                  cancelled=sum(r.status == '已取消' for r in results))
+        return results
+
+
+def _download_batch(parts, options, cancelled=None, progress=None, on_result=None, api=None, workers=3, on_progress=None):
     """Download with bounded concurrency; callbacks may finish out of row order."""
     if not parts:
         return []
@@ -918,7 +957,7 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                     'kicad_entries': kicad_entries} if libraries or any(fmt in KICAD_FORMATS for fmt in options.formats) else {}))
         except Cancelled:
             log_event('INFO', 'download.part_cancelled', part=safe_part(part))
-            return Result(part, '已取消', message='任务已取消；已保存的完整文件保留')
+            return Result(part, '已取消', message='任务已取消，正在清理本次下载的文件')
         except Exception as exc:
             record_error(exc, 'download.part_failed', part=safe_part(part))
             return Result(part, '失败', message=str(exc))
@@ -1082,10 +1121,5 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
         if pending or import_project and has_libraries:
             if on_result:
                 on_result(index, result)
-    log_event('INFO', 'download.batch_result', count=len(results),
-              succeeded=sum(r.status == '成功' for r in results),
-              partial=sum(r.status == '部分完成' for r in results),
-              failed=sum(r.status in ('失败', '无模型') for r in results),
-              cancelled=sum(r.status == '已取消' for r in results))
     tracker.finish(cancelled=cancelled.is_set() or any(r.status == '已取消' for r in results))
     return results

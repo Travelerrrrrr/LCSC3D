@@ -868,6 +868,11 @@ ENGLISH.update({
 
 ENGLISH.update({
     '分类': 'Categories', '筛选': 'Filters', '分类（已选）': 'Category selected',
+    '下载启动失败，请重试。错误详情已记录到日志。': 'Could not start the download. Try again; error details were logged.',
+    '正在停止并清理本次下载的文件，请等待当前请求结束…': 'Stopping and undoing this batch. Waiting for the current request…',
+    '任务已取消，正在清理本次下载的文件': 'Cancelled; undoing files from this batch',
+    '任务已取消；本次下载的文件已删除，原有文件已恢复': 'Cancelled; new files from this batch were removed and previous files restored',
+    '取消清理未完成，保留无法恢复或已被修改的文件；恢复资料：{0}': 'Cancellation cleanup is incomplete. Unrestorable or externally changed files were kept. Recovery files: {0}',
     '筛选 ({0})': 'Filters ({0})',
     '拖动调整两侧宽度': 'Drag to resize the two panels',
     '拖动列头分隔线调整宽度；双击分隔线适应内容': 'Drag column borders to resize; double-click to fit content',
