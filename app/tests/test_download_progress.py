@@ -133,7 +133,7 @@ class ProgressTests(unittest.TestCase):
         QTest.qWait(100)
         self.assertEqual(bar.value(),0)
 
-    def test_worker_shows_progress_during_blocked_download_and_stop_preserves_it(self):
+    def test_worker_stop_animates_to_zero_while_waiting_and_ignores_late_updates(self):
         with patch.object(main.MainWindow,'_setup_preview'), patch.object(main.MainWindow,'request_component_info'), \
                 patch.object(main.MainWindow,'show_preview'):
             w=main.MainWindow(settings_enabled=False)
@@ -146,14 +146,18 @@ class ProgressTests(unittest.TestCase):
         with patch.object(w,'request_component_info'),patch.object(w,'show_preview'):w.load_queue()
         w.path_input.setText(str(self.folder/'exports'))
         entered=threading.Event()
+        release=threading.Event()
+        self.addCleanup(release.set)
         class Api(FakeApi):
             def __init__(self,stop,**kwargs):
                 super().__init__()
                 self.cancelled=stop
             def get_step_3d_model(self,uuid):
                 entered.set()
-                self.cancelled.wait(3)
-                raise backend.Cancelled()
+                release.wait(3)
+                if self.cancelled.is_set():
+                    raise backend.Cancelled()
+                return STEP
         with patch('lcsc3d.ui.main.NetworkApi',Api), patch('lcsc3d.services.backend.model_reference',
                 return_value=SimpleNamespace(name='model',uuid='test-model')):
             w.start_batch()
@@ -161,9 +165,95 @@ class ProgressTests(unittest.TestCase):
             QTest.qWait(400)
             self.assertGreater(w.progress_bar.value(),0)
             self.assertLess(w.progress_bar.value(),10000)
-            w.stop_batch()
+            before = w.progress_bar.value()
+            w.stop_button.click()
+            self.assertEqual(w.progress_bar.value(), before)
+            self.assertEqual(w.progress_bar.target, 0)
+            w.update_batch_progress(.99)
+            QTest.qWait(90)
+            self.assertGreater(w.progress_bar.value(), 0)
+            self.assertLess(w.progress_bar.value(), before)
+            QTest.qWait(280)
+            self.assertTrue(w.batch_running)
+            self.assertEqual(w.progress_bar.value(), 0)
+            release.set()
             self.assertTrue(w.worker.wait(3000))
-            QTest.qWait(450)
+            QTest.qWait(50)
+            w.update_result(0, backend.Result('C2040', '已取消'))
+            w.update_batch_progress(.99)
+            self.assertEqual(w.progress_bar.value(), 0)
+            self.assertEqual(w.progress_bar.target, 0)
+            old_worker = w.worker
+            w.start_button.click()
+            old_worker.progress_changed.emit(.99)
+            old_worker.result.emit(0, backend.Result('C2040', '已取消'))
+            self.assertNotEqual(w.progress_bar.target, 9900)
+            self.assertNotEqual(getattr(w.results.get('C2040'), 'status', ''), '已取消')
+            self.assertTrue(w.worker.wait(3000))
+            QTest.qWait(400)
+            self.assertEqual(w.results['C2040'].status, '成功')
+            self.assertEqual(w.progress_bar.value(), 10000)
         self.assertFalse(w.batch_running)
-        self.assertLess(w.progress_bar.target,10000)
         self.assertIn('下载已停止',[e['title'] for e in w.notifications.history.entries])
+        events=[json.loads(line) for line in (self.folder/'LCSC3D/logs/LCSC3D.log').read_text('utf-8').splitlines()]
+        self.assertEqual(sum(row['event']=='download.progress_reset' for row in events),1)
+
+    def test_cancel_reset_reverses_active_animation_without_jumping_or_restarting(self):
+        bar=SmoothProgressBar();self.addCleanup(bar.deleteLater)
+        bar.setFraction(.6,immediate=True)
+        bar.setFraction(.9)
+        QTest.qWait(80)
+        before=bar.value()
+        self.assertTrue(6000<before<9000)
+        samples=[];bar.valueChanged.connect(samples.append)
+        bar.resetAnimated()
+        self.assertEqual(bar.value(),before)
+        QTest.qWait(180)
+        self.assertTrue(0<bar.value()<before)
+        bar.resetAnimated()
+        QTest.qWait(180)
+        self.assertEqual((bar.value(),bar.target),(0,0))
+        self.assertEqual(samples,sorted(samples,reverse=True))
+        self.assertGreater(len(set(samples)),3)
+
+    def test_new_run_interrupts_reset_without_old_animation_erasing_new_progress(self):
+        bar=SmoothProgressBar();self.addCleanup(bar.deleteLater)
+        bar.setFraction(.8,immediate=True);bar.resetAnimated()
+        QTest.qWait(60)
+        bar.setFraction(0,immediate=True);bar.setFraction(.4)
+        QTest.qWait(370)
+        self.assertEqual((bar.value(),bar.target),(4000,4000))
+
+    def test_cancelled_completion_including_cleanup_failure_resets_progress(self):
+        with patch.object(main.MainWindow,'_setup_preview'),patch.object(main.MainWindow,'request_component_info'),patch.object(main.MainWindow,'show_preview'):
+            w=main.MainWindow(settings_enabled=False)
+        try:
+            w.worker=main.BatchWorker(['C2040'],backend.Options(self.folder),w)
+            w.worker.cancelled.set()
+            w.progress_bar.setFraction(.7,immediate=True)
+            w.complete_batch([backend.Result('C2040','失败',message='清理失败')])
+            self.assertEqual(w.progress_bar.target,0)
+            QTest.qWait(80)
+            self.assertTrue(0<w.progress_bar.value()<7000)
+            QTest.qWait(300)
+            self.assertEqual(w.progress_bar.value(),0)
+        finally:
+            w.close();w.deleteLater();self.app.sendPostedEvents(None,QEvent.DeferredDelete)
+
+    def test_editing_cancelled_queue_does_not_count_cancelled_rows_as_progress(self):
+        with patch.object(main.MainWindow,'_setup_preview'),patch.object(main.MainWindow,'request_component_info'),patch.object(main.MainWindow,'show_preview'):
+            w=main.MainWindow(settings_enabled=False)
+            try:
+                w.input.setPlainText('C2040\nC20197');w.load_queue()
+                w.progress_bar.setFraction(.7,immediate=True)
+                w.reset_cancelled_progress()
+                for row,part in enumerate(w.ids):
+                    w.update_result(row,backend.Result(part,'已取消'))
+                w.table.item(1,main.DOWNLOAD_COLUMN).setCheckState(Qt.Unchecked)
+                w.remove_checked_downloads()
+                self.assertEqual(w.ids,['C20197'])
+                self.assertEqual(w.progress_bar.target,0)
+                QTest.qWait(360)
+                self.assertEqual(w.progress_bar.value(),0)
+            finally:
+                w.close();w.deleteLater();self.app.sendPostedEvents(None,QEvent.DeferredDelete)

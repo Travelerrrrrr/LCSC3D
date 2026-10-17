@@ -34,9 +34,12 @@ def verify(exe, root):
     for flag in ('full_after_commit','newest_top_right','older_moves_down','history_saved_reloaded',
                  'messages_page_and_copy','progress_and_notification_logs','logs_packaged_and_writable_after_clear',
                  'message_history_survives_log_clear','single_native_window','anonymous_deferred_store_download',
-                 'cancel_removes_new_and_restores_previous','store_open_during_download','retry_after_cancel'):
+                 'cancel_removes_new_and_restores_previous','store_open_during_download','retry_after_cancel',
+                 'cancel_progress_animated_to_zero'):
         assert report[flag],flag
     assert len(report['download_intermediate_values'])>3
+    values=report['cancel_progress_values']
+    assert values[0]>0 and values[-1]==0 and values==sorted(values,reverse=True) and len(set(values))>3
     assert {p.name for p in application.iterdir()}=={'LCSC3D.exe'}
     assert not any(cwd.iterdir())
     assert executable.read_bytes()==exe.read_bytes()

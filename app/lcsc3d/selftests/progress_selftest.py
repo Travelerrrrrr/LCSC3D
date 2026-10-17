@@ -18,10 +18,12 @@ def start(window, folder):
     root=Path(folder).resolve()
     root.mkdir(parents=True,exist_ok=True)
     step=b'ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;'
-    state=dict(mode='begin', deadline=time.monotonic()+60, samples=[], done=False)
+    state=dict(mode='begin', deadline=time.monotonic()+60, samples=[], reset_samples=[], done=False)
     release=threading.Event()
     entered=threading.Event()
     report=dict(version=main.VERSION, frozen=bool(getattr(sys,'frozen',False)))
+    window.progress_bar.valueChanged.connect(lambda value:state['reset_samples'].append(value)
+                                             if state['mode']=='cancelled' else None)
     window.request_component_info=lambda:None
     window.show_preview=lambda *a,**kw:None
     window.ensure_store(deferred=True)
@@ -92,15 +94,29 @@ def start(window, folder):
                 window.obj_box.setChecked(True)
                 window.start_button.click()
                 state['mode']='cancel-written'
+                state['cancel_started']=time.monotonic()
             elif mode=='cancel-written':
                 files=list((root/'export').rglob('*.step'))
-                if len(files)<2 or not all(b'new batch' in p.read_bytes() for p in files):return
+                if (len(files)<2 or not all(b'new batch' in p.read_bytes() for p in files)
+                        or time.monotonic()-state['cancel_started']<.45):return
                 window.ensure_store()
                 assert not window.favorites_dialog.cart_panel.import_enabled
                 assert not window.favorites_dialog.orders_panel.detail.import_enabled
-                window.stop_button.click()
+                state['cancel_before']=window.progress_bar.value()
+                assert state['cancel_before']>0
                 state['mode']='cancelled'
+                window.stop_button.click()
+                assert window.progress_bar.target==0
+                assert window.progress_bar.value()==state['cancel_before']
             elif mode=='cancelled' and not window.batch_running and not window.worker.isRunning():
+                if window.progress_bar.value()!=0:return
+                samples=state['reset_samples']
+                assert any(0<value<state['cancel_before'] for value in samples)
+                assert samples==sorted(samples,reverse=True) and samples[-1]==0
+                window.update_batch_progress(.99)
+                assert window.progress_bar.target==0
+                report['cancel_progress_animated_to_zero']=True
+                report['cancel_progress_values']=[state['cancel_before']]+samples
                 assert all(r.status=='已取消' and not r.files for r in window.results.values())
                 assert {str(p):p.read_bytes() for p in (root/'export').rglob('*') if p.is_file()}==state['before']
                 assert not list((root/'export').glob('*_C20197'))
@@ -143,7 +159,7 @@ def start(window, folder):
                 logs=Path(get_log_directory())/'LCSC3D.log'
                 events=[json.loads(line) for line in logs.read_text('utf-8').splitlines()]
                 assert all(event in {r['event'] for r in events} for event in
-                    ('download.progress','download.batch_result','download.rollback_completed',
+                    ('download.progress','download.progress_reset','download.batch_result','download.rollback_completed',
                      'notification.created','notification.history_opened'))
                 report['progress_and_notification_logs']=True
                 bundle=package_logs()

@@ -17,6 +17,14 @@ class SmoothProgressBar(QProgressBar):
         target = round(max(0., min(1., fraction)) * self.maximum())
         if not immediate and target <= self.target:
             return
+        self._set_target(target, immediate=immediate)
+
+    def resetAnimated(self):
+        """Retreat from the displayed value; repeated cancellation keeps its timing."""
+        if self.target != 0:
+            self._set_target(0, immediate=False)
+
+    def _set_target(self, target, *, immediate):
         self.animation.stop()
         self.target = target
         if immediate or target == self.value():

@@ -301,6 +301,7 @@ class MainWindow(FramelessMainWindow):
         self._normal_library_formats = None
         self.worker = None
         self.batch_running = False
+        self.progress_cancelled = False
         self.batch_ids = []
         self.ids = []
         self.purchase_quantities = {}
@@ -1401,7 +1402,8 @@ class MainWindow(FramelessMainWindow):
             self.detail.setToolTip('')
             self.part_folder_button.setEnabled(False)
         self.summary.setText(ui_message('{0} 个器件', len(self.ids)))
-        self.progress_bar.setFraction(sum(part in self.results for part in self.ids) / max(1, len(self.ids)), immediate=True)
+        if not self.progress_cancelled:
+            self.progress_bar.setFraction(sum(part in self.results for part in self.ids) / max(1, len(self.ids)), immediate=True)
         self.download_selection_changed()
         self.run_status.setText(ui_message('已从下载列表删除 {0} 个器件，剩余 {1} 个。已下载文件保留。', len(removed), len(self.ids)))
         log_event('INFO', 'queue.deleted', count=len(removed), remaining=len(self.ids))
@@ -1746,6 +1748,7 @@ class MainWindow(FramelessMainWindow):
             notify(self, ui_text('无法开始下载'), self.run_status.source_text(), severity='error')
             return
         self.batch_ids = [self.ids[row] for row in rows]
+        self.progress_cancelled = False
         for row in rows:
             self.results.pop(self.ids[row], None)
             item = self.table.item(row, RESULT_COLUMN)
@@ -1815,10 +1818,16 @@ class MainWindow(FramelessMainWindow):
         self.run_status.setText(ui_message('已完成 {0} / {1} · {2} · {3}', completed, len(batch_ids), self.ids[row], ui_text(status)))
 
     def update_batch_progress(self, fraction):
-        if self.batch_running:
+        sender = self.sender()
+        if isinstance(sender, BatchWorker) and sender is not self.worker:
+            return
+        if self.batch_running and not self.progress_cancelled:
             self.progress_bar.setFraction(fraction)
 
     def update_result(self, row, result):
+        sender = self.sender()
+        if isinstance(sender, BatchWorker) and sender is not self.worker:
+            return
         self.results[result.part] = result
         item = self.table.item(row, RESULT_COLUMN)
         item.setText(result.status)
@@ -1835,7 +1844,7 @@ class MainWindow(FramelessMainWindow):
             self.component_info[result.part] = {'title': title, 'model': model}
             model_item.setText(title or model)
             model_item.setToolTip(self.component_tooltip({'title': title, 'model': model}))
-        if not self.batch_running:
+        if not self.batch_running and not self.progress_cancelled:
             parts = self.batch_ids or self.ids
             self.progress_bar.setFraction(sum(part in self.results and self.results[part].status != ui_text('等待合并')
                 for part in parts) / max(1, len(parts)), immediate=True)
@@ -1849,7 +1858,9 @@ class MainWindow(FramelessMainWindow):
         self.run_status.setText(ui_message('完成 · 成功 {0} · 部分完成 {1} · 失败或无资料 {2} · 取消 {3}', ok, partial, failed, cancelled))
         self.summary.setText(ui_message('{0} / {1} 成功', ok, len(results)))
         stopped = bool(cancelled or self.worker and self.worker.cancelled.is_set())
-        if not stopped:
+        if stopped:
+            self.reset_cancelled_progress()
+        else:
             self.progress_bar.setFraction(1)
         notify(self, ui_text('下载已停止') if stopped else ui_text('下载完成'), self.run_status.source_text(),
                severity='warning' if partial or failed or stopped else 'success',
@@ -1878,11 +1889,19 @@ class MainWindow(FramelessMainWindow):
         if self.close_when_finished:
             self.close()
 
+    def reset_cancelled_progress(self):
+        if not self.progress_cancelled:
+            self.progress_cancelled = True
+            log_event('INFO', 'download.progress_reset', reason='cancelled',
+                      from_percent=round(self.progress_bar.value() / 100, 2), target_percent=0)
+            self.progress_bar.resetAnimated()
+
     @traced('download.stop_requested', level='INFO')
     def stop_batch(self):
         if self.worker:
             if self.worker.cancelled.set() is False:
                 return
+            self.reset_cancelled_progress()
             self.stop_button.setEnabled(False)
             self.run_status.setText(ui_text('正在停止并清理本次下载的文件，请等待当前请求结束…'))
 

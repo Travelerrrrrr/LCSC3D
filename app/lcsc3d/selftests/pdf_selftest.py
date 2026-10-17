@@ -97,9 +97,12 @@ def start(window, folder):
                 if path.read_bytes()!=pdf+b'\n':return
                 window.stop_button.click();state['phase']='cancelled'
             elif phase=='cancelled' and finished():
+                if window.progress_bar.value()!=0:return
+                assert window.progress_bar.target==0
                 assert all(row.status=='已取消' and not row.pdf_status for row in window.results.values())
                 assert snapshot()==state['before']
                 report['cancel_restores_pdf_and_report']=True
+                report['cancel_progress_zero']=True
                 state.update(phase='retry',mode='success');window.start_button.click()
             elif phase=='retry' and finished():
                 if time.monotonic()-state.setdefault('retry_settle',time.monotonic())<.4:return
