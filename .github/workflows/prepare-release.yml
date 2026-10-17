@@ -101,7 +101,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Draft release preparation failed' }
           gh release upload $env:RELEASE_TAG outputs/LCSC3D.exe outputs/LCSC3D.zip outputs/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed' }
-          $release = (gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG") | ConvertFrom-Json
+          # Drafts are not returned reliably by the public tag lookup endpoint.
+          $releaseIds = @(gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq '.[] | select(.tag_name == env.RELEASE_TAG) | .id')
+          if ($LASTEXITCODE -ne 0 -or $releaseIds.Count -ne 1) { throw 'Expected one release for this tag' }
+          $release = (gh api "repos/$env:GITHUB_REPOSITORY/releases/$($releaseIds[0])") | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or -not $release.draft) { throw 'Draft release verification failed' }
           foreach ($name in @('LCSC3D.exe', 'LCSC3D.zip', 'SHA256SUMS.txt')) {
             $assets = @($release.assets | Where-Object name -eq $name)
