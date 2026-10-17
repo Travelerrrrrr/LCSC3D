@@ -101,6 +101,8 @@ README 中英文首页保持软件整体介绍，不放版本更新重点。Git 
 
 发布说明引用仓库文档时，先运行 `python scripts/prepare_release_notes.py --tag vX.Y.Z --source docs/releases/vX.Y.Z.md --output work/release-notes.md`。它核对本地来源并将链接转换为该正式 tag 的公开地址；创建或编辑 Release 时使用生成文件作为 `--notes-file`，避免发布页面中的相对图片路径失效。`Prepare release` 已使用相同流程。
 
-也可在 Actions 中运行 `Prepare release`，填写版本标签和已成功完成的 `Windows build` 运行编号。流程核对应用源码与该构建一致，下载其 EXE，打包完整源码，生成校验和并上传到 Release 草稿；公开发布前核对附件。它不会覆盖已公开的 Release。
+也可在 Actions 中从 `main` 运行 `Prepare release`，填写版本标签和已成功完成的 `Windows build` 运行编号。所选构建必须来自当前 `main` 的同一个提交，且包含完整 EXE、PDF、取消动画和日志验收证据。流程直接复用 CI 已校验的 EXE、源码 ZIP 和校验和，按 Git 的文本/二进制规则逐文件核对源码归属，不重新生成发行资产。默认生成 Release 草稿；仅在明确要求公开发布时启用 `publish`。上传后核对 GitHub 附件 SHA-256，再公开发布；不会覆盖已有正式 Release。
+
+附注标签首行固定为 `LCSC3D X.Y.Z`，正文包含完整问题原因、修复方法与功能介绍。`prepare_release_notes.py --tag-message-output work/tag-message.txt` 同时生成附注标签正文，使用 `git tag -a --cleanup=verbatim -F work/tag-message.txt` 保留说明内容。Windows CI 不再通过提交消息中的固定版本标记自动发布。
 
 2.1.2 增量导出验证：在 `--self-test-ad` 目标目录预放 `已有库.SchLib`、`已有库.PcbLib` 和 `测试工程.PrjPcb`，追加 `--self-test-ad-integrate`，验证保留原库、重复跳过、同时单独输出及加入工程。交付脚本 `--integration-dir` 还需要同目录的 `原始库.SchLib` / `原始库.PcbLib`，用于逐流对比原内容；`--capture-dir` 检查实际商品图片与导入弹窗截图报告。所有目标和备份均使用隔离目录。

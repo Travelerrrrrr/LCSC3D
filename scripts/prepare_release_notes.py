@@ -41,13 +41,28 @@ def prepare(source: Path, tag: str, *, allow_images=False) -> str:
                   lambda m: m[1] + public_url(m[2]) + m[3], content)
 
 
+def tag_message(content: str, tag: str) -> str:
+    """Keep the annotated tag's title exact and include the full release explanation."""
+    title = 'LCSC3D ' + tag.removeprefix('v')
+    lines = content.splitlines()
+    if not lines or lines[0] != '# ' + title:
+        raise ValueError('Release notes must start with # ' + title)
+    return '\n'.join([title, *lines[1:]]).rstrip() + '\n'
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--tag', required=True)
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--tag-message-output', type=Path)
     parser.add_argument('--allow-images', action='store_true', help='Only use when the user explicitly requests release images')
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(prepare(args.source, args.tag, allow_images=args.allow_images), encoding='utf-8', newline='\n')
+    content = prepare(args.source, args.tag, allow_images=args.allow_images)
+    annotation = tag_message(content, args.tag)
+    args.output.write_text(content, encoding='utf-8', newline='\n')
+    if args.tag_message_output:
+        args.tag_message_output.parent.mkdir(parents=True, exist_ok=True)
+        args.tag_message_output.write_text(annotation, encoding='utf-8', newline='\n')
     print(f'Prepared public release notes: {args.output}')

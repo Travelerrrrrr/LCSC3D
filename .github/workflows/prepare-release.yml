@@ -6,10 +6,22 @@ on:
       release_tag:
         description: Release tag matching app/lcsc3d/ui/main.py VERSION
         required: true
-        default: v2.4.2
+        default: v2.4.4
       build_run_id:
         description: Successful Windows build run to use
         required: true
+      publish:
+        description: Publish after all checks (otherwise leave a draft)
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
 
 permissions:
   contents: write
@@ -18,6 +30,7 @@ permissions:
 jobs:
   prepare:
     runs-on: windows-latest
+    timeout-minutes: 15
     env:
       PYTHONUTF8: '1'
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -33,6 +46,7 @@ jobs:
       - name: Verify version and successful build
         shell: pwsh
         run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main') { throw 'Release preparation must run from main' }
           if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$' -or $env:BUILD_RUN_ID -notmatch '^\d+$') {
             throw 'Invalid release inputs'
           }
@@ -43,36 +57,62 @@ jobs:
           if (-not (Test-Path -LiteralPath ("docs/releases/" + $env:RELEASE_TAG + '.md'))) {
             throw 'Release notes are missing'
           }
-          $build = (gh run view $env:BUILD_RUN_ID --repo $env:GITHUB_REPOSITORY --json conclusion,status,headSha,workflowName) | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or $build.conclusion -ne 'success' -or $build.status -ne 'completed' -or $build.workflowName -ne 'Windows build') {
+          $build = (gh run view $env:BUILD_RUN_ID --repo $env:GITHUB_REPOSITORY --json conclusion,status,headSha,headBranch,event,workflowName) | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $build.conclusion -ne 'success' -or $build.status -ne 'completed' -or $build.workflowName -ne 'Windows build' -or $build.event -ne 'push' -or $build.headBranch -ne 'main') {
             throw 'A successful completed Windows build is required'
           }
-          git diff --quiet $build.headSha -- app
-          if ($LASTEXITCODE -ne 0) { throw 'Application source differs from the tested build' }
-      - name: Download verified build and package complete source
+          if ($build.headSha -ne $env:GITHUB_SHA) { throw 'The exact release commit must pass Windows build' }
+          $head = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:GITHUB_SHA) { throw 'A newer main commit must be verified before release' }
+      - name: Download and verify immutable build assets
         shell: pwsh
         run: |
-          gh run download $env:BUILD_RUN_ID --repo $env:GITHUB_REPOSITORY --name LCSC3D-Windows-x64 --dir outputs
+          gh run download $env:BUILD_RUN_ID --repo $env:GITHUB_REPOSITORY --name LCSC3D-release-assets --dir outputs
           if ($LASTEXITCODE -ne 0) { throw 'Build artifact download failed' }
-          python scripts/package_source.py
-          if ($LASTEXITCODE -ne 0) { throw 'Source packaging failed' }
-          $checksums = foreach ($name in @('LCSC3D.exe', 'LCSC3D.zip')) {
-            $hash = Get-FileHash -LiteralPath (Join-Path outputs $name) -Algorithm SHA256
-            $hash.Hash.ToLowerInvariant() + '  ' + $name
-          }
-          Set-Content -LiteralPath outputs/SHA256SUMS.txt -Value $checksums -Encoding ascii
+          python scripts/verify_release_assets.py --directory outputs --version ($env:RELEASE_TAG.Substring(1)) --commit $env:GITHUB_SHA --report work/publish-verification.json
+          if ($LASTEXITCODE -ne 0) { throw 'Verified release asset check failed' }
       - name: Prepare draft release and upload verified assets
         shell: pwsh
         run: |
-          python scripts/prepare_release_notes.py --tag $env:RELEASE_TAG --source ("docs/releases/" + $env:RELEASE_TAG + '.md') --output work/release-notes.md
+          python scripts/prepare_release_notes.py --tag $env:RELEASE_TAG --source ("docs/releases/" + $env:RELEASE_TAG + '.md') --output work/release-notes.md --tag-message-output work/tag-message.txt
           if ($LASTEXITCODE -ne 0) { throw 'Release notes preparation failed' }
           $draft = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json isDraft --jq .isDraft 2>$null
           if ($LASTEXITCODE -eq 0) {
             if ($draft -ne 'true') { throw 'An existing public release will not be replaced' }
-            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title ("LCSC3D " + $env:RELEASE_TAG.TrimStart('v')) --notes-file work/release-notes.md
+          }
+          git show-ref --verify --quiet ("refs/tags/" + $env:RELEASE_TAG)
+          if ($LASTEXITCODE -eq 0) {
+            $kind = git cat-file -t ("refs/tags/" + $env:RELEASE_TAG)
+            $target = git rev-list -n 1 $env:RELEASE_TAG
+            $annotation = (git for-each-ref '--format=%(contents)' ("refs/tags/" + $env:RELEASE_TAG)) -join "`n"
+            $expected = Get-Content -LiteralPath work/tag-message.txt -Raw
+            if ($kind -ne 'tag' -or $target -ne $env:GITHUB_SHA -or $annotation.TrimEnd() -ne $expected.TrimEnd()) { throw 'Existing tag differs from the verified release' }
+          } elseif ($LASTEXITCODE -eq 1) {
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' tag -a --cleanup=verbatim $env:RELEASE_TAG -F work/tag-message.txt $env:GITHUB_SHA
+            if ($LASTEXITCODE -ne 0) { throw 'Annotated tag creation failed' }
+            git push origin ("refs/tags/" + $env:RELEASE_TAG)
+            if ($LASTEXITCODE -ne 0) { throw 'Tag publication failed' }
+          } else { throw 'Tag lookup failed' }
+          if ($draft -eq 'true') {
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --title ("LCSC3D " + $env:RELEASE_TAG.TrimStart('v')) --notes-file work/release-notes.md
           } else {
-            gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft --target $env:GITHUB_SHA --title ("LCSC3D " + $env:RELEASE_TAG.TrimStart('v')) --notes-file work/release-notes.md
+            gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft --verify-tag --title ("LCSC3D " + $env:RELEASE_TAG.TrimStart('v')) --notes-file work/release-notes.md
           }
           if ($LASTEXITCODE -ne 0) { throw 'Draft release preparation failed' }
           gh release upload $env:RELEASE_TAG outputs/LCSC3D.exe outputs/LCSC3D.zip outputs/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed' }
+          $release = (gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG") | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $release.draft) { throw 'Draft release verification failed' }
+          foreach ($name in @('LCSC3D.exe', 'LCSC3D.zip', 'SHA256SUMS.txt')) {
+            $assets = @($release.assets | Where-Object name -eq $name)
+            $file = Get-Item -LiteralPath (Join-Path outputs $name)
+            $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($assets.Count -ne 1 -or $assets[0].state -ne 'uploaded' -or $assets[0].size -ne $file.Length -or $assets[0].digest -ne ('sha256:' + $hash)) { throw 'Uploaded release digest mismatch' }
+          }
+      - name: Publish verified release
+        if: inputs.publish
+        run: |
+          $head = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:GITHUB_SHA) { throw 'Main changed during release preparation' }
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
