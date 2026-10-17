@@ -187,12 +187,19 @@ class ResourceNetworkTests(unittest.TestCase):
         self.assertGreaterEqual(requests[1][1] - requests[0][1], 1)
 
     def test_service_unavailable_retry_after_http_date(self):
-        due = int(time.time()) + 2
+        # Fix only the HTTP-date parser's wall clock. Measure the real wait
+        # with the same monotonic clock as the cooldown, so wall-clock
+        # granularity/adjustments cannot make a completed wait appear early.
+        now, due = 1_700_000_000.75, 1_700_000_002
+        self.patch(patch('urllib3.util.retry.time', SimpleNamespace(time=lambda: now)))
+        defer = self.patch(patch.object(backend.RESOURCE_COOLDOWNS, 'defer',
+                                       wraps=backend.RESOURCE_COOLDOWNS.defer))
         base, requests = self.serve(lambda path, count:
             (503, {'Retry-After': formatdate(due, usegmt=True)}, b'busy') if count == 1 else (200, {}, STEP))
         self.assertEqual(backend.NetworkApi().fetch(base + '/model'), STEP)
         self.assertEqual(len(requests), 2)
-        self.assertGreaterEqual(time.time(), due)
+        defer.assert_called_once_with(base + '/model', due - now)
+        self.assertGreaterEqual(requests[1][1] - requests[0][1], due - now)
 
     def test_missing_and_invalid_retry_after_recover(self):
         self.patch(patch('lcsc3d.services.backend.RESOURCE_RETRY_BACKOFF', 0.02))

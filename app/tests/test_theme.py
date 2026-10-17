@@ -253,7 +253,7 @@ class AppearanceTests(unittest.TestCase):
 
     def test_selected_table_text_uses_accent_text_color_with_and_without_focus(self):
         from PySide6.QtWidgets import QAbstractItemView
-        from PySide6.QtGui import QColor
+        from PySide6.QtGui import QColor, QPixmap
         from PySide6.QtTest import QTest
         table = QTableWidget(2, 2)
         other = QPushButton('Focus elsewhere')
@@ -287,9 +287,18 @@ class AppearanceTests(unittest.TestCase):
                                     other.setFocus()
                                     table.clearFocus()
                                 QTest.qWait(20)
+                                # Render at a fixed 2x scale, independent of the
+                                # host screen. At 1x, unhinted Segoe UI's short
+                                # "Success" has too few nearly opaque pixels
+                                # for a foreground-color assertion.
+                                pixmap = QPixmap(table.viewport().size() * 2)
+                                pixmap.setDevicePixelRatio(2)
+                                pixmap.fill(Qt.transparent)
+                                table.viewport().render(pixmap)
                                 for column in range(2):
                                     rect = table.visualItemRect(table.item(row, column)).adjusted(6, 4, -6, -4)
-                                    image = table.viewport().grab(rect).toImage()
+                                    image = pixmap.toImage().copy(rect.x() * 2, rect.y() * 2,
+                                                                 rect.width() * 2, rect.height() * 2)
                                     matches = sum(max(abs(a - b) for a, b in zip(image.pixelColor(x, y).getRgb()[:3], target)) < 15
                                                   for y in range(image.height()) for x in range(image.width()))
                                     self.assertGreater(matches, 10, (column, focused, color))

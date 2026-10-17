@@ -123,20 +123,39 @@ class MaterialUiTests(unittest.TestCase):
 
     def test_result_column_follows_the_table_right_edge_after_window_and_splitter_resize(self):
         w = self.window
+        header = w.table.horizontalHeader()
+        columns = [w.table.columnWidth(col) for col in range(main.RESULT_COLUMN)]
+        # Stretching must preserve the requested result width when a small
+        # screen/splitter leaves less room than the columns need in total.
+        result_width = 100
+        minimum_width = sum(columns) + result_width
+
+        def assert_filled_or_scrollable():
+            self.assertEqual([w.table.columnWidth(col) for col in range(main.RESULT_COLUMN)], columns)
+            self.assertEqual(header.length(), max(minimum_width, w.table.viewport().width()))
+            bar = w.table.horizontalScrollBar()
+            bar.setValue(bar.maximum())
+            edge = header.sectionViewportPosition(main.RESULT_COLUMN) + header.sectionSize(main.RESULT_COLUMN)
+            self.assertEqual(edge, w.table.viewport().width())
+            bar.setValue(0)
+
         for width, sizes in ((1380, [620, 420]), (1600, [820, 420]), (1200, [580, 350])):
             w.resize(width, 900)
             w.workspace_splitter.setSizes(sizes)
             QTest.qWait(60)
-            header = w.table.horizontalHeader()
-            edge = header.sectionViewportPosition(main.RESULT_COLUMN) + header.sectionSize(main.RESULT_COLUMN)
-            self.assertEqual(edge, w.table.viewport().width())
+            assert_filled_or_scrollable()
+        # Exercise overflow even on a large local display, both without and
+        # with the vertical scrollbar taking space from the viewport.
+        w.table.setFixedWidth(minimum_width - 10)
+        QTest.qWait(60)
+        self.assertTrue(w.table.horizontalScrollBar().isVisible())
+        assert_filled_or_scrollable()
         with patch.object(w, 'request_component_info'), patch.object(w, 'show_preview'):
             w.input.setPlainText('\n'.join('C' + str(n) for n in range(1, 41)))
             w.load_queue()
         QTest.qWait(60)
         self.assertTrue(w.table.verticalScrollBar().isVisible())
-        header = w.table.horizontalHeader()
-        self.assertEqual(header.length(), w.table.viewport().width())
+        assert_filled_or_scrollable()
         w.table.setColumnWidth(main.MODEL_COLUMN, 240)
         w.apply_preferences(Preferences(theme_mode='dark'))
         QTest.qWait(50)
