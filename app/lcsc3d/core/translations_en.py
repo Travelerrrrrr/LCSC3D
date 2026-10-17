@@ -868,6 +868,18 @@ ENGLISH.update({
 
 ENGLISH.update({
     '分类': 'Categories', '筛选': 'Filters', '分类（已选）': 'Category selected',
+    '资料': 'Documents', 'PDF 数据手册': 'PDF datasheets', '无数据手册': 'No datasheet', '未提供': 'Not provided',
+    '下载立创商城提供的数据手册；缺失型号和品牌写入 PDF/缺少pdf元件型号.txt': 'Download datasheets supplied by LCSC; missing models and brands are listed in PDF/缺少pdf元件型号.txt',
+    '请至少选择一种模型、PDF、AD 或 KiCad 元件库格式': 'Select at least one model, PDF, AD or KiCad library format',
+    '完成 · 成功 {0} · 部分完成 {1} · 失败或无资料 {2} · 取消 {3}': 'Finished · {0} succeeded · {1} partial · {2} failed/unavailable · {3} cancelled',
+    'PDF 数据手册缺失': 'Missing PDF datasheets',
+    '立创商城未提供 {0} 个元件的数据手册，型号和品牌已写入 PDF/缺少pdf元件型号.txt。': 'LCSC has no datasheet for {0} parts. Their models and brands are listed in PDF/缺少pdf元件型号.txt.',
+    '缺失 PDF 清单保存失败，请在器件结果中查看错误。': 'Could not save the missing-PDF report. See the part results for errors.',
+    '立创商城未提供 PDF 数据手册': 'LCSC does not provide a PDF datasheet',
+    '查询 PDF 数据手册': 'Looking up PDF datasheet',
+    '下载 PDF：{0:.1f} MiB': 'Downloading PDF: {0:.1f} MiB',
+    '下载 PDF：{0:.1f} / {1:.1f} MiB': 'Downloading PDF: {0:.1f} / {1:.1f} MiB',
+    '已保存 PDF {0} 份': 'Saved {0} PDF files',
     '下载启动失败，请重试。错误详情已记录到日志。': 'Could not start the download. Try again; error details were logged.',
     '正在停止并清理本次下载的文件，请等待当前请求结束…': 'Stopping and undoing this batch. Waiting for the current request…',
     '任务已取消，正在清理本次下载的文件': 'Cancelled; undoing files from this batch',

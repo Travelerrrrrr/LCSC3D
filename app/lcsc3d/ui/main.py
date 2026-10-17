@@ -494,6 +494,10 @@ class MainWindow(FramelessMainWindow):
         self.obj_box.setToolTip(ui_text('下载官方 OBJ 模型文本'))
         for widget in (self.step_box, self.obj_box):
             option_row.addWidget(widget)
+        option_row.addSpacing(12)
+        self.pdf_box = QCheckBox(ui_text('PDF 数据手册'))
+        self.pdf_box.setToolTip(ui_text('下载立创商城提供的数据手册；缺失型号和品牌写入 PDF/缺少pdf元件型号.txt'))
+        option_row.addWidget(self.pdf_box)
         option_row.insertWidget(0, label(ui_text('导出到'), 'muted'))
         self.export_target_box = QComboBox()
         self.export_target_box.setAccessibleName(ui_text('导出到'))
@@ -652,6 +656,9 @@ class MainWindow(FramelessMainWindow):
         output_layout.addWidget(self.append_options)
         self.lib_merge_box.toggled.connect(lambda checked: self.change_library_mode('merge', checked))
         self.lib_append_box.toggled.connect(lambda checked: self.change_library_mode('append', checked))
+        self.pdf_box.toggled.connect(self.update_merge_controls)
+        self.step_box.toggled.connect(self.update_merge_controls)
+        self.obj_box.toggled.connect(self.update_merge_controls)
         self.lib_append_box.clicked.connect(self.append_clicked)
         self.update_merge_controls()
         self.export_card = output_card
@@ -900,6 +907,7 @@ class MainWindow(FramelessMainWindow):
         self.path_input.setText(destination if isinstance(destination, str) and destination else default)
         self.step_box.setChecked(bool(settings.get('step', True)))
         self.obj_box.setChecked(bool(settings.get('obj')))
+        self.pdf_box.setChecked(bool(settings.get('pdf')))
         self.schlib_box.setChecked(bool(settings.get('schlib')))
         self.pcblib_box.setChecked(bool(settings.get('pcblib')))
         self.bind_3d_box.setChecked(settings.get('bind_3d_models', True) is not False)
@@ -972,7 +980,7 @@ class MainWindow(FramelessMainWindow):
         preferences = preferences or self.preferences
         try:
             write_settings(SETTINGS_PATH, {'destination': self.path_input.text(), 'step': self.step_box.isChecked(),
-                'obj': self.obj_box.isChecked(), 'schlib': self.schlib_box.isChecked(),
+                'obj': self.obj_box.isChecked(), 'pdf': self.pdf_box.isChecked(), 'schlib': self.schlib_box.isChecked(),
                 'pcblib': self.pcblib_box.isChecked(),
                 'bind_3d_models': self.bind_3d_box.isChecked(),
                 'ad_3d_layer': self.ad_3d_layer_box.currentData(),
@@ -1469,7 +1477,7 @@ class MainWindow(FramelessMainWindow):
             self.settings_dialog.backup_panel.refresh_buttons()
         if self.favorites_dialog:
             self.favorites_dialog.set_import_enabled(not running)
-        for widget in (self.input, self.sample_button, self.clear_button, self.path_input, self.browse_button, self.queue_button, self.start_button, self.step_box, self.obj_box, self.schlib_box, self.pcblib_box):
+        for widget in (self.input, self.sample_button, self.clear_button, self.path_input, self.browse_button, self.queue_button, self.start_button, self.step_box, self.obj_box, self.pdf_box, self.schlib_box, self.pcblib_box):
             widget.setEnabled(not running)
         self.stop_button.setEnabled(running)
         self.update_merge_controls()
@@ -1519,7 +1527,7 @@ class MainWindow(FramelessMainWindow):
 
     def update_merge_controls(self):
         ad = self.export_target_box.currentData() == 'ad'
-        append = ad and self.lib_append_box.isChecked()
+        append = ad and self.lib_append_box.isChecked() and self.selected_formats() != ('PDF',)
         merging = ad and self.lib_merge_box.isChecked()
         self.export_target_box.setEnabled(not self.batch_running)
         self.ad_format_options.setVisible(ad)
@@ -1641,7 +1649,7 @@ class MainWindow(FramelessMainWindow):
         dialog.show()
 
     def selected_formats(self):
-        choices = [('STEP', self.step_box), ('OBJ', self.obj_box)]
+        choices = [('STEP', self.step_box), ('OBJ', self.obj_box), ('PDF', self.pdf_box)]
         if self.export_target_box.currentData() == 'kicad':
             choices += [('KICAD_SYMBOL', self.kicad_symbol_box), ('KICAD_FOOTPRINT', self.kicad_footprint_box)]
         else:
@@ -1650,6 +1658,8 @@ class MainWindow(FramelessMainWindow):
 
     def export_options(self):
         formats = self.selected_formats()
+        if formats == ('PDF',):
+            return Options(Path(self.path_input.text().strip()).expanduser().resolve(), formats, bind_3d_models=False)
         ad = self.export_target_box.currentData() == 'ad'
         merge = ad and self.lib_merge_box.isChecked()
         append = ad and self.lib_append_box.isChecked()
@@ -1692,10 +1702,10 @@ class MainWindow(FramelessMainWindow):
             return
         formats = self.selected_formats()
         if not formats:
-            self.run_status.setText(ui_text('请至少选择一种模型、AD 或 KiCad 元件库格式'))
+            self.run_status.setText(ui_text('请至少选择一种模型、PDF、AD 或 KiCad 元件库格式'))
             notify(self, ui_text('无法开始下载'), self.run_status.source_text(), severity='warning')
             return
-        if not (self.export_target_box.currentData() == 'ad' and self.lib_append_box.isChecked()) and not self.path_input.text().strip():
+        if (formats == ('PDF',) or not (self.export_target_box.currentData() == 'ad' and self.lib_append_box.isChecked())) and not self.path_input.text().strip():
             self.run_status.setText(ui_text('请选择保存目录'))
             notify(self, ui_text('无法开始下载'), self.run_status.source_text(), severity='warning')
             return
@@ -1813,7 +1823,7 @@ class MainWindow(FramelessMainWindow):
         item = self.table.item(row, RESULT_COLUMN)
         item.setText(result.status)
         item.setToolTip(result.message)
-        role = {ui_text('成功'): 'success', ui_text('部分完成'): 'warning', ui_text('失败'): 'error', ui_text('无模型'): 'warning', ui_text('已取消'): 'muted'}.get(result.status, 'text')
+        role = {ui_text('成功'): 'success', ui_text('部分完成'): 'warning', ui_text('失败'): 'error', ui_text('无模型'): 'warning', ui_text('无数据手册'): 'warning', ui_text('已取消'): 'muted'}.get(result.status, 'text')
         item.setForeground(QColor(theme_manager().tokens[role]))
         if result.model_diagnostics and any(d.get('severity') == 'warning' for d in result.model_diagnostics):
             item.setForeground(QColor(theme_manager().tokens['warning']))
@@ -1834,9 +1844,9 @@ class MainWindow(FramelessMainWindow):
     def complete_batch(self, results):
         ok = sum(r.status == ui_text('成功') for r in results)
         partial = sum(r.status == ui_text('部分完成') for r in results)
-        failed = sum(r.status in (ui_text('失败'), ui_text('无模型')) for r in results)
+        failed = sum(r.status in (ui_text('失败'), ui_text('无模型'), ui_text('无数据手册')) for r in results)
         cancelled = sum(r.status == ui_text('已取消') for r in results)
-        self.run_status.setText(ui_message('完成 · 成功 {0} · 部分完成 {1} · 失败或无模型 {2} · 取消 {3}', ok, partial, failed, cancelled))
+        self.run_status.setText(ui_message('完成 · 成功 {0} · 部分完成 {1} · 失败或无资料 {2} · 取消 {3}', ok, partial, failed, cancelled))
         self.summary.setText(ui_message('{0} / {1} 成功', ok, len(results)))
         stopped = bool(cancelled or self.worker and self.worker.cancelled.is_set())
         if not stopped:
@@ -1844,6 +1854,14 @@ class MainWindow(FramelessMainWindow):
         notify(self, ui_text('下载已停止') if stopped else ui_text('下载完成'), self.run_status.source_text(),
                severity='warning' if partial or failed or stopped else 'success',
                details='\n'.join(r.part + ' · ' + r.status + ' · ' + r.message for r in results))
+        missing = [r for r in results if r.pdf_status == 'missing']
+        if missing and not stopped:
+            report = next((r.pdf_report for r in missing if r.pdf_report), '')
+            notify(self, ui_text('PDF 数据手册缺失'),
+                   ui_message('立创商城未提供 {0} 个元件的数据手册，型号和品牌已写入 PDF/缺少pdf元件型号.txt。', len(missing))
+                   if report else ui_text('缺失 PDF 清单保存失败，请在器件结果中查看错误。'), severity='warning',
+                   details='\n'.join(r.part + ' · ' + (r.pdf_model or r.title) + ' · ' + (r.brand or ui_text('未提供')) for r in missing)
+                           + ('\n' + report if report else ''))
         affected = [r for r in results if any(d.get('severity') in ('warning', 'error') for d in r.model_diagnostics)]
         if affected:
             details = '\n'.join(r.part + ' · ' + '；'.join(
@@ -2376,6 +2394,7 @@ def main():
     parser.add_argument('--self-test-kicad', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-models', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-progress', metavar='FOLDER', help=argparse.SUPPRESS)
+    parser.add_argument('--self-test-pdf', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-commerce', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--capture-docs', metavar='FOLDER', help=argparse.SUPPRESS)
     parser.add_argument('--self-test-material', metavar='FOLDER', help=argparse.SUPPRESS)
@@ -2410,7 +2429,7 @@ def main():
     test_destination = next((value for value in (args.self_test, args.self_test_ad, args.self_test_favorites,
                                                   args.self_test_store_live, args.self_test_catalog_live, args.self_test_settings, args.self_test_backups,
                                                   args.self_test_export, args.self_test_resources, args.self_test_kicad, args.self_test_models,
-                                                  args.capture_docs, args.self_test_material, args.self_test_progress, args.self_test_commerce) if value), None)
+                                                  args.capture_docs, args.self_test_material, args.self_test_progress, args.self_test_pdf, args.self_test_commerce) if value), None)
     configure_logging('DEBUG' if test_destination else initial_log_level(SETTINGS_PATH), version=VERSION,
                       directory=Path(test_destination) / 'logs' if test_destination else None)
     install_exception_hooks()
@@ -2437,6 +2456,10 @@ def main():
     if args.self_test_progress:
         from lcsc3d.selftests.progress_selftest import start
         start(window, args.self_test_progress)
+        return app.exec()
+    if args.self_test_pdf:
+        from lcsc3d.selftests.pdf_selftest import start
+        start(window, args.self_test_pdf)
         return app.exec()
     if args.self_test_commerce:
         from lcsc3d.selftests.commerce_selftest import start

@@ -7,5 +7,6 @@
 *.ps1 text eol=crlf
 *.png -text
 *.ico -text
+*.pdf binary
 # Upstream license notices retain their original spacing.
 app/licenses/*.txt -whitespace

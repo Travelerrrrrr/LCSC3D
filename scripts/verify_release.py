@@ -99,6 +99,7 @@ def main():
     try:
         for name, flag, filename in (
             ('settings-logs', '--self-test-settings', 'settings-verification.json'),
+            ('pdf-downloads', '--self-test-pdf', 'pdf-verification.json'),
             ('backups', '--self-test-backups', 'backups-verification.json'),
             ('export-controls', '--self-test-export', 'export-verification.json'),
             ('kicad-ad', '--self-test-kicad', 'kicad-verification.json'),

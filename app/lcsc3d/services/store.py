@@ -355,7 +355,8 @@ def product_page(html, expected_part):
         product = storefront_product(data.get('productRecord'), params)
         if not product or product['part'] != expected_part:
             raise ValueError()
-        product['datasheet'] = datasheet_url(data)
+        product['datasheets'] = datasheet_urls(data)
+        product['datasheet'] = next(iter(product['datasheets']), '')
         product['details_complete'] = True
         return product
     except (ValueError, KeyError, TypeError, UnicodeError):
@@ -363,6 +364,10 @@ def product_page(html, expected_part):
 
 
 def datasheet_url(data):
+    return next(iter(datasheet_urls(data)), '')
+
+
+def datasheet_urls(data):
     """Read only datasheets, never a similarly named certificate or PCN file."""
     record = data.get('productRecord') or {}
     groups = record.get('fileTypeVOList', []) if isinstance(record, dict) else []
@@ -373,6 +378,7 @@ def datasheet_url(data):
             if isinstance(rows, list):
                 files.extend(rows)
     files.append(data.get('pdfFileDetailVO'))
+    found = []
     for file in files:
         if not isinstance(file, dict):
             continue
@@ -380,10 +386,12 @@ def datasheet_url(data):
             path = file.get(key)
             url = public_url(path)
             if url:
-                return url
+                found.append(url)
+                break
             if isinstance(path, str) and path.startswith('/upload/public/pdf/'):
-                return 'https://atta.szlcsc.com' + path
-    return ''
+                found.append('https://atta.szlcsc.com' + path)
+                break
+    return list(dict.fromkeys(found))
 
 
 def favorite_products(payload, expected_page):
@@ -482,7 +490,8 @@ class MemorySession:
             PooledHandler(proxies))
 
     @traced('store.http', lambda self, url, **kw: {'host': network_target(url), 'operation': request_operation(url)})
-    def request(self, url, *, method='GET', data=None, headers=None, cancelled=None, limit=8 * 1024 * 1024):
+    def request(self, url, *, method='GET', data=None, headers=None, cancelled=None, limit=8 * 1024 * 1024,
+                on_bytes=None):
         check_cancelled(cancelled)
         operation = request_operation(url)
 
@@ -508,6 +517,12 @@ class MemorySession:
                 with self.opener.open(req, timeout=12) as response:
                     log_event('DEBUG', 'store.http_response', status=getattr(response, 'status', None))
                     chunks, size = io.BytesIO(), 0
+                    total = None
+                    if on_bytes:
+                        length = response.headers.get('Content-Length', '')
+                        total = int(length) if isinstance(length, str) and length.isdigit() else None
+                        if total is not None and total > limit:
+                            raise StoreError('商城返回的数据过大，已停止读取。')
                     while True:
                         check_cancelled(cancelled)
                         chunk = response.read(65536)
@@ -517,6 +532,10 @@ class MemorySession:
                         if size > limit:
                             raise StoreError('商城返回的数据过大，已停止读取。')
                         chunks.write(chunk)
+                        if on_bytes:
+                            on_bytes(size, total)
+                    if on_bytes and total is not None and size != total:
+                        raise StoreError('商城返回的文件不完整，请重试。')
                     body = chunks.getvalue()
                     if response.headers.get('Content-Encoding') == 'gzip' or body.startswith(b'\x1f\x8b'):
                         body = decompress_gzip(body, limit, lambda: check_cancelled(cancelled))
@@ -961,6 +980,27 @@ class StoreClient:
         if detail_error:
             raise detail_error
         return None
+
+    @traced('catalog.pdf_detail', lambda self, part, *a, **kw: {'part': safe_part(part)}, level='INFO')
+    def datasheet_product(self, part, cancelled=None):
+        """Only the domestic storefront's authoritative datasheet category.
+
+        A failed search/detail request is not evidence that a datasheet is absent.
+        Do not fall back to the EDA catalog, overseas search or manufacturer search.
+        """
+        if not PART.fullmatch(part):
+            raise StoreError('请使用有效的立创 C 编号。')
+        found = next((row for row in self.search_page(part, cancelled=cancelled)['items']
+                      if row['part'] == part), None)
+        identity = product_id(found.get('product_id')) if found else ''
+        if not identity:
+            raise StoreError('立创商城未找到对应器件，无法确认数据手册。')
+        body, _ = self.session.request(f'https://item.szlcsc.com/{identity}.html', cancelled=cancelled)
+        product = product_page(body, part)
+        # Search metadata can fill an absent name/brand without supplying another source's PDF.
+        for field in ('title', 'manufacturer'):
+            product[field] = product.get(field) or found.get(field, '')
+        return product
 
     @traced('favorites.check')
     def favorite_state(self, identity, cancelled=None):

@@ -11,7 +11,8 @@ import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from contextlib import nullcontext
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable
@@ -20,6 +21,7 @@ from urllib.parse import urlsplit, unquote
 from lcsc3d.core.errors import Cancelled, DownloadError
 from lcsc3d.services.download_progress import BatchProgress
 from lcsc3d.services.output_transaction import OutputTransaction, track_file_write
+from lcsc3d.services.pdf_download import DatasheetBatch, write_missing_report
 from lcsc3d.core.app_settings import proxy_for_url, proxy_mode
 from lcsc3d.eda.symbol_style import normalize_symbol_style
 from lcsc3d.core.app_logging import (log_event, record_error, traced, log_context, submit_logged,
@@ -539,6 +541,10 @@ class Options:
     ad_3d_layer: int = 1
 
     def __post_init__(self):
+        if self.formats == ('PDF',):
+            self.append_mode = self.merge_schlib = self.merge_pcblib = False
+            self.schlib_target = self.pcblib_target = self.project_path = ''
+            return
         self.symbol_style = normalize_symbol_style(self.symbol_style)
         self.ad_3d_layer = validate_model_layer(self.ad_3d_layer)
         if self.kicad_3d_mode not in ('embedded', 'external'):
@@ -558,7 +564,7 @@ class Options:
             targets = self.existing_targets()
             if targets:
                 # Selecting just one library must never generate its unselected counterpart.
-                self.formats = tuple(fmt for fmt in self.formats if fmt in ('STEP', 'OBJ')) + tuple(targets)
+                self.formats = tuple(fmt for fmt in self.formats if fmt in ('STEP', 'OBJ', 'PDF')) + tuple(targets)
             self.merge_schlib = 'SCHLIB' in self.formats
             self.merge_pcblib = 'PCBLIB' in self.formats
 
@@ -681,6 +687,10 @@ class Result:
     completed_formats: list[str] = field(default_factory=list)
     export_errors: list[str] = field(default_factory=list)
     model_diagnostics: list[dict] = field(default_factory=list)
+    brand: str = ''
+    pdf_status: str = ''
+    pdf_report: str = ''
+    pdf_model: str = ''
 
 
 @traced('component.lookup', lambda part, api: {'part': safe_part(part)})
@@ -708,7 +718,7 @@ def download_part(part: str, options: Options, api: NetworkApi,
                   progress: Callable[[str, str], None] | None = None, *, libraries=None, merge_lock=None,
                   deferred_outputs=None, kicad_entries=None, on_progress=None) -> Result:
     # A direct one-part request uses the same merge/commit semantics as a batch.
-    if libraries is None and (options.merged_paths() or any(fmt in KICAD_FORMATS for fmt in options.formats)):
+    if libraries is None and (options.merged_paths() or 'PDF' in options.formats or any(fmt in KICAD_FORMATS for fmt in options.formats)):
         return download_batch([part], options, getattr(api, 'cancelled', None),
                               (lambda index, phase, title: progress(phase, title)) if progress else None,
                               api=api, workers=1, on_progress=on_progress)[0]
@@ -880,10 +890,10 @@ def download_part(part: str, options: Options, api: NetworkApi,
 def download_batch(parts, options, cancelled=None, progress=None, on_result=None, api=None, workers=3, on_progress=None):
     """Track a whole batch so cancellation also undoes already completed exports."""
     cancelled = cancelled or getattr(api, 'cancelled', None) or threading.Event()
-    with OutputTransaction() as transaction:
+    with OutputTransaction() as transaction, (DatasheetBatch(cancelled) if 'PDF' in options.formats else nullcontext()) as pdf_batch:
         results = None
         try:
-            results = _download_batch(parts, options, cancelled, progress, on_result, api, workers, on_progress)
+            results = _download_batch(parts, options, cancelled, progress, on_result, api, workers, on_progress, pdf_batch)
         except Exception as exc:
             if not cancelled.is_set():
                 raise
@@ -901,6 +911,7 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
                 result.completed_formats.clear()
                 result.pending_formats.clear()
                 result.model_diagnostics.clear()
+                result.pdf_status = result.pdf_report = ''
                 result.message = ('取消清理未完成，保留无法恢复或已被修改的文件；恢复资料：' + str(transaction.recovery)
                                   if failures else '任务已取消；本次下载的文件已删除，原有文件已恢复')
                 result.export_errors = [result.message] if failures else []
@@ -909,12 +920,12 @@ def download_batch(parts, options, cancelled=None, progress=None, on_result=None
         log_event('INFO', 'download.batch_result', count=len(results),
                   succeeded=sum(r.status == '成功' for r in results),
                   partial=sum(r.status == '部分完成' for r in results),
-                  failed=sum(r.status in ('失败', '无模型') for r in results),
+                  failed=sum(r.status in ('失败', '无模型', '无数据手册') for r in results),
                   cancelled=sum(r.status == '已取消' for r in results))
         return results
 
 
-def _download_batch(parts, options, cancelled=None, progress=None, on_result=None, api=None, workers=3, on_progress=None):
+def _download_batch(parts, options, cancelled=None, progress=None, on_result=None, api=None, workers=3, on_progress=None, pdf_batch=None):
     """Download with bounded concurrency; callbacks may finish out of row order."""
     if not parts:
         return []
@@ -950,11 +961,40 @@ def _download_batch(parts, options, cancelled=None, progress=None, on_result=Non
         try:
             if cancelled.is_set():
                 raise Cancelled()
-            return download_part(part, options, api,
-                (lambda status, title: progress(index, status, title)) if progress else None,
-                **({'on_progress': lambda fraction: tracker.advance(part, fraction)} if on_progress else {}),
-                **({'libraries': libraries, 'merge_lock': merge_lock, 'deferred_outputs': deferred_outputs,
-                    'kicad_entries': kicad_entries} if libraries or any(fmt in KICAD_FORMATS for fmt in options.formats) else {}))
+            phase = (lambda status, title: progress(index, status, title)) if progress else lambda *a: None
+            advance = (lambda fraction: tracker.advance(part, fraction)) if on_progress else lambda *a: None
+            pdf = pdf_batch.download(part, options.output_root(), phase, lambda value: advance(value * .35)) if pdf_batch else None
+            other_formats = tuple(fmt for fmt in options.formats if fmt != 'PDF')
+            if pdf is not None and not other_formats:
+                return pdf
+            try:
+                result = download_part(part, replace(options, formats=other_formats) if pdf else options, api, phase,
+                    **({'on_progress': lambda fraction: advance(.35 + .65 * fraction) if pdf else advance(fraction)} if on_progress else {}),
+                    **({'libraries': libraries, 'merge_lock': merge_lock, 'deferred_outputs': deferred_outputs,
+                        'kicad_entries': kicad_entries} if libraries or any(fmt in KICAD_FORMATS for fmt in options.formats) else {}))
+            except Cancelled:
+                raise
+            except Exception as exc:
+                if pdf is None:
+                    raise
+                record_error(exc, 'download.part_failed', part=safe_part(part))
+                result = Result(part, '失败', message=str(exc), export_errors=[str(exc)])
+            if pdf is not None:
+                if result.status not in ('成功', '等待合并') and not result.export_errors:
+                    result.export_errors.append(result.message)
+                result.title = result.title or pdf.title
+                result.brand, result.pdf_status = pdf.brand, pdf.pdf_status
+                result.pdf_model = pdf.title
+                if not result.files:
+                    result.folder = pdf.folder or result.folder
+                result.files.extend(pdf.files)
+                result.completed_formats.extend(pdf.completed_formats)
+                result.export_errors.extend(pdf.export_errors or ([pdf.message] if pdf.pdf_status == 'missing' else []))
+                result.message = '；'.join(filter(None, (result.message, pdf.message)))
+                if not result.pending_formats:
+                    result.status = ('成功' if set(result.completed_formats) == set(options.formats) and not result.export_errors
+                                     else '部分完成' if result.files else '失败')
+            return result
         except Cancelled:
             log_event('INFO', 'download.part_cancelled', part=safe_part(part))
             return Result(part, '已取消', message='任务已取消，正在清理本次下载的文件')
@@ -1120,6 +1160,18 @@ def _download_batch(parts, options, cancelled=None, progress=None, on_result=Non
                 result.message += '；库已加入 PCB 工程'
         if pending or import_project and has_libraries:
             if on_result:
+                on_result(index, result)
+    if pdf_batch is not None and not cancelled.is_set():
+        try:
+            write_missing_report(results, options.output_root())
+        except Exception as exc:
+            record_error(exc, 'download.pdf_report_failed', format='TXT', stage='write')
+            for result in results:
+                result.export_errors.append('缺少 PDF 清单写入失败：' + str(exc))
+                result.message += '；' + result.export_errors[-1]
+                result.status = '部分完成' if result.files else '失败'
+        if on_result:
+            for index, result in enumerate(results):
                 on_result(index, result)
     tracker.finish(cancelled=cancelled.is_set() or any(r.status == '已取消' for r in results))
     return results
