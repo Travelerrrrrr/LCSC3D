@@ -76,7 +76,17 @@ def main():
             result = subprocess.run([str(copy), flag, str(destination)], cwd=cwd, env=env,
                                     stdout=log, stderr=subprocess.STDOUT, timeout=timeout,
                                     creationflags=subprocess.CREATE_NO_WINDOW)
-        data = json.loads((destination / filename).read_text('utf-8'))
+        report_path = destination / filename
+        if result.returncode or not report_path.is_file():
+            # A native crash may happen before the self-test writes its JSON.
+            # Preserve the exit code and crash stack instead of masking it as
+            # a missing-file error in the CI job's main log.
+            for log in (case / 'stdout.log', *sorted((destination / 'logs').glob('LCSC3D-crash-*.log'))):
+                if log.is_file():
+                    print(log.read_text('utf-8', errors='replace')[-12000:], flush=True)
+            raise RuntimeError(f'{name} exited {result.returncode} (0x{result.returncode & 0xffffffff:08X}); '
+                               f'report_present={report_path.is_file()}')
+        data = json.loads(report_path.read_text('utf-8'))
         assert result.returncode == 0 and data['success'] and data['frozen'], data
         assert data['version'] == version, data
         assert not any(cwd.iterdir()), name

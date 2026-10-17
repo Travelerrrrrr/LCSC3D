@@ -2404,6 +2404,8 @@ def main():
     from lcsc3d.core.app_logging import install_qt_logging, start_crash_capture
     install_qt_logging()
     start_crash_capture()
+    from lcsc3d.ui.garbage_collection import install_gui_garbage_collector
+    install_gui_garbage_collector(app)
     window = MainWindow(settings_enabled=not bool(test_destination), update_source=update_source)
     if test_destination:
         window.symbol_style_box.setCurrentIndex(window.symbol_style_box.findData(args.self_test_symbol_style))
