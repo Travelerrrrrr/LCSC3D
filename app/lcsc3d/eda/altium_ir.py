@@ -346,7 +346,7 @@ def pcb(component, check, *, merged=False, footprint_name=None, model_assets=Non
                     records.append(a._track_record(target_layer, point(first), point(last), raw(item.stroke.width)))
         else:
             raise DownloadError('AD 封装导出暂不支持图元 ' + item.kind)
-    section = a._section(name)
+    section = a._component_section(name)
     version = 'PCB 6.0 Binary Library File'
     wide = {f'ENCODEDTEXT{i}': ','.join(str(unit) for unit in struct.unpack('<' + 'H' * (len(text.encode('utf-16le')) // 2),
                                                                          text.encode('utf-16le'))) for i, text in enumerate(texts)}
