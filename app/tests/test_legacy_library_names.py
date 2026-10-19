@@ -1,4 +1,5 @@
 """Append native ANSI/Unicode library indices without changing existing data."""
+import copy
 import io
 import json
 import os
@@ -14,16 +15,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import olefile
 from lcsc3d.core import app_logging as logs
 from lcsc3d.core.errors import DownloadError
-from lcsc3d.eda.altium import MergedLibrary, _parameters
+from lcsc3d.eda.altium import MergedLibrary, _block, _parameters
 from lcsc3d.eda.compound_storage import compound_file
 from lcsc3d.eda.library_merge import (
     LibraryIndex, Reader, append_library, patch_parameters, read_library,
-    rewrite_symbol_records,
+    rewrite_symbol_records, parameters, name_key,
 )
 
 
 def native_string(value):
     return struct.pack('<I', len(value) + 1) + bytes([len(value)]) + value
+
+
+def native_parameters(values):
+    """Frame native ANSI fields, including GBK trail bytes equal to '|'."""
+    fields = []
+    for key, value in values.items():
+        try:
+            raw = str(value).encode('cp1252', errors='surrogateescape')
+        except UnicodeEncodeError:
+            key, raw = '%UTF8%' + key, str(value).encode('utf-8')
+        fields.append(b'|' + key.encode('ascii') + b'=' + raw)
+    return _block(b''.join(fields) + b'\0')
 
 
 @unittest.skipUnless(sys.platform == 'win32', 'Native AD compound storage')
@@ -49,7 +62,7 @@ class LegacyLibraryNamesTests(unittest.TestCase):
         index = LibraryIndex(payload, fmt)
         try:
             streams = {'/'.join(path): index.read(path) for path in index.ole.listdir()}
-            source = index.sections[index.names[0].casefold()]
+            source = index.sections[name_key(index.names[0])]
             header = dict(index.values) if fmt == 'SCHLIB' else index.header
         finally:
             index.ole.close()
@@ -63,11 +76,15 @@ class LegacyLibraryNamesTests(unittest.TestCase):
         key_name = key_bytes.decode('cp1252', errors='surrogateescape')
         if fmt == 'SCHLIB':
             header['LIBREF0'] = byte_name
-            streams['FileHeader'] = _parameters(header)
+            streams['FileHeader'] = native_parameters(header)
             if binary:
                 streams['FileHeader'] += struct.pack('<I', 1) + native_string(raw)
-            streams[section + '/Data'] = rewrite_symbol_records(streams[section + '/Data'], name=byte_name)
-            streams['SectionKeys'] = _parameters({'KeyCount': 1, 'LibRef0': byte_name,
+            data = rewrite_symbol_records(streams[section + '/Data'], name='LegacyNamePlaceholder')
+            reader = Reader(data)
+            flag, body = reader.block()
+            streams[section + '/Data'] = (_block(body.replace(b'LegacyNamePlaceholder', raw), flag)
+                                          + data[reader.offset:])
+            streams['SectionKeys'] = native_parameters({'KeyCount': 1, 'LibRef0': byte_name,
                                                   'SectionKey0': key_name, 'VendorField': 'retained'})
         else:
             streams['Library/Data'] = struct.pack('<I', len(header)) + header + struct.pack('<I', 1) + native_string(raw)
@@ -75,7 +92,9 @@ class LegacyLibraryNamesTests(unittest.TestCase):
             reader.string()
             streams[section + '/Data'] = native_string(raw) + reader.data[reader.offset:]
             reader = Reader(streams[section + '/Parameters'])
-            streams[section + '/Parameters'] = patch_parameters(reader.block()[1], {'PATTERN': byte_name})
+            parameters_block = patch_parameters(reader.block()[1], {'PATTERN': 'LegacyNamePlaceholder'})
+            streams[section + '/Parameters'] = _block(
+                Reader(parameters_block).block()[1].replace(b'LegacyNamePlaceholder', raw))
             streams['SectionKeys'] = struct.pack('<I', 1) + native_string(raw) + native_string(key_bytes)
         if not mapped:
             streams.pop('SectionKeys', None)
@@ -102,7 +121,7 @@ class LegacyLibraryNamesTests(unittest.TestCase):
                         try:
                             self.assertEqual(len(index.names), 2)
                             self.assertEqual(index.names[0].encode('cp1252', errors='surrogateescape'), name.encode(encoding))
-                            self.assertEqual(index.sections[byte_name.casefold()], section)
+                            self.assertEqual(index.sections[name_key(index.names[0])], section)
                         finally:
                             index.ole.close()
                         self.assert_old_streams_preserved(original, result, section)
@@ -128,7 +147,7 @@ class LegacyLibraryNamesTests(unittest.TestCase):
             result, _ = append_library(original, self.library(fmt, 'C2040'), fmt)
             index = LibraryIndex(result, fmt)
             try:
-                self.assertEqual(index.sections[name.casefold()], section)
+                self.assertEqual(index.sections[name_key(index.names[0])], section)
             finally:
                 index.ole.close()
             self.assert_old_streams_preserved(original, result, section)
@@ -170,6 +189,120 @@ class LegacyLibraryNamesTests(unittest.TestCase):
             original, section, _ = self.native_library(fmt, 'DIP*2?', 'cp1252', section='DIP*2?')
             result, _ = append_library(original, self.library(fmt, 'C2040'), fmt)
             self.assert_old_streams_preserved(original, result, section)
+
+    def test_append_does_not_casefold_legacy_bytes_into_an_unrelated_name(self):
+        from lcsc3d.services import backend
+        for fmt in ('SCHLIB', 'PCBLIB'):
+            for section_alias in (None, '逜', 'OpaqueAlias'):
+                with self.subTest(fmt=fmt, alias=section_alias):
+                    original, section, _ = self.native_library(fmt, '逜', 'gbk',
+                        mapped=section_alias is not None, section=section_alias)
+                    target = self.root / ('target.' + fmt)
+                    target.write_bytes(original)
+                    data = copy.deepcopy(self.data['C2040'])
+                    data['title'] = 'ssA'
+                    data['packageDetail']['title'] = 'ssA'
+                    api = backend.NetworkApi(use_cache=False)
+                    api.get_cad_data_of_component = lambda part: copy.deepcopy(data)
+                    options = backend.Options(self.root / 'export', (fmt,), append_mode=True,
+                        **{fmt.lower() + '_target': str(target)}, bind_3d_models=False)
+                    rows = backend.download_batch(['C2040'], options, api=api, workers=1)
+                    self.assertEqual(rows[0].status, '成功', rows[0].message)
+                    result = target.read_bytes()
+                    index = LibraryIndex(result, fmt)
+                    try:
+                        self.assertEqual(len(index.names), 2)
+                        self.assertIn('ssA', index.names)
+                    finally:
+                        index.ole.close()
+                    self.assert_old_streams_preserved(original, result, section)
+                    rows = backend.download_batch(['C2040'], options, api=api, workers=1)
+                    self.assertEqual(rows[0].status, '成功', rows[0].message)
+                    self.assertEqual(target.read_bytes(), result)
+
+    def test_gbk_pipe_trail_bytes_survive_header_keys_and_repeated_append(self):
+        for fmt in ('SCHLIB', 'PCBLIB'):
+            for mapped in (False, True):
+                for name in ('東', '東侧_1'):
+                    with self.subTest(fmt=fmt, mapped=mapped, name=name):
+                        original, section, _ = self.native_library(fmt, name, 'gbk', mapped=mapped)
+                        result, skipped = append_library(original, self.library(fmt, 'C2040'), fmt)
+                        self.assertEqual(skipped, [])
+                        index = LibraryIndex(result, fmt)
+                        try:
+                            self.assertEqual(len(index.names), 2)
+                            self.assertEqual(index.names[0].encode('cp1252', errors='surrogateescape'), name.encode('gbk'))
+                            if fmt == 'SCHLIB':
+                                self.assertIn(b'|LIBREF0=' + name.encode('gbk') + b'|', index.header)
+                        finally:
+                            index.ole.close()
+                        self.assert_old_streams_preserved(original, result, section)
+                        repeated, _ = append_library(result, self.library(fmt, 'C2040'), fmt)
+                        self.assertEqual(repeated, result)
+
+    def test_binary_gbk_schematic_with_pipe_trail_byte_preserves_native_header(self):
+        original, section, _ = self.native_library('SCHLIB', '東', 'gbk', binary=True, mapped=True)
+        result, _ = append_library(original, self.library('SCHLIB', 'C2040'), 'SCHLIB')
+        index = LibraryIndex(result, 'SCHLIB')
+        try:
+            self.assertEqual(len(index.names), 2)
+            self.assertTrue(index.raw_names.startswith(native_string('東'.encode('gbk'))))
+            self.assertIn(b'|LIBREF0=' + '東'.encode('gbk') + b'|', index.header)
+        finally:
+            index.ole.close()
+        self.assert_old_streams_preserved(original, result, section)
+
+    def test_patching_header_preserves_unknown_fields_spelling_and_duplicate_bytes(self):
+        payload = (b'|VendorUnknown|LIBREF0=' + '東'.encode('gbk') + b'|Weight=4'
+                   b'|Vendor#Flag=first|Vendor#Flag=second|%UTF8%Notes=' + '中文'.encode('utf-8') + b'\0')
+        updated = Reader(patch_parameters(payload, {'WEIGHT': 8})).block()[1]
+        self.assertEqual(updated, payload.replace(b'|Weight=4', b'')[:-1] + b'|WEIGHT=8\0')
+        fields = parameters(updated)
+        self.assertEqual(fields['LIBREF0'].encode('cp1252'), '東'.encode('gbk'))
+        self.assertEqual(fields['VENDOR#FLAG'], 'second')
+        self.assertEqual(fields['NOTES'], '中文')
+        self.assertEqual(fields['WEIGHT'], '8')
+
+    def test_reused_legacy_footprint_keeps_standalone_outputs_and_symbol_links(self):
+        from lcsc3d.services import backend
+        for name in ('底壳丂Ω±', '東'):
+            with self.subTest(name=name):
+                original, _, byte_name = self.native_library('PCBLIB', name, 'gbk')
+                target = self.root / 'existing.PcbLib'
+                target.write_bytes(original)
+                api = backend.NetworkApi(use_cache=False)
+                api.get_cad_data_of_component = lambda part: copy.deepcopy(self.data[part])
+                options = backend.Options(self.root / 'standalone', ('SCHLIB', 'PCBLIB'), True, True,
+                    keep_schlib=True, keep_pcblib=True, pcblib_target=str(target), bind_3d_models=False)
+                rows = backend.download_batch(['C20197'], options, api=api, workers=1)
+                self.assertEqual(rows[0].status, '成功', rows[0].message)
+                self.assertEqual(rows[0].export_errors, [])
+                self.assertEqual(target.read_bytes(), original)
+                standalone = [Path(file) for file in rows[0].files
+                              if Path(file).suffix.lower() == '.pcblib' and Path(file) != target]
+                self.assertEqual(len(standalone), 1)
+                index = LibraryIndex(standalone[0].read_bytes(), 'PCBLIB')
+                try:
+                    self.assertEqual(index.names, [byte_name])
+                    self.assertEqual(index.raw_names, native_string(name.encode('gbk')))
+                finally:
+                    index.ole.close()
+                symbols = [Path(file) for file in rows[0].files if Path(file).suffix.lower() == '.schlib']
+                self.assertEqual(len(symbols), 2)
+                for symbol in symbols:
+                    with olefile.OleFileIO(str(symbol)) as ole:
+                        path = next(path for path in ole.listdir() if path[-1] == 'Data')
+                        reader = Reader(ole.openstream(path).read())
+                        references = []
+                        while reader.offset < len(reader.data):
+                            flag, body = reader.block()
+                            if not flag:
+                                fields = parameters(body)
+                                if fields.get('RECORD') == '45':
+                                    references.append(fields['MODELNAME'])
+                                if fields.get('RECORD') == '41' and fields.get('NAME') == 'Footprint':
+                                    references.append(fields['TEXT'])
+                        self.assertEqual(references, [byte_name, byte_name])
 
     def test_diagnostics_record_compatibility_and_failure_without_private_names(self):
         folder = self.root / 'logs'

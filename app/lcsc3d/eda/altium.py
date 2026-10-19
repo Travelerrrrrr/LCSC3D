@@ -9,6 +9,7 @@ from __future__ import annotations
 from lcsc3d.core.app_logging import traced, safe_part
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import hashlib
 import re
 import struct
 import uuid
@@ -55,9 +56,25 @@ def _block(data, flag=0):
     return struct.pack('<I', len(data) | flag << 24) + data
 
 
+class _AnsiString(str):
+    """Lossless native bytes; an optional code page is established by CFB names."""
+    def __new__(cls, raw, encoding=None):
+        value = super().__new__(cls, raw.decode('cp1252', errors='surrogateescape'))
+        value.raw = raw
+        value.encoding = 'cp1252' if raw.isascii() else encoding
+        return value
+
+
 def _parameters(values):
     fields = []
     for key, value in values.items():
+        if isinstance(value, _AnsiString):
+            # A verified native name can contain a GBK trail byte 0x7c. Keep
+            # its original bytes in references instead of treating it as '|'.
+            if b'\0' in value.raw:
+                raise DownloadError(f'AD 参数 {key} 中包含不支持的分隔符')
+            fields.append(b'|' + key.encode('ascii') + b'=' + value.raw)
+            continue
         value = str(value)
         if any(c in value for c in '|\x00'):
             raise DownloadError(f'AD 参数 {key} 中包含不支持的分隔符')
@@ -102,6 +119,16 @@ def _library_name(value, fallback):
 
 def _section(name):
     return re.sub(r'[/\\:!*?]', '_', name)[:31]
+
+
+def _component_section(name):
+    """Use the same byte-safe storage name for merged and standalone exports."""
+    section = _section(name)
+    if (isinstance(name, _AnsiString) and not name.raw.isascii()
+            or any(0xdc80 <= ord(char) <= 0xdcff for char in section)):
+        raw = name.encode('cp1252', errors='surrogateescape')
+        return 'Legacy_' + hashlib.sha256(raw).hexdigest()[:24]
+    return section
 
 
 def _color(value):

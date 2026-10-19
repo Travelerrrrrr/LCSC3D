@@ -10,7 +10,7 @@ from pathlib import Path
 
 import olefile
 
-from lcsc3d.eda.altium import _block, _parameters, _section, _string_block
+from lcsc3d.eda.altium import _AnsiString, _block, _component_section, _parameters, _section, _string_block
 from lcsc3d.eda.compound_storage import compound_file
 from lcsc3d.core.errors import DownloadError
 from lcsc3d.core.app_logging import log_event, traced
@@ -40,31 +40,37 @@ class Reader:
             raise DownloadError('库名称索引无效')
         # Retain the exact ANSI byte identity, including bytes undefined in
         # cp1252. Native AD libraries can use the creator's Windows code page.
-        return payload[1:1 + payload[0]].decode('cp1252', errors='surrogateescape')
+        return _AnsiString(payload[1:1 + payload[0]])
+
+
+def parameter_spans(block):
+    # A pipe is a boundary only when it introduces a parameter key. In GBK
+    # names such as 東 (96 7c), the trail byte may precede another pipe or text.
+    starts = list(re.finditer(rb'(?:^|\|)([^\x00-\x1f=|\x7f-\xff]+)=', block))
+    for index, match in enumerate(starts):
+        end = starts[index + 1].start() if index + 1 < len(starts) else len(block.rstrip(b'\0'))
+        yield match.start(), end, match[1], block[match.end():end]
 
 
 def parameters(block):
     result = {}
-    for field in block.rstrip(b'\0').split(b'|'):
-        key, sep, value = field.partition(b'=')
-        if sep:
-            key = key.decode('ascii')
-            unicode_value = key.startswith('%UTF8%')
-            result[key.removeprefix('%UTF8%').upper()] = value.decode(
-                'utf-8' if unicode_value else 'cp1252', errors='strict' if unicode_value else 'surrogateescape')
+    for _, _, key, value in parameter_spans(block):
+        key = key.decode('ascii')
+        result[key.removeprefix('%UTF8%').upper()] = (
+            value.decode('utf-8') if key.startswith('%UTF8%') else _AnsiString(value))
     return result
 
 
 def patch_parameters(payload, updates):
     """Preserve unknown fields, spelling and duplicate unmodified parameters."""
-    fields = _parameters(updates)[4:].rstrip(b'\0').split(b'|')
-    replacement = {field.partition(b'=')[0].removeprefix(b'%UTF8%').upper(): field for field in fields if b'=' in field}
-    kept = []
-    for field in payload.rstrip(b'\0').split(b'|'):
-        key = field.partition(b'=')[0].removeprefix(b'%UTF8%').upper()
-        if key not in replacement and field:
-            kept.append(field)
-    return _block(b'|' + b'|'.join(kept + list(replacement.values())) + b'\0')
+    replacement = {key.removeprefix('%UTF8%').upper() for key in updates}
+    kept, offset = [], 0
+    for start, end, key, _ in parameter_spans(payload):
+        if key.removeprefix(b'%UTF8%').decode('ascii').upper() in replacement:
+            kept.append(payload[offset:start])
+            offset = end
+    kept.append(payload[offset:].rstrip(b'\0'))
+    return _block(b''.join(kept) + _parameters(updates)[4:])
 
 
 def count(value):
@@ -81,7 +87,7 @@ def storage_spellings(value):
     from the machine running this application. A direct spelling wins; a
     legacy fallback must identify exactly one existing component storage.
     """
-    yield value
+    yield value, 'cp1252'
     try:
         raw = value.encode('cp1252', errors='surrogateescape')
     except UnicodeEncodeError:
@@ -92,30 +98,63 @@ def storage_spellings(value):
         except UnicodeDecodeError:
             continue
         if decoded != value:
-            yield decoded
+            yield decoded, encoding
+
+
+def name_key(name):
+    """Case-fold decoded names only; never fold an opaque ANSI byte container."""
+    if isinstance(name, _AnsiString):
+        if name.encoding is None:
+            return ('ansi', name.raw)
+        try:
+            return name.raw.decode(name.encoding).casefold()
+        except UnicodeDecodeError:
+            return ('ansi', name.raw)
+    return name.casefold()
+
+
+def raw_name_key(name):
+    if isinstance(name, _AnsiString):
+        raw = name.raw
+    else:
+        try:
+            raw = name.encode('cp1252')
+        except UnicodeEncodeError:
+            return ('unicode', name.casefold())
+    return ('ansi', raw.lower() if raw.isascii() else raw)
+
+
+def storage_key(value):
+    # CFB names use a case-insensitive directory comparison, not Unicode
+    # casefold expansions (which would identify ßA with the distinct ssA).
+    return ''.join(upper if len(upper := char.upper()) == 1 else char for char in value)
 
 
 def resolve_storage(name, section, roots):
     # SectionKeys is authoritative when supplied. Otherwise AD derives a
     # storage name by replacing special characters and truncating to 31 chars.
     value = section if section is not None else name
-    spellings = list(dict.fromkeys(storage_spellings(value)))
-    candidates = [spelling if section is not None else _section(spelling) for spelling in spellings]
-    direct = roots.get(candidates[0].casefold())
+    spellings = list(storage_spellings(value))
+    candidates = [(spelling if section is not None else _section(spelling), encoding)
+                  for spelling, encoding in spellings]
+    direct = roots.get(storage_key(candidates[0][0]))
     if direct is not None:
-        return direct, False
+        encoding = 'cp1252' if section is None or not section.isascii() else None
+        return direct, False, encoding
     # Earlier LCSC3D exports could retain literal '*'/'?' without SectionKeys.
     # Accept those existing spellings too; new exports use AD's normalized form.
     if section is None:
-        candidates += [re.sub(r'[/\\:!]', '_', spelling)[:31] for spelling in spellings]
-    matches = {roots[candidate.casefold()] for candidate in candidates[1:] if candidate.casefold() in roots}
+        candidates += [(re.sub(r'[/\\:!]', '_', spelling)[:31], encoding) for spelling, encoding in spellings]
+    matches = {roots[storage_key(candidate)] for candidate, _ in candidates[1:] if storage_key(candidate) in roots}
     if len(matches) != 1:
         reason = 'ambiguous_storage' if matches else 'missing_storage'
         log_event('WARNING', 'library.index_resolution_failed', reason=reason, candidate_count=len(matches))
         if matches:
             raise DownloadError('原库名称编码对应多个条目，无法安全追加')
         raise DownloadError('原库索引指向不存在的条目')
-    return matches.pop(), True
+    target = matches.pop()
+    encodings = {encoding for candidate, encoding in candidates if storage_key(candidate) == storage_key(target)}
+    return target, True, next(iter(encodings)) if len(encodings) == 1 else None
 
 
 class LibraryIndex:
@@ -146,7 +185,7 @@ class LibraryIndex:
                     self.key_header = Reader(keys).block()[1]
                     values = parameters(self.key_header)
                     self.key_count = count(values.get('KEYCOUNT', 0))
-                    self.sections = {values[f'LIBREF{i}'].casefold(): values[f'SECTIONKEY{i}']
+                    self.sections = {raw_name_key(values[f'LIBREF{i}']): values[f'SECTIONKEY{i}']
                                      for i in range(count(values.get('KEYCOUNT', 0)))}
             else:
                 signature = self.read('FileHeader')
@@ -167,18 +206,23 @@ class LibraryIndex:
                     self.key_count = count(r.uint())
                     for _ in range(self.key_count):
                         name, section = r.string(), r.string()
-                        self.sections[name.casefold()] = section
+                        self.sections[raw_name_key(name)] = section
                     if r.offset != len(keys):
                         raise DownloadError('PcbLib 名称索引尾部格式不受支持')
-            if len({name.casefold() for name in self.names}) != len(self.names):
-                raise DownloadError('原库有重复条目名，无法安全追加')
-            data_roots = {path[0].casefold(): path[0] for path in self.ole.listdir()
+            data_roots = {storage_key(path[0]): path[0] for path in self.ole.listdir()
                           if len(path) == 2 and path[1].casefold() == 'data'}
             legacy_count = 0
+            mappings, self.sections = self.sections, {}
             for name in self.names:
-                section, legacy = resolve_storage(name, self.sections.get(name.casefold()), data_roots)
-                self.sections[name.casefold()] = section
+                section, legacy, encoding = resolve_storage(name, mappings.get(raw_name_key(name)), data_roots)
+                if isinstance(name, _AnsiString) and not name.raw.isascii():
+                    name.encoding = encoding
+                self.sections[name_key(name)] = section
                 legacy_count += legacy
+            self._name_keys = {name_key(name) for name in self.names}
+            self._raw_name_index = {raw_name_key(name): name for name in self.names}
+            if len(self._name_keys) != len(self.names) or len(self._raw_name_index) != len(self.names):
+                raise DownloadError('原库有重复条目名，无法安全追加')
             log_event('DEBUG', 'library.index_resolved', format=format, count=len(self.names),
                       legacy_name_count=legacy_count)
         except Exception:
@@ -191,6 +235,19 @@ class LibraryIndex:
         if self.ole.get_size(path) > 64 * 1024 * 1024:
             raise DownloadError('库索引或条目过大')
         return self.ole.openstream(path).read()
+
+    def has_name(self, name):
+        if name_key(name) in self._name_keys:
+            return True
+        other = self._raw_name_index.get(raw_name_key(name))
+        # Explicit ASCII aliases (including generated Legacy_* directories)
+        # do not establish a code page. Only exact bytes can match those names.
+        if other is not None and (isinstance(name_key(name), tuple) or isinstance(name_key(other), tuple)):
+            return True
+        if other is not None:
+            log_event('WARNING', 'library.index_resolution_failed', reason='conflicting_name_encoding')
+            raise DownloadError('新旧库的名称字节对应不同条目，无法安全追加')
+        return False
 
 
 def remap_fonts(data, offset):
@@ -313,12 +370,7 @@ def footprint_signature(streams):
 
 def rename_footprint(streams, name):
     source = component_section(streams)
-    section = _section(name)
-    if any(0xdc80 <= ord(char) <= 0xdcff for char in section):
-        # A reused legacy name may contain escaped ANSI bytes. Its temporary
-        # generated library uses an explicit ASCII SectionKeys target, while
-        # the component name itself keeps its native bytes unchanged.
-        section = 'Legacy_' + hashlib.sha256(name.encode('cp1252', errors='surrogateescape')).hexdigest()[:24]
+    section = _component_section(name)
     result = {}
     for path, payload in streams.items():
         if path.startswith(source + '/'):
@@ -338,7 +390,7 @@ def rename_footprint(streams, name):
 
 
 def indexed_component(index, name):
-    section = index.sections[name.casefold()]
+    section = index.sections[name_key(name)]
     result = {'/'.join(path): index.read(path) for path in index.ole.listdir()
               if path[0].casefold() == section.casefold()}
     if not hasattr(index, '_model_streams'):
@@ -355,7 +407,7 @@ def plan_footprints(entries, original=None, check_cancelled=lambda: None):
         old = LibraryIndex(original, 'PCBLIB')
         try:
             reserved.update(old.roots)
-            reserved.update(name.casefold() for name in old.names)
+            reserved.update(name_key(name) for name in old.names)
             for name in old.names:
                 check_cancelled()
                 signature = footprint_signature(indexed_component(old, name))
@@ -377,9 +429,9 @@ def plan_footprints(entries, original=None, check_cancelled=lambda: None):
             if signature is not None:
                 known[signature] = target
         names[identity] = target
-        if target.casefold() not in emitted:
+        if name_key(target) not in emitted:
             planned.append((identity, target, rename_footprint(streams, target)))
-            emitted.add(target.casefold())
+            emitted.add(name_key(target))
     log_event('INFO', 'library.footprint_reuse', count=len(entries), unique=len(planned), reused=reused,
               name_conflicts=conflicts, existing_library=original is not None)
     return planned, names, reused
@@ -420,9 +472,8 @@ def append_library(original, generated, format, check_cancelled=lambda: None, *,
                 footprint_names.update(resolved)
         old = LibraryIndex(original, format)
         new = LibraryIndex(generated, format)
-        known = {name.casefold() for name in old.names}
-        added = [name for name in new.names if name.casefold() not in known]
-        skipped = duplicates + [name for name in new.names if name.casefold() in known]
+        added = [name for name in new.names if not old.has_name(name)]
+        skipped = duplicates + [name for name in new.names if old.has_name(name)]
         if not added:
             return original, skipped
         streams, roots = {}, set(old.roots)
@@ -431,7 +482,7 @@ def append_library(original, generated, format, check_cancelled=lambda: None, *,
         offset = count(old.values.get('FONTIDCOUNT', 0)) if format == 'SCHLIB' else 0
         for name in added:
             check_cancelled()
-            source = new.sections[name.casefold()]
+            source = new.sections[name_key(name)]
             target = source
             if target.casefold() in roots:
                 if format == 'PCBLIB':
@@ -442,7 +493,7 @@ def append_library(original, generated, format, check_cancelled=lambda: None, *,
                     target = source[:31-len(suffix)] + suffix
                     index += 1
             roots.add(target.casefold())
-            sections[name.casefold()] = target
+            sections[name_key(name)] = target
             for path in new.ole.listdir():
                 if path[0].casefold() == source.casefold():
                     payload = new.read(path)
@@ -478,20 +529,20 @@ def append_library(original, generated, format, check_cancelled=lambda: None, *,
                 header += struct.pack('<I', len(names)) + old.raw_names + b''.join(_string_block(name) for name in added)
             keys = {'KeyCount': old.key_count + len(added)}
             for index, name in enumerate(added, old.key_count):
-                keys.update({f'LibRef{index}': name, f'SectionKey{index}': sections[name.casefold()]})
+                keys.update({f'LibRef{index}': name, f'SectionKey{index}': sections[name_key(name)]})
             streams.update(FileHeader=header, SectionKeys=patch_parameters(old.key_header, keys))
         else:
             streams['Library/Data'] = (_block(old.header) + struct.pack('<I', len(names)) + old.raw_names
                                        + b''.join(_string_block(name) for name in added))
             streams['SectionKeys'] = struct.pack('<I', old.key_count + len(added)) + old.raw_keys + b''.join(
-                _string_block(name) + _string_block(sections[name.casefold()]) for name in added)
+                _string_block(name) + _string_block(sections[name_key(name)]) for name in added)
             toc = old.read('Library/ComponentParamsTOC/Data', optional=True)
             if toc:
                 body = Reader(toc).block()[1].rstrip(b'\0')
                 if body and not body.endswith(b'\n'):
                     body += b'\r\n'
                 for name in added:
-                    data = Reader(new.read([new.sections[name.casefold()], 'Data']))
+                    data = Reader(new.read([new.sections[name_key(name)], 'Data']))
                     data.string()
                     pads = 0
                     while data.offset < len(data.data):
