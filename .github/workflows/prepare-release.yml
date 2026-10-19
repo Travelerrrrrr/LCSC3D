@@ -6,7 +6,7 @@ on:
       release_tag:
         description: Release tag matching app/lcsc3d/ui/main.py VERSION
         required: true
-        default: v2.4.4
+        default: v2.4.41
       build_run_id:
         description: Successful Windows build run to use
         required: true

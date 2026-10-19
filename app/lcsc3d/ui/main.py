@@ -51,7 +51,7 @@ from lcsc3d.core.assets import SOURCE_APP_DIR, RESOURCE_ROOT
 from lcsc3d.ui.progress_ui import SmoothProgressBar
 from lcsc3d.ui.messages_ui import MessagesPage
 
-VERSION = '2.4.4'
+VERSION = '2.4.41'
 DOWNLOAD_COLUMN, PART_COLUMN, MODEL_COLUMN, RESULT_COLUMN = range(4)
 ROOT = RESOURCE_ROOT
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else SOURCE_APP_DIR
