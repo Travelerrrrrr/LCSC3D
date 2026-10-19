@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import codecs
 import hashlib
 import json
 import re
@@ -43,29 +44,79 @@ class Reader:
         return _AnsiString(payload[1:1 + payload[0]])
 
 
-def parameter_spans(block):
-    # A pipe is a boundary only when it introduces a parameter key. In GBK
-    # names such as 東 (96 7c), the trail byte may precede another pipe or text.
-    starts = list(re.finditer(rb'(?:^|\|)([^\x00-\x1f=|\x7f-\xff]+)=', block))
-    for index, match in enumerate(starts):
-        end = starts[index + 1].start() if index + 1 < len(starts) else len(block.rstrip(b'\0'))
+PARAMETER_START = re.compile(rb'(?:^|\|)([^\x00-\x1f=|\x7f-\xff]+)=')
+INDEX_NAME = re.compile(rb'(?:LIBREF|SECTIONKEY)\d+$')
+
+
+def mbcs_value_end(block, start, encoding):
+    """Find a delimiter at a character boundary, including names like 東A=B."""
+    decoder = codecs.getincrementaldecoder(encoding)()
+    try:
+        for pos in range(start, len(block)):
+            if block[pos] == 0:
+                decoder.decode(b'', final=True)
+                return pos
+            if block[pos] == ord('|') and not decoder.getstate()[0] and PARAMETER_START.match(block, pos):
+                return pos
+            decoder.decode(block[pos:pos + 1])
+        decoder.decode(b'', final=True)
+    except UnicodeDecodeError:
+        return None
+    return len(block)
+
+
+def native_name_values(block, names):
+    """Protect complete binary index names before interpreting header fields."""
+    raw_names = {name.raw for name in names if isinstance(name, _AnsiString)}
+    limit = max(map(len, raw_names), default=0)
+    values = {}
+    for match in PARAMETER_START.finditer(block):
+        key = match[1].upper()
+        if re.fullmatch(rb'LIBREF\d+', key):
+            for end in range(match.end() + 1, min(match.end() + limit, len(block)) + 1):
+                if end == len(block) or block[end] in (0, ord('|')):
+                    raw = block[match.end():end]
+                    if raw in raw_names:
+                        values[key] = raw
+    return values
+
+
+def parameter_spans(block, *, name_encoding=None, native_values=None):
+    # Unmodified fields remain byte ranges. Known binary names take precedence;
+    # the MBCS fallback is used only for index name fields and must subsequently
+    # resolve against real CFB storages before LibraryIndex accepts it.
+    starts = list(PARAMETER_START.finditer(block))
+    index = 0
+    while index < len(starts):
+        match = starts[index]
+        key = match[1].upper()
+        raw = (native_values or {}).get(key)
+        protected_end = None
+        if raw is not None and block[match.end():match.end() + len(raw)] == raw:
+            protected_end = match.end() + len(raw)
+        elif name_encoding and INDEX_NAME.fullmatch(key):
+            protected_end = mbcs_value_end(block, match.end(), name_encoding)
+        index += 1
+        while index < len(starts) and protected_end is not None and starts[index].start() < protected_end:
+            index += 1
+        end = starts[index].start() if index < len(starts) else len(block.rstrip(b'\0'))
         yield match.start(), end, match[1], block[match.end():end]
 
 
-def parameters(block):
+def parameters(block, *, name_encoding=None, native_values=None):
     result = {}
-    for _, _, key, value in parameter_spans(block):
+    for _, _, key, value in parameter_spans(block, name_encoding=name_encoding, native_values=native_values):
         key = key.decode('ascii')
         result[key.removeprefix('%UTF8%').upper()] = (
             value.decode('utf-8') if key.startswith('%UTF8%') else _AnsiString(value))
     return result
 
 
-def patch_parameters(payload, updates):
+def patch_parameters(payload, updates, *, native_values=None):
     """Preserve unknown fields, spelling and duplicate unmodified parameters."""
     replacement = {key.removeprefix('%UTF8%').upper() for key in updates}
     kept, offset = [], 0
-    for start, end, key, _ in parameter_spans(payload):
+    for start, end, key, _ in parameter_spans(payload, native_values=native_values):
         if key.removeprefix(b'%UTF8%').decode('ascii').upper() in replacement:
             kept.append(payload[offset:start])
             offset = end
@@ -78,6 +129,14 @@ def count(value):
     if not 0 <= result <= 100000:
         raise DownloadError('库条目数量超出支持范围')
     return result
+
+
+def indexed_name_count(values, count_key):
+    size = count(values.get(count_key, 0))
+    actual = {int(key[6:]) for key in values if re.fullmatch(r'LIBREF\d+', key)}
+    if actual != set(range(size)):
+        raise DownloadError('库名称索引与条目数量不一致，未修改原文件')
+    return size
 
 
 def storage_spellings(value):
@@ -159,6 +218,16 @@ def resolve_storage(name, section, roots):
 
 class LibraryIndex:
     def __init__(self, content, format):
+        try:
+            self._read_index(content, format)
+        except (DownloadError, KeyError, UnicodeDecodeError):
+            if format != 'SCHLIB':
+                raise
+            # Retry only name-field framing. Other ANSI/UTF-8 metadata keeps
+            # its own representation; successful CFB resolution is mandatory.
+            self._read_index(content, format, name_encoding='gb18030')
+
+    def _read_index(self, content, format, *, name_encoding=None):
         self.ole = olefile.OleFileIO(io.BytesIO(content), raise_defects=olefile.DEFECT_INCORRECT)
         try:
             self.format = format
@@ -166,12 +235,11 @@ class LibraryIndex:
             self.sections = {}
             self.raw_names = b''
             self.key_header, self.key_count, self.raw_keys = b'', 0, b''
+            self.header_native_values, self.key_native_values = {}, {}
             if format == 'SCHLIB':
                 reader = Reader(self.read('FileHeader'))
                 flag, self.header = reader.block()
-                self.values = parameters(self.header)
-                if flag or 'Schematic Library' not in self.values.get('HEADER', ''):
-                    raise DownloadError('所选文件不是受支持的二进制 SchLib')
+                self.values = parameters(self.header, name_encoding=name_encoding)
                 self.binary_index = reader.offset < len(reader.data)
                 if self.binary_index:
                     size = count(reader.uint())
@@ -179,14 +247,22 @@ class LibraryIndex:
                     self.names = [reader.string() for _ in range(size)]
                     self.raw_names = reader.data[start:reader.offset]
                 else:
-                    self.names = [self.values[f'LIBREF{i}'] for i in range(count(self.values.get('COMPCOUNT', 0)))]
+                    self.names = [self.values[f'LIBREF{i}'] for i in range(indexed_name_count(self.values, 'COMPCOUNT'))]
+                self.header_native_values = native_name_values(self.header, self.names)
+                self.values = parameters(self.header, native_values=self.header_native_values)
+                if flag or 'Schematic Library' not in self.values.get('HEADER', ''):
+                    raise DownloadError('所选文件不是受支持的二进制 SchLib')
                 keys = self.read('SectionKeys', optional=True)
                 if keys:
                     self.key_header = Reader(keys).block()[1]
-                    values = parameters(self.key_header)
-                    self.key_count = count(values.get('KEYCOUNT', 0))
+                    values = parameters(self.key_header, name_encoding=name_encoding,
+                                        native_values=native_name_values(self.key_header, self.names))
+                    self.key_native_values = {key.encode('ascii'): value.raw for key, value in values.items()
+                                              if INDEX_NAME.fullmatch(key.encode('ascii'))
+                                              and isinstance(value, _AnsiString)}
+                    self.key_count = indexed_name_count(values, 'KEYCOUNT')
                     self.sections = {raw_name_key(values[f'LIBREF{i}']): values[f'SECTIONKEY{i}']
-                                     for i in range(count(values.get('KEYCOUNT', 0)))}
+                                     for i in range(self.key_count)}
             else:
                 signature = self.read('FileHeader')
                 if b'PCB 6.0 Binary Library File' not in signature[:128]:
@@ -312,7 +388,7 @@ def footprint_signature(streams):
             key, payload = path[len(section) + 1:], streams[path]
             if key == 'Data':
                 reader = Reader(payload)
-                reader.string()  # The footprint name is not physical geometry.
+                native_name = reader.string()  # The footprint name is not physical geometry.
                 records = []
                 while reader.offset < len(reader.data):
                     kind = reader.take(1)[0]
@@ -348,7 +424,7 @@ def footprint_signature(streams):
                 flag, body = reader.block()
                 if flag or reader.offset != len(payload):
                     return None
-                values = parameters(body)
+                values = parameters(body, native_values={b'PATTERN': native_name.raw}) if key == 'Parameters' else parameters(body)
                 if key == 'Parameters':
                     values = {key: value for key, value in values.items() if key not in ignored}
                 payload = json.dumps(values, sort_keys=True, ensure_ascii=True).encode('ascii')
@@ -370,6 +446,7 @@ def footprint_signature(streams):
 
 def rename_footprint(streams, name):
     source = component_section(streams)
+    previous_name = Reader(streams[source + '/Data']).string()
     section = _component_section(name)
     result = {}
     for path, payload in streams.items():
@@ -383,7 +460,7 @@ def rename_footprint(streams, name):
                 flag, body = Reader(payload).block()
                 if flag:
                     raise DownloadError('封装参数格式不受支持，无法安全重命名')
-                payload = patch_parameters(body, {'PATTERN': name})
+                payload = patch_parameters(body, {'PATTERN': name}, native_values={b'PATTERN': previous_name.raw})
             path = section + '/' + relative
         result[path] = payload
     return result
@@ -524,13 +601,14 @@ def append_library(original, generated, format, check_cancelled=lambda: None, *,
             for i in range(1, count(new.values.get('FONTIDCOUNT', 0)) + 1):
                 for key in ('FontName', 'Size'):
                     updates[f'{key}{offset+i}'] = new.values[f'{key}{i}'.upper()]
-            header = patch_parameters(old.header, updates)
+            header = patch_parameters(old.header, updates, native_values=old.header_native_values)
             if old.binary_index:
                 header += struct.pack('<I', len(names)) + old.raw_names + b''.join(_string_block(name) for name in added)
             keys = {'KeyCount': old.key_count + len(added)}
             for index, name in enumerate(added, old.key_count):
                 keys.update({f'LibRef{index}': name, f'SectionKey{index}': sections[name_key(name)]})
-            streams.update(FileHeader=header, SectionKeys=patch_parameters(old.key_header, keys))
+            streams.update(FileHeader=header, SectionKeys=patch_parameters(old.key_header, keys,
+                                                                          native_values=old.key_native_values))
         else:
             streams['Library/Data'] = (_block(old.header) + struct.pack('<I', len(names)) + old.raw_names
                                        + b''.join(_string_block(name) for name in added))

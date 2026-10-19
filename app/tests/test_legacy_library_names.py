@@ -252,6 +252,39 @@ class LegacyLibraryNamesTests(unittest.TestCase):
             index.ole.close()
         self.assert_old_streams_preserved(original, result, section)
 
+    def test_gbk_names_containing_parameter_like_suffixes_preserve_index_and_metadata(self):
+        for binary in (False, True):
+            for mapped in (False, True):
+                for name in ('東A=B', '東Weight=4', '東KEYCOUNT=99999', '東FontIDCount=99999',
+                             '東COMPCOUNT=0', '東KEYCOUNT=0'):
+                    with self.subTest(binary=binary, mapped=mapped, name=name):
+                        original, section, _ = self.native_library('SCHLIB', name, 'gbk', binary=binary, mapped=mapped)
+                        with olefile.OleFileIO(io.BytesIO(original)) as ole:
+                            original_header = Reader(ole.openstream('FileHeader').read()).block()[1]
+                        weight = int(re.search(rb'\|WEIGHT=(\d+)', original_header)[1])
+                        generated = self.library('SCHLIB', 'C2040')
+                        new = LibraryIndex(generated, 'SCHLIB')
+                        try:
+                            added_weight = int(new.values['WEIGHT'])
+                        finally:
+                            new.ole.close()
+                        result, skipped = append_library(original, generated, 'SCHLIB')
+                        self.assertEqual(skipped, [])
+                        index = LibraryIndex(result, 'SCHLIB')
+                        try:
+                            self.assertEqual(len(index.names), 2)
+                            self.assertEqual(index.names[0].encode('cp1252', errors='surrogateescape'), name.encode('gbk'))
+                            self.assertEqual(index.values['LIBREF0'].encode('cp1252', errors='surrogateescape'), name.encode('gbk'))
+                            self.assertEqual(int(index.values['WEIGHT']), weight + added_weight)
+                            self.assertIn(b'|LIBREF0=' + name.encode('gbk') + b'|', index.header)
+                            if mapped:
+                                self.assertIn(b'|LibRef0=' + name.encode('gbk') + b'|', index.key_header)
+                        finally:
+                            index.ole.close()
+                        self.assert_old_streams_preserved(original, result, section)
+                        repeated, _ = append_library(result, generated, 'SCHLIB')
+                        self.assertEqual(repeated, result)
+
     def test_patching_header_preserves_unknown_fields_spelling_and_duplicate_bytes(self):
         payload = (b'|VendorUnknown|LIBREF0=' + '東'.encode('gbk') + b'|Weight=4'
                    b'|Vendor#Flag=first|Vendor#Flag=second|%UTF8%Notes=' + '中文'.encode('utf-8') + b'\0')
@@ -265,7 +298,7 @@ class LegacyLibraryNamesTests(unittest.TestCase):
 
     def test_reused_legacy_footprint_keeps_standalone_outputs_and_symbol_links(self):
         from lcsc3d.services import backend
-        for name in ('底壳丂Ω±', '東'):
+        for name in ('底壳丂Ω±', '東', '東A=B', '東Weight=4'):
             with self.subTest(name=name):
                 original, _, byte_name = self.native_library('PCBLIB', name, 'gbk')
                 target = self.root / 'existing.PcbLib'
@@ -297,7 +330,8 @@ class LegacyLibraryNamesTests(unittest.TestCase):
                         while reader.offset < len(reader.data):
                             flag, body = reader.block()
                             if not flag:
-                                fields = parameters(body)
+                                fields = parameters(body, native_values={b'MODELNAME': name.encode('gbk'),
+                                                                         b'TEXT': name.encode('gbk')})
                                 if fields.get('RECORD') == '45':
                                     references.append(fields['MODELNAME'])
                                 if fields.get('RECORD') == '41' and fields.get('NAME') == 'Footprint':
