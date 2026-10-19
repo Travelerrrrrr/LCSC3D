@@ -62,7 +62,7 @@ def _parameters(values):
         if any(c in value for c in '|\x00'):
             raise DownloadError(f'AD 参数 {key} 中包含不支持的分隔符')
         try:
-            encoded = value.encode('cp1252')
+            encoded = value.encode('cp1252', errors='surrogateescape')
         except UnicodeEncodeError:
             key = '%UTF8%' + key
             encoded = value.encode('utf-8')
@@ -72,7 +72,7 @@ def _parameters(values):
 
 def _short_string(value, replace=False):
     try:
-        encoded = str(value).encode('cp1252', errors='replace' if replace else 'strict')
+        encoded = str(value).encode('cp1252', errors='replace' if replace else 'surrogateescape')
     except UnicodeEncodeError as exc:
         raise DownloadError('AD 短字符串含有不支持的字符') from exc
     if len(encoded) > 255:
@@ -101,7 +101,7 @@ def _library_name(value, fallback):
 
 
 def _section(name):
-    return re.sub(r'[/\\:!]', '_', name)[:31]
+    return re.sub(r'[/\\:!*?]', '_', name)[:31]
 
 
 def _color(value):
