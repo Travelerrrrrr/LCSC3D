@@ -27,7 +27,7 @@ with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compressleve
             if any(part in {'.git', '__pycache__', '.venv', 'build', 'dist', 'runtime'} for part in relative.parts):
                 continue
             archive.write(source, str(prefix / relative))
-    for filename in ('README.md', 'README.en.md', 'LICENSE', 'CONTRIBUTING.md', 'AGENTS.md', 'GLOSSARY.md', '.gitignore', '.gitattributes'):
+    for filename in ('README.md', 'README.en.md', 'LICENSE', 'CONTRIBUTING.md', 'AGENTS.md', 'GLOSSARY.md', '.gitignore', '.gitattributes', '.mcp.json'):
         archive.write(workspace / filename, str(Path('LCSC3D') / filename))
 shutil.copyfile(app / 'README.md', outputs / '使用说明.md')
 for name in ['LCSC3D.exe', target.name]:
