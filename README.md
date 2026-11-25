@@ -226,7 +226,7 @@ python -m venv .venv
 
 项目代码采用 [AGPL-3.0-or-later](LICENSE)，依赖声明见 [第三方声明](app/licenses/THIRD-PARTY.md)。符号、封装和模型来自 [嘉立创EDA / JLCEDA 官方库](https://lceda.cn/) 与 [EasyEDA 官方库](https://easyeda.com/)；软件许可证不替代元件数据自身的版权与使用条件。
 
-欢迎通过 [Issues](https://github.com/Travelerrrrrr/LCSC3D/issues) 反馈问题，附上 C 编号、版本、所选格式、错误提示与截图。也欢迎点 Star 或 [赞助支持](docs/sponsorship.md)。
+欢迎通过 [Issues](https://github.com/Travelerrrrrr/LCSC3D/issues) 反馈问题，附上 C 编号、LCSC3D 版本、AD / KiCad 版本、所选格式、错误提示与截图；如方便，请在 **设置 → 日志与诊断** 打包诊断日志一并上传。Issue 由 [@Travelerrrrrr-bot](https://github.com/Travelerrrrrr-bot) 协助跟进，会尽快回复补充信息请求和处理进展。也欢迎点 Star 或 [赞助支持](docs/sponsorship.md)。
 
 ## 鸣谢
 
