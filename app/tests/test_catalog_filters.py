@@ -6,7 +6,6 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
-import time
 import unittest
 from unittest.mock import patch
 from urllib.parse import unquote
@@ -22,6 +21,7 @@ from lcsc3d.services.store import StoreClient, StoreError, search_page_products
 from lcsc3d.selftests.catalog_fixture import categories, parameters, add_facets
 from lcsc3d.selftests.favorites_selftest import OfflineStore, fixture_search
 from lcsc3d.ui.favorites import FavoritesDialog
+from qt_wait import wait_until
 
 
 class FilterDataTests(unittest.TestCase):
@@ -151,9 +151,8 @@ class FilterUiTests(unittest.TestCase):
         self.dialog.show(); self.addCleanup(self.close)
 
     def wait(self, predicate):
-        end = time.monotonic() + 8
-        while not predicate() and time.monotonic() < end:
-            self.app.processEvents(); time.sleep(.005)
+        wait_until(predicate, message=lambda: f'searching={self.dialog.searching}, '
+                   f'has_jobs={self.dialog.has_jobs()}, status={self.dialog.status.text()!r}')
         self.assertTrue(predicate())
 
     def close(self):

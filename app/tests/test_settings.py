@@ -8,7 +8,6 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
-import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -23,6 +22,7 @@ from lcsc3d.services.store_session import SessionVault
 from lcsc3d.services.store import MemorySession
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
+from qt_wait import wait_until
 
 
 class PreferencesTestCase(unittest.TestCase):
@@ -588,10 +588,8 @@ class SettingsWindowTests(PreferencesTestCase):
         with patch('lcsc3d.ui.settings_ui.QDesktopServices.openUrl', return_value=True) as opened:
             dialog.package_log_button.click()
             self.assertFalse(dialog.clear_log_button.isEnabled())
-            deadline = time.monotonic() + 5
-            while dialog.worker is not None and time.monotonic() < deadline:
-                self.app.processEvents()
-                time.sleep(.01)
+            wait_until(lambda: dialog.worker is None,
+                       message=lambda: f'log worker={dialog.worker!r}, status={dialog.status.text()!r}')
         self.assertIsNone(dialog.worker)
         bundles = list((data_directory() / 'diagnostics').glob('*.zip'))
         self.assertEqual(len(bundles), 1)
@@ -617,10 +615,8 @@ class SettingsWindowTests(PreferencesTestCase):
         dialog = self.window.settings_dialog
         with patch('lcsc3d.ui.settings_ui.package_logs', side_effect=PermissionError()):
             dialog.package_log_button.click()
-            deadline = time.monotonic() + 5
-            while dialog.worker is not None and time.monotonic() < deadline:
-                self.app.processEvents()
-                time.sleep(.01)
+            wait_until(lambda: dialog.worker is None,
+                       message=lambda: f'log worker={dialog.worker!r}, status={dialog.status.text()!r}')
         self.assertIsNone(dialog.worker)
         self.assertIn('打包失败', dialog.status.text())
         self.assertTrue(dialog.package_log_button.isEnabled())
@@ -643,10 +639,8 @@ class SettingsWindowTests(PreferencesTestCase):
             self.window.close()
             self.assertTrue(self.window.isVisible())
             release.set()
-            deadline = time.monotonic() + 5
-            while self.window.isVisible() and time.monotonic() < deadline:
-                self.app.processEvents()
-                time.sleep(.01)
+            wait_until(lambda: not self.window.isVisible(),
+                       message=lambda: f'window visible={self.window.isVisible()}, log worker={dialog.worker!r}')
         self.assertIsNone(dialog.worker)
         self.assertFalse(self.window.isVisible())
 

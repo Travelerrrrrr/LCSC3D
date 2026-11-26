@@ -5,17 +5,16 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
-import time
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from lcsc3d.ui import main
 from lcsc3d.core import app_logging as logs
 from lcsc3d.services import backend
+from qt_wait import wait_until
 from test_backend import STEP, OBJ
 
 
@@ -73,9 +72,8 @@ class DownloadStartTests(unittest.TestCase):
         self.app.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def wait_finished(self):
-        end = time.monotonic() + 5
-        while self.window.batch_running and time.monotonic() < end:
-            QTest.qWait(10)
+        wait_until(lambda: not self.window.batch_running,
+                   message=lambda: f'batch_running={self.window.batch_running}, status={self.window.run_status.text()!r}')
         self.assertFalse(self.window.batch_running)
         self.assertFalse(self.window.worker.isRunning())
 

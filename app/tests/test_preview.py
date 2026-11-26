@@ -14,8 +14,9 @@ from lcsc3d.ui import main
 from lcsc3d.services.backend import DownloadError
 from PySide6.QtCore import QEvent, QObject, Qt, QPoint, QPointF
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication
+from qt_wait import wait_until
 from test_library_preview import fixture
 from lcsc3d.services.updater import Release
 
@@ -97,20 +98,28 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.directory.cleanup()
 
     def wait_for_preview(self, part):
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            if self.window.preview_state in ('ready', 'error'):
-                break
-            QTest.qWait(20)
+        wait_until(lambda: self.window.preview_state in ('ready', 'error'),
+                   message=self.preview_wait_state)
         self.assertEqual(self.window.preview_state, 'ready', self.window.preview_status.text())
         self.assertEqual(self.window.current_preview, part)
         self.assertEqual(self.window.preview_status.text(), part + ' WebGL ready')
 
     def wait_for_component_info(self):
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and self.window.info_worker is not None:
-            QTest.qWait(20)
+        wait_until(lambda: self.window.info_worker is None,
+                   message=lambda: f'info_worker={self.window.info_worker!r}')
         self.assertIsNone(self.window.info_worker, 'Component query did not finish')
+
+    def preview_wait_state(self):
+        return (f'preview_state={self.window.preview_state!r}, '
+                f'status={self.window.preview_status.text()!r}, '
+                f'library_worker={self.window.library_worker!r}')
+
+    def batch_wait_state(self):
+        worker = self.window.worker
+        statuses = {part: result.status for part, result in self.window.results.items()}
+        return (f'batch_running={self.window.batch_running}, '
+                f'worker.isRunning()={worker.isRunning() if worker is not None else None}, '
+                f'results={statuses!r}, status={self.window.run_status.text()!r}')
 
     def test_legacy_wrl_only_settings_migrate_to_step(self):
         settings_path = Path(self.directory.name) / 'settings.json'
@@ -140,9 +149,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertEqual(self.window.isMaximized(), maximized)
 
     def wait_for_library(self):
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and (self.window.preview_state == 'loading' or self.window.library_worker is not None):
-            QTest.qWait(20)
+        wait_until(lambda: self.window.preview_state != 'loading' and self.window.library_worker is None,
+                   message=self.preview_wait_state)
         self.assertEqual(self.window.preview_state, 'ready', self.window.preview_status.text())
 
     def test_library_switch_uses_one_request_and_returns_to_3d_without_flicker(self):
@@ -201,9 +209,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
     def evaluate(self, view, javascript):
         values = []
         view.page().runJavaScript('JSON.stringify(' + javascript + ')', values.append)
-        deadline = time.monotonic() + 3
-        while time.monotonic() < deadline and not values:
-            QTest.qWait(10)
+        wait_until(lambda: bool(values), message=lambda: f'JavaScript results={values!r}, script={javascript!r}')
         self.assertTrue(values, 'Browser did not return its rendered state')
         return json.loads(values[0])
 
@@ -604,9 +610,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         api = SimpleNamespace(get_svg_data_of_component=lambda part: fixture(part), check_cancelled=lambda: None)
         with patch('lcsc3d.ui.main.NetworkApi', side_effect=[DownloadError('offline'), api]) as network:
             self.window.preview_mode_buttons['symbol'].click()
-            deadline = time.monotonic() + 5
-            while time.monotonic() < deadline and self.window.library_worker is not None:
-                QTest.qWait(20)
+            wait_until(lambda: self.window.library_worker is None, message=self.preview_wait_state)
             self.assertEqual(self.window.preview_state, 'error')
             self.assertNotIn('C2040', self.window.library_cache)
             self.window.reload_button.click()
@@ -663,9 +667,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.assertTrue(started.wait(1))
             self.assertFalse(self.window.close())
             self.assertTrue(self.window.close_when_finished)
-            deadline = time.monotonic() + 5
-            while time.monotonic() < deadline and self.window.library_worker is not None:
-                QTest.qWait(20)
+            wait_until(lambda: self.window.library_worker is None, message=self.preview_wait_state)
         self.assertIsNone(self.window.library_worker)
         self.assertFalse(self.window.isVisible())
 
@@ -767,18 +769,23 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             self.window.reload_button.click()
         # The mock page can finish an in-flight load during reload. Wait for
         # the real renderer's API, rather than accepting that page's signal.
-        deadline = time.monotonic() + 10
         renderer_ready = []
-        while time.monotonic() < deadline:
-            renderer_ready = []
-            self.window.web.page().runJavaScript(
-                'typeof window.getModelPreviewState === "function"', renderer_ready.append)
-            poll_deadline = min(deadline, time.monotonic() + .25)
-            while time.monotonic() < poll_deadline and not renderer_ready:
-                QTest.qWait(10)
+        probe_started = float('-inf')
+
+        def renderer_is_ready():
+            nonlocal renderer_ready, probe_started
             if renderer_ready == [True]:
-                break
-            QTest.qWait(20)
+                return True
+            now = time.monotonic()
+            if renderer_ready or now - probe_started >= .25:
+                renderer_ready = []
+                probe_started = now
+                self.window.web.page().runJavaScript(
+                    'typeof window.getModelPreviewState === "function"', renderer_ready.append)
+            return renderer_ready == [True]
+
+        wait_until(renderer_is_ready,
+                   message=lambda: f'renderer_ready={renderer_ready!r}, {self.preview_wait_state()}')
         self.assertEqual(renderer_ready, [True], 'Real model renderer did not finish loading')
         # Red marks the top (+Z), blue the bottom (-Z). Verify their actual
         # framebuffer positions so an inverted initial view cannot pass.
@@ -787,9 +794,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                    'faces': [[0,0,1,2],[1,3,4,5]], 'materials': [[.85,.1,.1],[.1,.1,.85]]}
         revision = self.window.web_revision
         self.window.model_preview_loaded('C2040', revision, payload)
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and self.window.preview_state != 'ready':
-            QTest.qWait(20)
+        wait_until(lambda: self.window.preview_state == 'ready', message=self.preview_wait_state)
         self.assertEqual(self.window.preview_state, 'ready', self.window.preview_status.text())
         initial = self.evaluate(self.window.web, 'window.getModelPreviewState()')
         self.assertEqual(initial['triangles'], 2)
@@ -858,9 +863,9 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         self.assertFalse(self.window.symbol_view.shell_started)
 
     def wait_for_update_check(self):
-        deadline = time.monotonic() + 5
-        while self.window.update_dialog.worker is not None and time.monotonic() < deadline:
-            QTest.qWait(20)
+        dialog = self.window.update_dialog
+        wait_until(lambda: dialog.worker is None,
+                   message=lambda: f'update worker={dialog.worker!r}, status={dialog.status.text()!r}')
         self.assertIsNone(self.window.update_dialog.worker)
 
     def test_check_update_button_displays_latest_version_and_reuses_open_dialog(self):
@@ -972,9 +977,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             return main.Result(part, '成功')
         with patch('lcsc3d.ui.main.NetworkApi', return_value=SimpleNamespace()), patch('lcsc3d.services.backend.download_part', side_effect=download):
             self.window.start_batch()
-            deadline = time.monotonic() + 5
-            while self.window.batch_running and time.monotonic() < deadline:
-                QTest.qWait(20)
+            wait_until(lambda: not self.window.batch_running, message=self.batch_wait_state)
             self.assertFalse(self.window.batch_running)
         self.assertEqual(captured, [('STEP',)] * 2)
 
@@ -1004,15 +1007,15 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
                     for result in self.window.results.values():
                         for file in result.files:
                             Path(file).write_bytes(b'old library')
+                batch_done = QSignalSpy(self.window.batch_done)
                 self.window.start_batch()
                 self.assertFalse(self.window.schlib_box.isEnabled())
                 self.assertFalse(self.window.pcblib_box.isEnabled())
                 # Native CFB writes, AppData cross-volume moves and Qt delivery
-                # share the desktop runner. This is a correctness check, not a
-                # five-second performance contract.
-                deadline = time.monotonic() + 15
-                while self.window.batch_running and time.monotonic() < deadline:
-                    QTest.qWait(20)
+                # share the desktop runner. The thread's separate finished slot
+                # clears batch_running after the results have been delivered.
+                wait_until(lambda: not self.window.batch_running,
+                           signal_spy=batch_done, message=self.batch_wait_state)
                 self.assertFalse(self.window.batch_running)
                 self.assertTrue(self.window.worker.wait(5000))
             self.assertEqual(network.call_count, 2)
@@ -1221,9 +1224,7 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
             return main.Result(part, '成功', title=part + ' model', message='done')
 
         def wait_for_batch():
-            deadline = time.monotonic() + 5
-            while self.window.batch_running and time.monotonic() < deadline:
-                QTest.qWait(20)
+            wait_until(lambda: not self.window.batch_running, message=self.batch_wait_state)
             self.assertFalse(self.window.batch_running, 'Batch did not complete')
             self.assertTrue(self.window.worker.wait(5000))
             QTest.qWait(350)
@@ -1287,9 +1288,8 @@ window.loadLcscPart(__PART_JSON__, __REVISION_JSON__);
         with patch('lcsc3d.ui.main.NetworkApi', return_value=Api()), \
                 patch('lcsc3d.services.backend.model_reference', return_value=model):
             self.window.start_batch()
-            deadline = time.monotonic() + 5
-            while time.monotonic() < deadline and (not finished or self.window.worker.isRunning()):
-                QTest.qWait(20)
+            wait_until(lambda: finished and not self.window.worker.isRunning(),
+                       message=lambda: f'batch_done={bool(finished)}, {self.batch_wait_state()}')
             self.assertTrue(finished, 'Batch did not complete')
             self.assertTrue(self.window.worker.wait(5000))
         self.assertEqual(self.window.results['C2040'].status, '成功')

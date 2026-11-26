@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import sys
 import tempfile
-import time
 import unittest
 from unittest.mock import patch
 import uuid
@@ -19,6 +18,7 @@ from lcsc3d.core.app_logging import close_logging
 from lcsc3d.services.backups import (backup_directory, create_backup, list_backups, prepare_restore,
                      restore_backup, clear_backups)
 from lcsc3d.core.errors import DownloadError, Cancelled
+from qt_wait import wait_until
 
 
 class BackupTests(unittest.TestCase):
@@ -301,10 +301,8 @@ class BackupUiTests(unittest.TestCase):
         self.app.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def wait(self):
-        deadline = time.monotonic() + 5
-        while self.settings.worker is not None and time.monotonic() < deadline:
-            self.app.processEvents()
-            time.sleep(.01)
+        wait_until(lambda: self.settings.worker is None,
+                   message=lambda: f'backup worker={self.settings.worker!r}, usage={self.panel.usage.text()!r}')
         self.app.processEvents()
         self.assertIsNone(self.settings.worker)
 

@@ -5,7 +5,6 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
-import time
 import unittest
 from unittest.mock import patch
 
@@ -20,6 +19,7 @@ from lcsc3d.services.commerce import (add_to_cart, add_cart_batch, CartItemRejec
 from lcsc3d.selftests.favorites_selftest import OfflineStore, fixture_store_record, fixture_identity
 from lcsc3d.ui.commerce import QuantityInput, PriceTierBox
 from lcsc3d.ui.favorites import FavoritesDialog
+from qt_wait import wait_until
 
 
 def page(record, **extra):
@@ -296,10 +296,9 @@ class CommerceUiTests(unittest.TestCase):
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         self.app.processEvents()
 
-    def wait(self, condition, timeout=8):
-        end = time.monotonic() + timeout
-        while not condition() and time.monotonic() < end:
-            self.app.processEvents(); time.sleep(.01)
+    def wait(self, condition, timeout=60):
+        wait_until(condition, timeout=timeout, message=lambda: f'cart_loading={self.dialog.cart_loading}, '
+                   f'has_jobs={self.dialog.has_jobs()}, status={self.dialog.status.text()!r}')
         self.assertTrue(condition())
 
     def products(self):

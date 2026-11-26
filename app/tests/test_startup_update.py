@@ -11,6 +11,7 @@ from lcsc3d.services.updater import Release
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+from qt_wait import wait_until
 
 
 class StartupUpdateTests(PreferencesTestCase):
@@ -45,9 +46,8 @@ class StartupUpdateTests(PreferencesTestCase):
         self.threads.append(self.window.startup_update_check.thread)
 
     def wait_for(self, predicate):
-        deadline = time.monotonic() + 3
-        while not predicate() and time.monotonic() < deadline:
-            QTest.qWait(10)
+        wait_until(predicate, message=lambda: f'startup_update_outcome={self.window.startup_update_outcome!r}, '
+                   f'update worker={getattr(self.window.update_dialog, "worker", None)!r}')
         self.assertTrue(predicate())
 
     def test_new_version_notifies_and_opens_ready_page_only_on_request(self):

@@ -6,7 +6,6 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
-import time
 import unittest
 from unittest.mock import patch
 
@@ -20,6 +19,7 @@ from lcsc3d.services.commerce import add_to_cart
 from lcsc3d.services.order_details import parse_order_details, read_order_details
 from lcsc3d.selftests.favorites_selftest import OfflineStore, fixture_order_detail
 from lcsc3d.ui.favorites import FavoritesDialog
+from qt_wait import wait_until
 
 
 class OrderDataTests(unittest.TestCase):
@@ -82,9 +82,8 @@ class OrderUiTests(unittest.TestCase):
         self.dialog.show(); self.addCleanup(self.close)
 
     def wait(self, condition):
-        deadline = time.monotonic() + 8
-        while not condition() and time.monotonic() < deadline:
-            self.app.processEvents(); time.sleep(.01)
+        wait_until(condition, message=lambda: f'orders_loading={self.dialog.orders_loading}, '
+                   f'cart_loading={self.dialog.cart_loading}, has_jobs={self.dialog.has_jobs()}')
         self.assertTrue(condition())
 
     def close(self):

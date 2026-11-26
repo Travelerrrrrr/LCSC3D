@@ -4,17 +4,16 @@ import os
 from pathlib import Path
 import sys
 import tempfile
-import time
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import Qt, QEvent
-from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from lcsc3d.ui import main
 from lcsc3d.services.pdf_download import DatasheetBatch, MISSING_REPORT
 from lcsc3d.core.app_logging import close_logging
+from qt_wait import wait_until
 from test_pdf_download import pdf_bytes
 
 
@@ -75,8 +74,8 @@ class PDFWindowTests(unittest.TestCase):
             return dict(title='Model-'+part,manufacturer='Brand',datasheets=[] if part=='C20197' else ['https://example.com/data.pdf'])
         with patch.object(DatasheetBatch,'product',side_effect=product),patch.object(DatasheetBatch,'fetch',return_value=pdf_bytes()):
             w.start_button.click()
-            deadline=time.monotonic()+5
-            while w.batch_running and time.monotonic()<deadline:QTest.qWait(10)
+            wait_until(lambda: not w.batch_running,
+                       message=lambda: f'batch_running={w.batch_running}, status={w.run_status.text()!r}')
         self.assertFalse(w.batch_running)
         self.assertEqual([w.results[p].status for p in w.ids],['成功','无数据手册'])
         self.assertTrue((self.root/'exports/PDF'/MISSING_REPORT).is_file())

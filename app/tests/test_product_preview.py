@@ -1,6 +1,5 @@
 """Embedded public product pictures and visible storefront import feedback."""
 import threading
-import time
 from unittest.mock import patch
 
 from test_settings import PreferencesTestCase
@@ -10,8 +9,8 @@ from lcsc3d.services.store import StoreError
 from lcsc3d.ui.product_preview import ProductPreview
 from PySide6.QtCore import Qt, QBuffer, QIODevice, QEvent
 from PySide6.QtGui import QImage, QColor
-from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+from qt_wait import wait_until
 
 
 def picture(color):
@@ -52,9 +51,8 @@ class ProductPreviewTests(PreferencesTestCase):
         self.app.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def wait(self, condition):
-        deadline = time.monotonic() + 4
-        while not condition() and time.monotonic() < deadline:
-            QTest.qWait(10)
+        wait_until(condition, message=lambda: f'part={self.widget.part!r}, load_state={self.widget.load_state!r}, '
+                   f'active jobs={[worker.channel for worker in self.widget.jobs.workers]!r}')
         self.assertTrue(condition())
 
     def test_photo_buttons_show_real_image_pixels_and_support_zoom(self):

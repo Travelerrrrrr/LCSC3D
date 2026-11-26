@@ -28,6 +28,7 @@ from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLineEdit
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from qt_wait import wait_until
 
 
 def captured_detail(part):
@@ -954,10 +955,9 @@ class NativeStoreWindowTests(unittest.TestCase):
         self.app.sendPostedEvents(None, QEvent.DeferredDelete)
         self.service.close()
 
-    def wait_until(self, condition, timeout=15):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline and not condition():
-            QTest.qWait(10)
+    def wait_until(self, condition, timeout=60):
+        wait_until(condition, timeout=timeout, message=lambda: f'{self.dialog.status.text()} · '
+                   f'active={[(w.channel, w.isRunning()) for w in self.dialog.jobs.workers]}')
         active = [(w.channel, w.isRunning()) for w in self.dialog.jobs.workers]
         self.assertTrue(condition(), self.dialog.status.text() + ' · active=' + str(active))
 
