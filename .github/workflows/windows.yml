@@ -37,6 +37,13 @@ jobs:
           cache-dependency-path: |
             app/requirements.txt
             app/requirements-test.txt
+      - name: Source ZIP preflight
+        timeout-minutes: 2
+        run: |
+          python scripts/package_source.py --output-dir work/source-preflight
+          if ($LASTEXITCODE -ne 0) { throw 'Source ZIP preflight failed' }
+          python scripts/verify_release_assets.py --source-only --directory work/source-preflight --commit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Source ZIP preflight failed' }
       - name: Install dependencies
         run: python -m pip install -r app/requirements-test.txt
       - name: Run Material UI preflight

@@ -1,5 +1,6 @@
 """Gate publication on checksums, executable acceptance and the exact Git source."""
 import argparse
+from functools import partial
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
@@ -22,6 +23,10 @@ REQUIRED_CASES = {
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def _git(repository, *args, input=None):
+    return subprocess.check_output(['git', '-C', str(repository), *args], input=input)
 
 
 def verify(directory, version, commit, *, repository=ROOT):
@@ -63,11 +68,16 @@ def verify(directory, version, commit, *, repository=ROOT):
                     and values[-1] == 0 and values == sorted(values, reverse=True) and len(set(values)) > 3,
                     'Cancellation animation was not verified')
 
-    def git(*args, input=None):
-        return subprocess.check_output(['git', '-C', str(repository), *args], input=input)
+    git = partial(_git, repository)
     require(git('rev-parse', 'HEAD').decode().strip() == commit, 'Checkout differs from verified commit')
     source_version = re.search(r"^VERSION = '([^']+)'", git('show', commit + ':app/lcsc3d/ui/main.py').decode('utf-8'), re.M)
     require(source_version and source_version[1] == version, 'Application version differs from release')
+    source_files = verify_source_zip(directory / 'LCSC3D.zip', commit, repository=repository)
+    return dict(success=True, version=version, source_commit=commit, source_files=source_files, sha256=checksums)
+
+
+def verify_source_zip(archive_path, commit, *, repository=ROOT):
+    git = partial(_git, repository)
     blobs = {}
     for entry in git('ls-tree', '-rz', commit).split(b'\0'):
         if not entry:
@@ -76,7 +86,7 @@ def verify(directory, version, commit, *, repository=ROOT):
         _, kind, sha = metadata.split()
         require(kind == b'blob', 'Unexpected non-file source entry')
         blobs[path.decode('utf-8')] = sha.decode()
-    with zipfile.ZipFile(directory / 'LCSC3D.zip') as archive:
+    with zipfile.ZipFile(archive_path) as archive:
         require(archive.testzip() is None, 'Source ZIP is corrupt')
         seen = set()
         for name in archive.namelist():
@@ -90,17 +100,25 @@ def verify(directory, version, commit, *, repository=ROOT):
             require(actual == blobs[relative], 'Source differs from verified commit: ' + relative)
             seen.add(relative)
         require(seen == set(blobs), 'Source ZIP does not contain every tracked file')
-    return dict(success=True, version=version, source_commit=commit, source_files=len(blobs), sha256=checksums)
+    return len(blobs)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', type=Path, required=True)
-    parser.add_argument('--version', required=True)
+    parser.add_argument('--version')
     parser.add_argument('--commit', required=True)
     parser.add_argument('--report', type=Path)
+    parser.add_argument('--source-only', action='store_true')
     args = parser.parse_args()
-    result = verify(args.directory, args.version, args.commit)
+    if args.source_only:
+        require(_git(ROOT, 'rev-parse', 'HEAD').decode().strip() == args.commit, 'Checkout differs from verified commit')
+        source_files = verify_source_zip(args.directory / 'LCSC3D.zip', args.commit)
+        result = dict(success=True, source_commit=args.commit, source_files=source_files)
+    else:
+        if args.version is None:
+            parser.error('the following arguments are required: --version')
+        result = verify(args.directory, args.version, args.commit)
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2), 'utf-8')
